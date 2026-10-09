@@ -1,5 +1,5 @@
 //#region package.json
-var version$2 = "1.0.1";
+var version$2 = "1.1.0";
 //#endregion
 //#region src/adapters/card/index.ts
 function str$4(value) {
@@ -7367,6 +7367,134 @@ function buildCorrectionLines(notes, ctx) {
 	return out;
 }
 //#endregion
+//#region src/domain/levers.ts
+/** Levers a chat may override, in the order the sheet shows them. */
+var CHAT_LEVERS = [
+	"mode",
+	"playerGravity",
+	"inertia",
+	"driftResponse",
+	"appetiteStrength",
+	"huntersPerScene",
+	"corruption",
+	"diversity",
+	"secrets",
+	"cardLanguage",
+	"mergeVoices",
+	"cardBudget",
+	"depth",
+	"autoArchives"
+];
+/** Allowed values per lever (numbers: the presets offered for a chat; any value in the range is valid). */
+var LEVER_CHOICES = {
+	mode: [
+		"economy",
+		"balanced",
+		"cinema"
+	],
+	playerGravity: [
+		"low",
+		"medium",
+		"high"
+	],
+	inertia: [
+		"high",
+		"medium",
+		"low"
+	],
+	driftResponse: [
+		"correct",
+		"stress",
+		"redo"
+	],
+	appetiteStrength: [
+		"muted",
+		"author",
+		"sharp"
+	],
+	huntersPerScene: [
+		0,
+		1,
+		2,
+		3
+	],
+	corruption: [
+		"off",
+		"coarse",
+		"all"
+	],
+	diversity: ["even", "varied"],
+	secrets: [
+		"open",
+		"spoiler",
+		"known"
+	],
+	cardLanguage: ["en", "ru"],
+	mergeVoices: [true, false],
+	cardBudget: [
+		150,
+		200,
+		300,
+		400,
+		600,
+		800,
+		1200
+	],
+	depth: [
+		0,
+		1,
+		2,
+		3,
+		4,
+		6,
+		8
+	],
+	autoArchives: [true, false]
+};
+/** Numeric levers: any integer in the range is a valid override (the same limits as the general settings). */
+var LEVER_RANGES = {
+	cardBudget: {
+		min: 50,
+		max: 2e3
+	},
+	depth: {
+		min: 0,
+		max: 20
+	}
+};
+function isChatLever(key) {
+	return CHAT_LEVERS.includes(key);
+}
+/** Whether `value` is a valid override of `key`. */
+function validLever(key, value) {
+	const range = LEVER_RANGES[key];
+	if (range) return typeof value === "number" && Number.isInteger(value) && value >= range.min && value <= range.max;
+	return LEVER_CHOICES[key].includes(value);
+}
+/** The chat's valid overrides only (unknown keys and bad values dropped). */
+function cleanOverrides(overrides) {
+	const out = {};
+	for (const [key, value] of Object.entries(overrides ?? {})) if (isChatLever(key) && validLever(key, value)) out[key] = value;
+	return out;
+}
+/** The settings of a chat: the general settings with the chat's valid overrides on top. */
+function chatLevers(general, overrides) {
+	return {
+		...general,
+		...cleanOverrides(overrides)
+	};
+}
+/**
+* The overrides after setting one lever: `null` removes the override («как в общих»), so the chat follows the general
+* settings again when they change; a value equal to the general one is kept — the chat pins it.
+*/
+function withLever(overrides, key, value) {
+	const out = { ...cleanOverrides(overrides) };
+	if (value === null || value === void 0 || !validLever(key, value)) delete out[key];
+	else out[key] = value;
+	return out;
+}
+//#endregion
 //#region src/features/director/api.ts
 var DIRECTOR_API = "director";
 //#endregion
@@ -7418,7 +7546,7 @@ function castOf(view) {
 function castCardText(app, view, log, director) {
 	const present = castOf(view);
 	if (!view || !present.length) return "";
-	const settings = app.settings.get();
+	const settings = chatLevers(app.settings.get(), view.state.overrides);
 	const state = view.state;
 	const next = state.next && state.next.turn === state.turn ? state.next : void 0;
 	const api = app.maestro.api();
@@ -7492,7 +7620,7 @@ var castModule = {
 			if (claimedWith && claimedWith !== api) for (const fn of [...claims.keys()]) release(fn);
 			const wanted = /* @__PURE__ */ new Set();
 			if (api && active) {
-				if (app.settings.get().mergeVoices) {
+				if (chatLevers(app.settings.get(), attach()?.view()?.state.overrides).mergeVoices) {
 					wanted.add("voices");
 					wanted.add("ck.consistency");
 				}
@@ -7550,7 +7678,7 @@ var castModule = {
 			app.ephemeral.setInjection(CAST_INJECTION, {
 				text,
 				position: 1,
-				depth: app.settings.get().depth,
+				depth: chatLevers(app.settings.get(), current?.view()?.state.overrides).depth,
 				role: 0
 			});
 		}
@@ -7561,7 +7689,7 @@ var castModule = {
 		*/
 		async function direct(gen) {
 			const director = app.modules.api(DIRECTOR_API);
-			if (!director || gen.dryRun || gen.quiet || stopped || app.settings.get().mode !== "cinema") return;
+			if (!director || gen.dryRun || gen.quiet || stopped || chatLevers(app.settings.get(), attach()?.view()?.state.overrides).mode !== "cinema") return;
 			const turn = app.modules.api(TURN_API);
 			if (turn && gen.type === "normal") await within(turn.settle(), SETTLE_MS);
 			directorCalls = await director.beat(gen).catch(() => void 0);
@@ -18157,7 +18285,8 @@ function startGenerator({ app, settings, log, own }) {
 	let promotionsDue = false;
 	let attached = null;
 	let offEngine = null;
-	const lang = () => app.settings.get().cardLanguage;
+	const levers = () => chatLevers(app.settings.get(), engine()?.view()?.state.overrides);
+	const lang = () => levers().cardLanguage;
 	const chatOf = (state) => `${app.host.chatId() ?? ""}|${state.card}`;
 	function enqueue(job) {
 		const next = queue.then(() => alive ? job() : void 0).catch((error) => log.error("generator job failed", error));
@@ -18371,7 +18500,7 @@ function startGenerator({ app, settings, log, own }) {
 			const member = des.find((item) => normalizeName(item.name) === normalizeName(name));
 			const role = detectRole(roleSources(name, member));
 			const reputation = strangerStance(view.state.reputation, role === "unknown" ? [] : [role])?.stance;
-			const profile = sketchProfile(name, sampleParams(role, view.state.worldTone, cast, app.rng, app.settings.get().diversity, reputation === void 0 ? {} : { reputation }), {
+			const profile = sketchProfile(name, sampleParams(role, view.state.worldTone, cast, app.rng, levers().diversity, reputation === void 0 ? {} : { reputation }), {
 				lang: lang(),
 				taken,
 				...identityOf(member)
@@ -18542,7 +18671,7 @@ function startGenerator({ app, settings, log, own }) {
 			}
 			const hinted = tagFields ? applyTagFields(profile, tagFields).profile : profile;
 			const cast = view.present.filter((other) => other !== id).map((other) => view.byId.get(other)).filter(isProfile).map(castMember);
-			const params = paramsFromProfile(hinted, sampleParams(hinted.role ?? detectRole([hinted.name]), view.state.worldTone, cast, app.rng, app.settings.get().diversity));
+			const params = paramsFromProfile(hinted, sampleParams(hinted.role ?? detectRole([hinted.name]), view.state.worldTone, cast, app.rng, levers().diversity));
 			const answer = await candidateFor(target, view, hinted, params, tags, background);
 			if (!answer.candidate) {
 				const error = answer.error ?? "failed";
@@ -18641,7 +18770,7 @@ function startGenerator({ app, settings, log, own }) {
 		const api = maestro();
 		if (!api || target === "fill") return;
 		try {
-			if (target === "portrait" && !hasArchive && app.settings.get().autoArchives && api.styleUp) {
+			if (target === "portrait" && !hasArchive && levers().autoArchives && api.styleUp) {
 				const tags = fieldsToTags(profile);
 				if (tags.length) await api.styleUp(profile.name, tags);
 			}
@@ -21375,6 +21504,15 @@ var SHEET_STRINGS = {
 		"sheet.nav.reputation": "Reputation ({n})",
 		"sheet.nav.invariants": "Invariants ({n})",
 		"sheet.nav.metrics": "Measurements",
+		"sheet.nav.levers": "This chat’s levers ({n})",
+		"sheet.levers.title": "This chat’s levers",
+		"sheet.levers.intro": "Values for this chat only. «As in the general settings» follows Dramatis’ settings, also when they change later.",
+		"sheet.levers.general": "As in the general settings — {value}",
+		"sheet.levers.on": "on",
+		"sheet.levers.off": "off",
+		"sheet.levers.count": "Own levers: {n}. Mode of this chat: {mode}.",
+		"sheet.levers.none": "This chat follows the general settings.",
+		"sheet.levers.reset": "All as in the general settings",
 		"sheet.metrics.title": "Measurements",
 		"sheet.metrics.intro": "How the engine does in this chat, counted on committed turns together with the turn pass. To compare two runs (another mode, other levers), reset the measurements, play 20 turns and look again.",
 		"sheet.metrics.none": "Nothing counted yet: the measurements start with the next committed turn (the turn pass needs Maestro).",
@@ -21867,6 +22005,15 @@ var SHEET_STRINGS = {
 		"sheet.nav.reputation": "Репутация ({n})",
 		"sheet.nav.invariants": "Инварианты ({n})",
 		"sheet.nav.metrics": "Замеры",
+		"sheet.nav.levers": "Рычаги этого чата ({n})",
+		"sheet.levers.title": "Рычаги этого чата",
+		"sheet.levers.intro": "Свои значения только для этого чата. «Как в общих» — берётся из настроек Dramatis, в том числе когда они потом изменятся.",
+		"sheet.levers.general": "Как в общих — {value}",
+		"sheet.levers.on": "вкл",
+		"sheet.levers.off": "выкл",
+		"sheet.levers.count": "Своих рычагов: {n}. Режим этого чата: {mode}.",
+		"sheet.levers.none": "Этот чат следует общим настройкам.",
+		"sheet.levers.reset": "Всё как в общих",
 		"sheet.metrics.title": "Замеры",
 		"sheet.metrics.intro": "Как движок справляется в этом чате. Считается по отправленным ходам вместе с проходом хода. Чтобы сравнить два прогона (другой режим, другие рычаги), сбрось замеры, сыграй 20 ходов и посмотри снова.",
 		"sheet.metrics.none": "Пока ничего не посчитано: замеры начнутся со следующего отправленного хода (проходу хода нужен Maestro).",
@@ -23157,410 +23304,6 @@ function spoiler(ctx, key, build) {
 	return box;
 }
 //#endregion
-//#region src/features/sheet/words.ts
-function bucket(value, edges) {
-	let index = 0;
-	for (const edge of edges) if (value >= edge) index++;
-	return index;
-}
-function words(ctx) {
-	const t = ctx.t;
-	const scale = (name, value) => t(`sheet.scale.${name}.${Math.round(value)}`);
-	return {
-		level: (value) => scale("level", value),
-		hexaco: (axis, value) => {
-			if (value === 0) return t("sheet.scale.level.0");
-			const pole = hexacoPole(axis, value, ctx.lang, 1);
-			return Math.abs(value) >= 2 ? pole : t("sheet.scale.rather", { word: pole });
-		},
-		baseline: (value) => scale("baseline", value),
-		liking: (value) => scale("liking", value),
-		three: (value) => scale("three", value),
-		want: (value) => scale("want", value),
-		pressure: (value, gender) => pressureLabel(value, ctx.lang, gender),
-		proactivity: (value) => `${Math.round(value)} — ${t(`sheet.scale.proactivity.${bucket(value, [
-			3,
-			5,
-			7,
-			9
-		])}`)}`,
-		corruption: (value) => `${Math.round(value)} — ${t(`sheet.scale.corruption.${bucket(value, [
-			1,
-			3,
-			5,
-			7,
-			10
-		])}`)}`,
-		selfControl: (value) => scale("selfControl", value),
-		choosiness: (value) => scale("choosiness", value),
-		intensity: (value) => scale("intensity", value),
-		amount: (value) => scale("amount", value)
-	};
-}
-//#endregion
-//#region src/features/sheet/list.ts
-var TONES = [
-	"hostile",
-	"indifferent",
-	"neutral",
-	"welcoming"
-];
-function cardName(ctx) {
-	try {
-		const name = ctx.app.readers.card.current()?.name;
-		if (name) return name;
-	} catch {}
-	return ctx.view.card.card.replace(/\.[a-z0-9]+$/i, "");
-}
-function intentButton(ctx, intent, big = false) {
-	const t = ctx.t;
-	const again = !!ctx.view.card.intent;
-	const running = intent.busy || (intent.api?.running() ?? false);
-	const node = keyed(button({
-		icon: running ? "fa-spinner" : again ? "fa-rotate" : "fa-book-open",
-		label: running ? t("sheet.intent.running") : t(again ? "sheet.intent.reread" : "sheet.intent.read"),
-		kind: big ? "primary" : "default",
-		disabled: !intent.api || running,
-		title: intent.api ? t(again ? "sheet.intent.rereadHint" : "sheet.intent.readHint") : t("sheet.intent.unavailable"),
-		className: big ? "dramatis-sheet-big" : void 0,
-		onClick: () => intent.read(again)
-	}), big ? "intent:read-big" : "intent:read");
-	node.dataset.intent = again ? "reread" : "read";
-	return node;
-}
-/** Warnings and the re-read differences of the last reading. */
-function intentResult(ctx, intent) {
-	const result = intent.result;
-	if (!result) return null;
-	const t = ctx.t;
-	const parts = [];
-	if (!result.ok) parts.push(el("div", {
-		class: "dramatis-error-text",
-		text: t("sheet.intent.failed", { error: result.error ?? "" })
-	}));
-	else {
-		const summary = result.skipped ? result.message ?? t("sheet.intent.skipped") : result.message ?? t("sheet.intent.done", { n: result.characters });
-		parts.push(el("div", { text: summary }));
-	}
-	if (result.warnings.length) parts.push(el("details", { class: "dramatis-sheet-warnings-box" }, [el("summary", { text: t("sheet.intent.warningsCount", { n: result.warnings.length }) }), el("ul", {
-		class: "dramatis-sheet-warnings",
-		attrs: { "aria-label": t("sheet.intent.warnings") }
-	}, [...result.warnings.map((warning) => el("li", { text: warning }))])]));
-	if (result.diff.length) {
-		parts.push(el("div", {
-			class: "dramatis-sheet-unit-title",
-			text: t("sheet.intent.diff")
-		}));
-		parts.push(el("ul", { class: "dramatis-sheet-diff" }, result.diff.map((entry, index) => {
-			const exists = !entry.character || ctx.view.byId.has(entry.character);
-			const who = entry.character ? nameOf$1(ctx.view, entry.character) : t("sheet.intent.cardLevel");
-			const kept = entry.status === "kept-user" || entry.status === "kept-locked";
-			const taken = intent.taken.has(index);
-			return el("li", {
-				class: "dramatis-sheet-diff-item",
-				data: { status: entry.status }
-			}, [
-				el("div", { class: "dramatis-sheet-diff-head" }, [
-					el("strong", { text: who }),
-					el("span", {
-						class: "dramatis-muted",
-						text: fieldLabel(ctx, entry.path)
-					}),
-					el("span", {
-						class: "dramatis-sheet-tag",
-						text: known(ctx, `sheet.diff.${entry.status}`) ?? entry.status
-					})
-				]),
-				el("div", { class: "dramatis-sheet-diff-values" }, [
-					el("span", {
-						class: "dramatis-muted",
-						text: t("sheet.diff.now")
-					}),
-					el("span", { text: summarize(entry.before) }),
-					el("span", {
-						class: "dramatis-muted",
-						text: t("sheet.diff.author")
-					}),
-					el("span", { text: summarize(entry.after) })
-				]),
-				kept && exists && !taken ? keyed(button({
-					icon: "fa-feather-pointed",
-					label: t("sheet.diff.take"),
-					kind: "ghost",
-					className: "dramatis-sheet-take",
-					onClick: () => intent.take(index)
-				}), `intent:take:${index}`) : null,
-				taken ? el("span", {
-					class: "dramatis-muted",
-					text: t("sheet.diff.taken")
-				}) : null
-			]);
-		})));
-	}
-	return el("div", {
-		class: "dramatis-sheet-intent",
-		attrs: { role: "status" }
-	}, [...parts, button({
-		icon: "fa-xmark",
-		label: t("sheet.intent.dismiss"),
-		kind: "ghost",
-		onClick: () => intent.dismiss()
-	})]);
-}
-/** The string of a key, or null when there is none (i18n returns the key itself then). */
-function known(ctx, key) {
-	const text = ctx.t(key);
-	return text === key ? null : text;
-}
-/** Human label of a profile path from the diff ('core.values' → «Ценности»). */
-function fieldLabel(ctx, path) {
-	const parts = path.split(".");
-	const head = parts[0] ?? "";
-	const t = ctx.t;
-	if (head === "ties" && parts[1]) return t("sheet.path.tie", { target: nameOf$1(ctx.view, parts.slice(1).join(".")) });
-	if (head === "appetites" && parts[1]) return t("sheet.path.appetite", { id: parts[1] });
-	if (head === "rules" && parts[1]) return t("sheet.path.rule", { id: parts[1] });
-	if (head === "core" || head === "agenda") return known(ctx, `sheet.field.${parts[1]}`) ?? known(ctx, `sheet.agenda.${parts[1]}`) ?? path;
-	return known(ctx, `sheet.field.${head}`) ?? known(ctx, `sheet.path.${head}`) ?? path;
-}
-function header(ctx, intent) {
-	const t = ctx.t;
-	const { view } = ctx;
-	const characters = view.profiles.filter((profile) => profile.kind === "character").length;
-	const groups = view.profiles.length - characters;
-	const tone = unitBlock(ctx, {
-		title: t("sheet.header.tone"),
-		holder: view.card,
-		unit: "worldTone",
-		keyPrefix: "card",
-		onLock: () => ctx.save(toggleCardLock(ctx.engine, "worldTone"))
-	}, [keyed(select({
-		value: view.state.worldTone,
-		options: TONES.map((value) => ({
-			value,
-			label: worldToneLabel(value, ctx.lang)
-		})),
-		label: t("sheet.header.tone"),
-		onChange: (value) => ctx.save(setWorldTone(ctx.engine, value))
-	}), "card:worldTone")]);
-	return el("div", { class: "dramatis-sheet-header" }, [
-		el("div", { class: "dramatis-sheet-header-top" }, [el("h3", {
-			class: "dramatis-sheet-title",
-			text: cardName(ctx)
-		}), intentButton(ctx, intent)]),
-		el("div", {
-			class: "dramatis-sheet-counts dramatis-muted",
-			text: t("sheet.header.counts", {
-				characters,
-				groups,
-				present: view.present.length
-			})
-		}),
-		tone,
-		intent.api ? null : el("div", {
-			class: "dramatis-field-hint",
-			text: t("sheet.intent.unavailable")
-		}),
-		intentResult(ctx, intent)
-	]);
-}
-/** A row of the list: everything one needs to know at a glance; a click opens the character. */
-function listRow(ctx, profile) {
-	const t = ctx.t;
-	const view = ctx.view;
-	const live = view.state.characters[profile.id];
-	const present = view.present.includes(profile.id);
-	const band = view.bands[profile.id];
-	const playerTie = live?.ties["@player"] ?? profile.ties.find((tie) => tie.target === "@player");
-	const extra = view.state.extras.some((other) => other.id === profile.id);
-	const sub = [
-		profile.role,
-		profile.species,
-		profile.kind === "group" ? t("sheet.kind.group") : ""
-	].filter(Boolean).join(" · ");
-	let strongest = null;
-	for (const appetite of profile.appetites) {
-		const pressure = live?.appetites[appetite.id]?.pressure ?? appetite.baseline;
-		if (pressure <= 0 || strongest && strongest.pressure >= pressure) continue;
-		strongest = {
-			label: appetite.label || appetiteKindLabel(appetite.kind, ctx.lang),
-			pressure,
-			hidden: isHiddenAppetite(appetite)
-		};
-	}
-	const schemes = view.state.schemes.filter((scheme) => scheme.owner === profile.id && (scheme.state === "running" || scheme.state === "ready")).length;
-	const tags = [
-		el("span", {
-			class: "dramatis-sheet-tag",
-			data: { lod: profile.lod },
-			text: lodLabel(profile.lod, ctx.lang)
-		}),
-		present ? el("span", {
-			class: ["dramatis-sheet-tag", "dramatis-sheet-tag-on"],
-			text: t("sheet.present.yes")
-		}) : null,
-		present && band ? el("span", {
-			class: "dramatis-sheet-tag",
-			data: { band },
-			text: bandLabel(band, ctx.lang)
-		}) : null,
-		extra ? el("span", {
-			class: "dramatis-sheet-tag",
-			text: t("sheet.extra")
-		}) : null
-	];
-	const facts = [];
-	if (playerTie) facts.push(el("span", { class: "dramatis-sheet-fact" }, [el("span", {
-		class: "dramatis-muted",
-		text: t("sheet.list.toPlayer")
-	}), stanceChip(ctx, playerTie.stance, profile.gender)]));
-	if (strongest) {
-		const appetite = strongest;
-		const text = el("span", { class: "dramatis-sheet-fact" }, [el("span", {
-			class: "dramatis-muted",
-			text: `${appetite.label}:`
-		}), el("span", {
-			class: "dramatis-sheet-pressure",
-			text: words(ctx).pressure(appetite.pressure, profile.gender)
-		})]);
-		facts.push(appetite.hidden ? spoiler(ctx, `${profile.id}:list-appetite`, () => text) : text);
-	}
-	if (schemes) {
-		const text = el("span", {
-			class: "dramatis-sheet-fact",
-			text: t("sheet.list.schemes", { n: schemes })
-		});
-		facts.push(spoiler(ctx, `${profile.id}:list-schemes`, () => text));
-	}
-	const open = keyed(button({
-		label: profile.name,
-		kind: "ghost",
-		className: "dramatis-sheet-row-open",
-		title: t("sheet.list.open", { name: profile.name }),
-		onClick: () => ctx.navigate({
-			page: "character",
-			id: profile.id
-		})
-	}), `row:${profile.id}`);
-	return el("li", {
-		class: ["dramatis-sheet-row", present && "dramatis-sheet-row-present"],
-		data: { id: profile.id }
-	}, [
-		el("div", { class: "dramatis-sheet-row-main" }, [open, el("span", { class: "dramatis-sheet-tags" }, tags)]),
-		sub ? el("div", {
-			class: "dramatis-sheet-row-sub dramatis-muted",
-			text: sub
-		}) : null,
-		facts.length ? el("div", { class: "dramatis-sheet-row-facts" }, facts) : null
-	]);
-}
-function filterBar(ctx, filter, setFilter) {
-	const t = ctx.t;
-	return el("div", {
-		class: "dramatis-sheet-filter",
-		attrs: {
-			role: "group",
-			"aria-label": t("sheet.filter.label")
-		}
-	}, FILTERS.map((value) => {
-		const node = keyed(button({
-			label: t(`sheet.filter.${value}`),
-			kind: value === filter ? "primary" : "ghost",
-			onClick: () => setFilter(value)
-		}), `filter:${value}`);
-		node.setAttribute("aria-pressed", String(value === filter));
-		return node;
-	}));
-}
-function addForm(ctx) {
-	const t = ctx.t;
-	const name = textInput({
-		value: "",
-		label: t("sheet.add.name"),
-		placeholder: t("sheet.add.name"),
-		key: "add:name",
-		onCommit: () => void 0
-	});
-	name.addEventListener("keydown", (event) => {
-		if (event.key === "Enter") add("character");
-	});
-	const add = async (kind) => {
-		const clean = cleanText(name.value, LIMITS.name);
-		if (!clean) {
-			name.focus();
-			return;
-		}
-		let id = null;
-		await ctx.save(addCharacter(ctx.engine, clean, kind).then((created) => {
-			id = created;
-			return created !== null;
-		}));
-		if (id) ctx.navigate({
-			page: "character",
-			id
-		});
-	};
-	return el("div", { class: "dramatis-sheet-add" }, [
-		name,
-		keyed(button({
-			icon: "fa-user-plus",
-			label: t("sheet.add.character"),
-			onClick: () => add("character")
-		}), "add:character"),
-		keyed(button({
-			icon: "fa-users",
-			label: t("sheet.add.group"),
-			onClick: () => add("group")
-		}), "add:group")
-	]);
-}
-function worldLinks(ctx) {
-	const t = ctx.t;
-	const view = ctx.view;
-	const rules = view.card.rules.length + view.state.rules.filter((rule) => !view.card.rules.some((r) => r.id === rule.id)).length;
-	const link = (page, icon, label) => keyed(button({
-		icon,
-		label,
-		kind: "ghost",
-		onClick: () => ctx.navigate({ page })
-	}), `nav:${page}`);
-	return el("div", { class: "dramatis-sheet-links" }, [
-		link("rules", "fa-people-group", t("sheet.nav.rules", { n: rules })),
-		link("reputation", "fa-bullhorn", t("sheet.nav.reputation", { n: view.state.reputation.length })),
-		link("invariants", "fa-anchor", t("sheet.nav.invariants", { n: view.card.invariants.length })),
-		link("metrics", "fa-chart-simple", t("sheet.nav.metrics"))
-	]);
-}
-function renderList(ctx, intent, filter, setFilter) {
-	const t = ctx.t;
-	const view = ctx.view;
-	const out = [header(ctx, intent)];
-	if (!view.profiles.length) {
-		out.push(emptyState(t("sheet.empty.noProfiles"), [
-			intentButton(ctx, intent, true),
-			el("p", {
-				class: "dramatis-muted",
-				text: t("sheet.empty.orAdd")
-			}),
-			addForm(ctx)
-		]));
-		return out;
-	}
-	out.push(worldLinks(ctx));
-	out.push(filterBar(ctx, filter, setFilter));
-	const order = new Map(view.present.map((id, index) => [id, index]));
-	const shown = view.profiles.filter((profile) => filter === "present" ? order.has(profile.id) : filter === "groups" ? profile.kind === "group" : true).map((profile, index) => ({
-		profile,
-		index
-	})).sort((a, b) => (order.get(a.profile.id) ?? Number.MAX_SAFE_INTEGER) - (order.get(b.profile.id) ?? Number.MAX_SAFE_INTEGER) || a.index - b.index).map((item) => item.profile);
-	out.push(shown.length ? el("ul", {
-		class: "dramatis-sheet-list",
-		attrs: { "aria-label": t("sheet.list.title") }
-	}, shown.map((p) => listRow(ctx, p))) : emptyState(t(`sheet.filter.empty.${filter}`)));
-	out.push(addForm(ctx));
-	return out;
-}
-//#endregion
 //#region src/features/sheet/section-agenda.ts
 function nextId(prefix, taken) {
 	let n = taken.length + 1;
@@ -23950,6 +23693,47 @@ function renderStarts(b) {
 		}])
 	}), b.key("starts:add")) : null;
 	return profileUnit(b, t("sheet.starts.title"), "starts", [...rows, add], { hint: t("sheet.starts.hint") });
+}
+//#endregion
+//#region src/features/sheet/words.ts
+function bucket(value, edges) {
+	let index = 0;
+	for (const edge of edges) if (value >= edge) index++;
+	return index;
+}
+function words(ctx) {
+	const t = ctx.t;
+	const scale = (name, value) => t(`sheet.scale.${name}.${Math.round(value)}`);
+	return {
+		level: (value) => scale("level", value),
+		hexaco: (axis, value) => {
+			if (value === 0) return t("sheet.scale.level.0");
+			const pole = hexacoPole(axis, value, ctx.lang, 1);
+			return Math.abs(value) >= 2 ? pole : t("sheet.scale.rather", { word: pole });
+		},
+		baseline: (value) => scale("baseline", value),
+		liking: (value) => scale("liking", value),
+		three: (value) => scale("three", value),
+		want: (value) => scale("want", value),
+		pressure: (value, gender) => pressureLabel(value, ctx.lang, gender),
+		proactivity: (value) => `${Math.round(value)} — ${t(`sheet.scale.proactivity.${bucket(value, [
+			3,
+			5,
+			7,
+			9
+		])}`)}`,
+		corruption: (value) => `${Math.round(value)} — ${t(`sheet.scale.corruption.${bucket(value, [
+			1,
+			3,
+			5,
+			7,
+			10
+		])}`)}`,
+		selfControl: (value) => scale("selfControl", value),
+		choosiness: (value) => scale("choosiness", value),
+		intensity: (value) => scale("intensity", value),
+		amount: (value) => scale("amount", value)
+	};
 }
 //#endregion
 //#region src/features/sheet/section-appetites.ts
@@ -25746,6 +25530,492 @@ function accordion(ctx, b) {
 	return root;
 }
 //#endregion
+//#region src/features/sheet/levers.ts
+/** The general settings' label key of a lever and the prefix of its value labels (booleans and numbers: none). */
+var LABELS = {
+	mode: {
+		label: "ui.settings.mode",
+		values: "ui.settings.mode"
+	},
+	playerGravity: {
+		label: "ui.lever.playerGravity",
+		values: "ui.lever.playerGravity"
+	},
+	inertia: {
+		label: "ui.lever.inertia",
+		values: "ui.lever.inertia"
+	},
+	driftResponse: {
+		label: "ui.lever.driftResponse",
+		values: "ui.lever.driftResponse"
+	},
+	appetiteStrength: {
+		label: "ui.lever.appetiteStrength",
+		values: "ui.lever.appetiteStrength"
+	},
+	huntersPerScene: {
+		label: "ui.lever.huntersPerScene",
+		values: "ui.lever.huntersPerScene"
+	},
+	corruption: {
+		label: "ui.lever.corruption",
+		values: "ui.lever.corruption"
+	},
+	diversity: {
+		label: "ui.lever.diversity",
+		values: "ui.lever.diversity"
+	},
+	secrets: {
+		label: "ui.lever.secrets",
+		values: "ui.lever.secrets"
+	},
+	cardLanguage: {
+		label: "ui.settings.cardLanguage",
+		values: "ui.settings.cardLanguage"
+	},
+	mergeVoices: { label: "ui.settings.mergeVoices" },
+	cardBudget: { label: "ui.settings.cardBudget" },
+	depth: { label: "ui.settings.depth" },
+	autoArchives: { label: "ui.settings.autoArchives" }
+};
+/** The value's words: the general settings' label, «вкл/выкл» for switches, the number itself for numbers. */
+function leverValueLabel(ctx, key, value) {
+	const prefix = LABELS[key].values;
+	if (prefix) return ctx.t(`${prefix}.${String(value)}`);
+	if (typeof value === "boolean") return ctx.t(value ? "sheet.levers.on" : "sheet.levers.off");
+	return String(value);
+}
+/** How many levers this chat overrides (the list's link shows it). */
+function overrideCount(ctx) {
+	return Object.keys(cleanOverrides(ctx.view.state.overrides)).length;
+}
+function setLever(ctx, key, value) {
+	ctx.save(ctx.engine.updateState((state) => {
+		state.overrides = withLever(state.overrides, key, value);
+	}));
+}
+function renderLevers(ctx) {
+	const t = ctx.t;
+	const general = ctx.app.settings.get();
+	const overrides = cleanOverrides(ctx.view.state.overrides);
+	const rows = CHAT_LEVERS.map((key) => {
+		const own = Object.prototype.hasOwnProperty.call(overrides, key);
+		const values = LEVER_CHOICES[key];
+		const offered = values.includes(general[key]) ? values : [...values, general[key]];
+		const current = own ? overrides[key] : void 0;
+		const listed = current !== void 0 && !offered.includes(current) ? [...offered, current] : offered;
+		const options = [{
+			value: "",
+			label: t("sheet.levers.general", { value: leverValueLabel(ctx, key, general[key]) })
+		}, ...listed.map((value) => ({
+			value: JSON.stringify(value),
+			label: leverValueLabel(ctx, key, value)
+		}))];
+		const label = t(LABELS[key].label);
+		const node = row(label, keyed(select({
+			value: own ? JSON.stringify(current) : "",
+			options,
+			label,
+			onChange: (raw) => setLever(ctx, key, raw === "" ? null : JSON.parse(raw))
+		}), `lever:${key}`));
+		if (own) node.classList.add("dramatis-sheet-lever-own");
+		return node;
+	});
+	const effective = chatLevers(general, overrides);
+	const count = Object.keys(overrides).length;
+	return [
+		backButton(ctx),
+		el("h3", {
+			class: "dramatis-sheet-title",
+			text: t("sheet.levers.title")
+		}),
+		el("div", {
+			class: "dramatis-field-hint",
+			text: t("sheet.levers.intro")
+		}),
+		el("div", { class: "dramatis-sheet-levers" }, rows),
+		el("div", { class: "dramatis-sheet-levers-foot" }, [el("span", {
+			class: "dramatis-muted",
+			text: count ? t("sheet.levers.count", {
+				n: count,
+				mode: leverValueLabel(ctx, "mode", effective.mode)
+			}) : t("sheet.levers.none")
+		}), keyed(button({
+			icon: "fa-rotate-left",
+			label: t("sheet.levers.reset"),
+			kind: "ghost",
+			disabled: !count,
+			onClick: () => void ctx.save(ctx.engine.updateState((state) => {
+				delete state.overrides;
+			}))
+		}), "levers:reset")])
+	];
+}
+//#endregion
+//#region src/features/sheet/list.ts
+var TONES = [
+	"hostile",
+	"indifferent",
+	"neutral",
+	"welcoming"
+];
+function cardName(ctx) {
+	try {
+		const name = ctx.app.readers.card.current()?.name;
+		if (name) return name;
+	} catch {}
+	return ctx.view.card.card.replace(/\.[a-z0-9]+$/i, "");
+}
+function intentButton(ctx, intent, big = false) {
+	const t = ctx.t;
+	const again = !!ctx.view.card.intent;
+	const running = intent.busy || (intent.api?.running() ?? false);
+	const node = keyed(button({
+		icon: running ? "fa-spinner" : again ? "fa-rotate" : "fa-book-open",
+		label: running ? t("sheet.intent.running") : t(again ? "sheet.intent.reread" : "sheet.intent.read"),
+		kind: big ? "primary" : "default",
+		disabled: !intent.api || running,
+		title: intent.api ? t(again ? "sheet.intent.rereadHint" : "sheet.intent.readHint") : t("sheet.intent.unavailable"),
+		className: big ? "dramatis-sheet-big" : void 0,
+		onClick: () => intent.read(again)
+	}), big ? "intent:read-big" : "intent:read");
+	node.dataset.intent = again ? "reread" : "read";
+	return node;
+}
+/** Warnings and the re-read differences of the last reading. */
+function intentResult(ctx, intent) {
+	const result = intent.result;
+	if (!result) return null;
+	const t = ctx.t;
+	const parts = [];
+	if (!result.ok) parts.push(el("div", {
+		class: "dramatis-error-text",
+		text: t("sheet.intent.failed", { error: result.error ?? "" })
+	}));
+	else {
+		const summary = result.skipped ? result.message ?? t("sheet.intent.skipped") : result.message ?? t("sheet.intent.done", { n: result.characters });
+		parts.push(el("div", { text: summary }));
+	}
+	if (result.warnings.length) parts.push(el("details", { class: "dramatis-sheet-warnings-box" }, [el("summary", { text: t("sheet.intent.warningsCount", { n: result.warnings.length }) }), el("ul", {
+		class: "dramatis-sheet-warnings",
+		attrs: { "aria-label": t("sheet.intent.warnings") }
+	}, [...result.warnings.map((warning) => el("li", { text: warning }))])]));
+	if (result.diff.length) {
+		parts.push(el("div", {
+			class: "dramatis-sheet-unit-title",
+			text: t("sheet.intent.diff")
+		}));
+		parts.push(el("ul", { class: "dramatis-sheet-diff" }, result.diff.map((entry, index) => {
+			const exists = !entry.character || ctx.view.byId.has(entry.character);
+			const who = entry.character ? nameOf$1(ctx.view, entry.character) : t("sheet.intent.cardLevel");
+			const kept = entry.status === "kept-user" || entry.status === "kept-locked";
+			const taken = intent.taken.has(index);
+			return el("li", {
+				class: "dramatis-sheet-diff-item",
+				data: { status: entry.status }
+			}, [
+				el("div", { class: "dramatis-sheet-diff-head" }, [
+					el("strong", { text: who }),
+					el("span", {
+						class: "dramatis-muted",
+						text: fieldLabel(ctx, entry.path)
+					}),
+					el("span", {
+						class: "dramatis-sheet-tag",
+						text: known(ctx, `sheet.diff.${entry.status}`) ?? entry.status
+					})
+				]),
+				el("div", { class: "dramatis-sheet-diff-values" }, [
+					el("span", {
+						class: "dramatis-muted",
+						text: t("sheet.diff.now")
+					}),
+					el("span", { text: summarize(entry.before) }),
+					el("span", {
+						class: "dramatis-muted",
+						text: t("sheet.diff.author")
+					}),
+					el("span", { text: summarize(entry.after) })
+				]),
+				kept && exists && !taken ? keyed(button({
+					icon: "fa-feather-pointed",
+					label: t("sheet.diff.take"),
+					kind: "ghost",
+					className: "dramatis-sheet-take",
+					onClick: () => intent.take(index)
+				}), `intent:take:${index}`) : null,
+				taken ? el("span", {
+					class: "dramatis-muted",
+					text: t("sheet.diff.taken")
+				}) : null
+			]);
+		})));
+	}
+	return el("div", {
+		class: "dramatis-sheet-intent",
+		attrs: { role: "status" }
+	}, [...parts, button({
+		icon: "fa-xmark",
+		label: t("sheet.intent.dismiss"),
+		kind: "ghost",
+		onClick: () => intent.dismiss()
+	})]);
+}
+/** The string of a key, or null when there is none (i18n returns the key itself then). */
+function known(ctx, key) {
+	const text = ctx.t(key);
+	return text === key ? null : text;
+}
+/** Human label of a profile path from the diff ('core.values' → «Ценности»). */
+function fieldLabel(ctx, path) {
+	const parts = path.split(".");
+	const head = parts[0] ?? "";
+	const t = ctx.t;
+	if (head === "ties" && parts[1]) return t("sheet.path.tie", { target: nameOf$1(ctx.view, parts.slice(1).join(".")) });
+	if (head === "appetites" && parts[1]) return t("sheet.path.appetite", { id: parts[1] });
+	if (head === "rules" && parts[1]) return t("sheet.path.rule", { id: parts[1] });
+	if (head === "core" || head === "agenda") return known(ctx, `sheet.field.${parts[1]}`) ?? known(ctx, `sheet.agenda.${parts[1]}`) ?? path;
+	return known(ctx, `sheet.field.${head}`) ?? known(ctx, `sheet.path.${head}`) ?? path;
+}
+function header(ctx, intent) {
+	const t = ctx.t;
+	const { view } = ctx;
+	const characters = view.profiles.filter((profile) => profile.kind === "character").length;
+	const groups = view.profiles.length - characters;
+	const tone = unitBlock(ctx, {
+		title: t("sheet.header.tone"),
+		holder: view.card,
+		unit: "worldTone",
+		keyPrefix: "card",
+		onLock: () => ctx.save(toggleCardLock(ctx.engine, "worldTone"))
+	}, [keyed(select({
+		value: view.state.worldTone,
+		options: TONES.map((value) => ({
+			value,
+			label: worldToneLabel(value, ctx.lang)
+		})),
+		label: t("sheet.header.tone"),
+		onChange: (value) => ctx.save(setWorldTone(ctx.engine, value))
+	}), "card:worldTone")]);
+	return el("div", { class: "dramatis-sheet-header" }, [
+		el("div", { class: "dramatis-sheet-header-top" }, [el("h3", {
+			class: "dramatis-sheet-title",
+			text: cardName(ctx)
+		}), intentButton(ctx, intent)]),
+		el("div", {
+			class: "dramatis-sheet-counts dramatis-muted",
+			text: t("sheet.header.counts", {
+				characters,
+				groups,
+				present: view.present.length
+			})
+		}),
+		tone,
+		intent.api ? null : el("div", {
+			class: "dramatis-field-hint",
+			text: t("sheet.intent.unavailable")
+		}),
+		intentResult(ctx, intent)
+	]);
+}
+/** A row of the list: everything one needs to know at a glance; a click opens the character. */
+function listRow(ctx, profile) {
+	const t = ctx.t;
+	const view = ctx.view;
+	const live = view.state.characters[profile.id];
+	const present = view.present.includes(profile.id);
+	const band = view.bands[profile.id];
+	const playerTie = live?.ties["@player"] ?? profile.ties.find((tie) => tie.target === "@player");
+	const extra = view.state.extras.some((other) => other.id === profile.id);
+	const sub = [
+		profile.role,
+		profile.species,
+		profile.kind === "group" ? t("sheet.kind.group") : ""
+	].filter(Boolean).join(" · ");
+	let strongest = null;
+	for (const appetite of profile.appetites) {
+		const pressure = live?.appetites[appetite.id]?.pressure ?? appetite.baseline;
+		if (pressure <= 0 || strongest && strongest.pressure >= pressure) continue;
+		strongest = {
+			label: appetite.label || appetiteKindLabel(appetite.kind, ctx.lang),
+			pressure,
+			hidden: isHiddenAppetite(appetite)
+		};
+	}
+	const schemes = view.state.schemes.filter((scheme) => scheme.owner === profile.id && (scheme.state === "running" || scheme.state === "ready")).length;
+	const tags = [
+		el("span", {
+			class: "dramatis-sheet-tag",
+			data: { lod: profile.lod },
+			text: lodLabel(profile.lod, ctx.lang)
+		}),
+		present ? el("span", {
+			class: ["dramatis-sheet-tag", "dramatis-sheet-tag-on"],
+			text: t("sheet.present.yes")
+		}) : null,
+		present && band ? el("span", {
+			class: "dramatis-sheet-tag",
+			data: { band },
+			text: bandLabel(band, ctx.lang)
+		}) : null,
+		extra ? el("span", {
+			class: "dramatis-sheet-tag",
+			text: t("sheet.extra")
+		}) : null
+	];
+	const facts = [];
+	if (playerTie) facts.push(el("span", { class: "dramatis-sheet-fact" }, [el("span", {
+		class: "dramatis-muted",
+		text: t("sheet.list.toPlayer")
+	}), stanceChip(ctx, playerTie.stance, profile.gender)]));
+	if (strongest) {
+		const appetite = strongest;
+		const text = el("span", { class: "dramatis-sheet-fact" }, [el("span", {
+			class: "dramatis-muted",
+			text: `${appetite.label}:`
+		}), el("span", {
+			class: "dramatis-sheet-pressure",
+			text: words(ctx).pressure(appetite.pressure, profile.gender)
+		})]);
+		facts.push(appetite.hidden ? spoiler(ctx, `${profile.id}:list-appetite`, () => text) : text);
+	}
+	if (schemes) {
+		const text = el("span", {
+			class: "dramatis-sheet-fact",
+			text: t("sheet.list.schemes", { n: schemes })
+		});
+		facts.push(spoiler(ctx, `${profile.id}:list-schemes`, () => text));
+	}
+	const open = keyed(button({
+		label: profile.name,
+		kind: "ghost",
+		className: "dramatis-sheet-row-open",
+		title: t("sheet.list.open", { name: profile.name }),
+		onClick: () => ctx.navigate({
+			page: "character",
+			id: profile.id
+		})
+	}), `row:${profile.id}`);
+	return el("li", {
+		class: ["dramatis-sheet-row", present && "dramatis-sheet-row-present"],
+		data: { id: profile.id }
+	}, [
+		el("div", { class: "dramatis-sheet-row-main" }, [open, el("span", { class: "dramatis-sheet-tags" }, tags)]),
+		sub ? el("div", {
+			class: "dramatis-sheet-row-sub dramatis-muted",
+			text: sub
+		}) : null,
+		facts.length ? el("div", { class: "dramatis-sheet-row-facts" }, facts) : null
+	]);
+}
+function filterBar(ctx, filter, setFilter) {
+	const t = ctx.t;
+	return el("div", {
+		class: "dramatis-sheet-filter",
+		attrs: {
+			role: "group",
+			"aria-label": t("sheet.filter.label")
+		}
+	}, FILTERS.map((value) => {
+		const node = keyed(button({
+			label: t(`sheet.filter.${value}`),
+			kind: value === filter ? "primary" : "ghost",
+			onClick: () => setFilter(value)
+		}), `filter:${value}`);
+		node.setAttribute("aria-pressed", String(value === filter));
+		return node;
+	}));
+}
+function addForm(ctx) {
+	const t = ctx.t;
+	const name = textInput({
+		value: "",
+		label: t("sheet.add.name"),
+		placeholder: t("sheet.add.name"),
+		key: "add:name",
+		onCommit: () => void 0
+	});
+	name.addEventListener("keydown", (event) => {
+		if (event.key === "Enter") add("character");
+	});
+	const add = async (kind) => {
+		const clean = cleanText(name.value, LIMITS.name);
+		if (!clean) {
+			name.focus();
+			return;
+		}
+		let id = null;
+		await ctx.save(addCharacter(ctx.engine, clean, kind).then((created) => {
+			id = created;
+			return created !== null;
+		}));
+		if (id) ctx.navigate({
+			page: "character",
+			id
+		});
+	};
+	return el("div", { class: "dramatis-sheet-add" }, [
+		name,
+		keyed(button({
+			icon: "fa-user-plus",
+			label: t("sheet.add.character"),
+			onClick: () => add("character")
+		}), "add:character"),
+		keyed(button({
+			icon: "fa-users",
+			label: t("sheet.add.group"),
+			onClick: () => add("group")
+		}), "add:group")
+	]);
+}
+function worldLinks(ctx) {
+	const t = ctx.t;
+	const view = ctx.view;
+	const rules = view.card.rules.length + view.state.rules.filter((rule) => !view.card.rules.some((r) => r.id === rule.id)).length;
+	const link = (page, icon, label) => keyed(button({
+		icon,
+		label,
+		kind: "ghost",
+		onClick: () => ctx.navigate({ page })
+	}), `nav:${page}`);
+	return el("div", { class: "dramatis-sheet-links" }, [
+		link("rules", "fa-people-group", t("sheet.nav.rules", { n: rules })),
+		link("reputation", "fa-bullhorn", t("sheet.nav.reputation", { n: view.state.reputation.length })),
+		link("invariants", "fa-anchor", t("sheet.nav.invariants", { n: view.card.invariants.length })),
+		link("metrics", "fa-chart-simple", t("sheet.nav.metrics")),
+		link("levers", "fa-sliders", t("sheet.nav.levers", { n: overrideCount(ctx) }))
+	]);
+}
+function renderList(ctx, intent, filter, setFilter) {
+	const t = ctx.t;
+	const view = ctx.view;
+	const out = [header(ctx, intent)];
+	if (!view.profiles.length) {
+		out.push(emptyState(t("sheet.empty.noProfiles"), [
+			intentButton(ctx, intent, true),
+			el("p", {
+				class: "dramatis-muted",
+				text: t("sheet.empty.orAdd")
+			}),
+			addForm(ctx)
+		]));
+		return out;
+	}
+	out.push(worldLinks(ctx));
+	out.push(filterBar(ctx, filter, setFilter));
+	const order = new Map(view.present.map((id, index) => [id, index]));
+	const shown = view.profiles.filter((profile) => filter === "present" ? order.has(profile.id) : filter === "groups" ? profile.kind === "group" : true).map((profile, index) => ({
+		profile,
+		index
+	})).sort((a, b) => (order.get(a.profile.id) ?? Number.MAX_SAFE_INTEGER) - (order.get(b.profile.id) ?? Number.MAX_SAFE_INTEGER) || a.index - b.index).map((item) => item.profile);
+	out.push(shown.length ? el("ul", {
+		class: "dramatis-sheet-list",
+		attrs: { "aria-label": t("sheet.list.title") }
+	}, shown.map((p) => listRow(ctx, p))) : emptyState(t(`sheet.filter.empty.${filter}`)));
+	out.push(addForm(ctx));
+	return out;
+}
+//#endregion
 //#region src/features/sheet/metrics.ts
 /** Whether the metrics module is running (the numbers grow). */
 function counting(ctx) {
@@ -26326,7 +26596,7 @@ function routeFrom(params) {
 		page: "character",
 		id: params.character
 	};
-	if (params.page === "rules" || params.page === "reputation" || params.page === "invariants" || params.page === "metrics") return { page: params.page };
+	if (params.page === "rules" || params.page === "reputation" || params.page === "invariants" || params.page === "metrics" || params.page === "levers") return { page: params.page };
 	return { page: "list" };
 }
 var SheetView = class {
@@ -26456,6 +26726,7 @@ var SheetView = class {
 			case "reputation": return renderReputation(ctx);
 			case "invariants": return renderInvariants(ctx);
 			case "metrics": return renderMetrics(ctx);
+			case "levers": return renderLevers(ctx);
 			default: return renderList(ctx, this.intentPanel(view.card.card), this.deps.settings.filter, (filter) => this.setFilter(filter));
 		}
 	}
@@ -26468,7 +26739,7 @@ var SheetView = class {
 			lang: app.i18n.locale(),
 			engine,
 			view,
-			secrets: app.settings.get().secrets,
+			secrets: chatLevers(app.settings.get(), view.state.overrides).secrets,
 			session: this.session,
 			settings,
 			navigate: (route) => this.navigate(route),
@@ -26949,7 +27220,7 @@ function createTurnController(app, settings, log) {
 				levers: levers(current),
 				messageIndex: index,
 				uiLang: app.i18n.locale(),
-				cardLang: app.settings.get().cardLanguage
+				cardLang: chatLevers(app.settings.get(), current.state.overrides).cardLanguage
 			});
 			out.result.state.lastCommit = {
 				messageIndex: index,

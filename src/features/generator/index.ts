@@ -16,6 +16,7 @@
 // - API `generator` (api.ts) for the sheet UI: fillGaps, promote, pin — interactive requests.
 // Needs Maestro (background model, journal, notices); sketches themselves are code only.
 import { lodLabel, stanceLabel } from '../../domain/ladders';
+import { chatLevers } from '../../domain/levers';
 import {
     GENERATE_TASK,
     applyGenerated,
@@ -169,7 +170,8 @@ function startGenerator({ app, settings, log, own }: ModuleContext<GeneratorSett
     let attached: EngineApi | null = null;
     let offEngine: Unsubscribe | null = null;
 
-    const lang = () => app.settings.get().cardLanguage;
+    const levers = () => chatLevers(app.settings.get(), engine()?.view()?.state.overrides);
+    const lang = () => levers().cardLanguage;
     const chatOf = (state: Pick<ChatState, 'card'>) => `${app.host.chatId() ?? ''}|${state.card}`;
 
     function enqueue(job: () => Promise<void>): Promise<void> {
@@ -424,7 +426,7 @@ function startGenerator({ app, settings, log, own }: ModuleContext<GeneratorSett
                 view.state.worldTone,
                 cast,
                 app.rng,
-                app.settings.get().diversity,
+                levers().diversity,
                 reputation === undefined ? {} : { reputation },
             );
             const profile = sketchProfile(name, params, { lang: lang(), taken, ...identityOf(member) });
@@ -613,7 +615,7 @@ function startGenerator({ app, settings, log, own }: ModuleContext<GeneratorSett
                 .filter(isProfile)
                 .map(castMember);
             const role = hinted.role ?? detectRole([hinted.name]);
-            const sampled = sampleParams(role, view.state.worldTone, cast, app.rng, app.settings.get().diversity);
+            const sampled = sampleParams(role, view.state.worldTone, cast, app.rng, levers().diversity);
             const params = paramsFromProfile(hinted, sampled);
             const answer = await candidateFor(target, view, hinted, params, tags, background);
             if (!answer.candidate) {
@@ -707,7 +709,7 @@ function startGenerator({ app, settings, log, own }: ModuleContext<GeneratorSett
         const api = maestro();
         if (!api || target === 'fill') return;
         try {
-            if (target === 'portrait' && !hasArchive && app.settings.get().autoArchives && api.styleUp) {
+            if (target === 'portrait' && !hasArchive && levers().autoArchives && api.styleUp) {
                 const tags = fieldsToTags(profile);
                 if (tags.length) await api.styleUp(profile.name, tags);
             }

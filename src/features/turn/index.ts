@@ -13,6 +13,7 @@ import type { SceneMark } from '../../domain/scene';
 import { cleanForAnalysis } from '../../domain/text-clean';
 import { hashText } from '../../domain/intent-prompt';
 import { stanceLabel } from '../../domain/ladders';
+import { chatLevers } from '../../domain/levers';
 import {
     applyArcProposal,
     arcProposalValid,
@@ -379,7 +380,7 @@ export function createTurnController(app: App, settings: TurnSettings, log: Logg
                 levers: levers(current),
                 messageIndex: index,
                 uiLang: app.i18n.locale(),
-                cardLang: app.settings.get().cardLanguage,
+                cardLang: chatLevers(app.settings.get(), current.state.overrides).cardLanguage,
             });
             out.result.state.lastCommit = { messageIndex: index, swipeId: swipe, hash };
             return out.result.state;

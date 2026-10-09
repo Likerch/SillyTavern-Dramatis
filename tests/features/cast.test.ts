@@ -67,6 +67,16 @@ describe('cast — the motive card injection', () => {
         expect(Math.ceil(text.length / 4)).toBeLessThanOrEqual(220);
     });
 
+    it('follows the chat’s own levers over the general settings (language, depth)', async () => {
+        const state = { ...tavernState(), overrides: { cardLanguage: 'ru', depth: 3 } };
+        const h = await startHarness({ profiles: tavernCard(), state, persona: 'Курьер' });
+        expect(h.app.settings.get().cardLanguage).toBe('en');
+        await generate(h.mock);
+        const slot = h.mock.prompts.get('dramatis_cast')!;
+        expect(slot.value).toContain('[Мотивы персонажей');
+        expect(slot.depth).toBe(3);
+    });
+
     it('injects nothing for a dry run or a quiet background call', async () => {
         const h = await startHarness({ profiles: tavernCard(), state: tavernState() });
         await generate(h.mock, 'normal', true);

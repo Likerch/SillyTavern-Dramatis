@@ -4,6 +4,7 @@
 // runs the intent reading for the header.
 import type { EngineApi } from '../engine/api';
 import { ENGINE_API } from '../engine/api';
+import { chatLevers } from '../../domain/levers';
 import type { App, Logger, Unsubscribe } from '../../shared/contracts';
 import { clear, el } from '../../ui/dom';
 import { KEY_ATTR } from '../../ui/form';
@@ -15,6 +16,7 @@ import { renderCharacterPage, sectionKey } from './page';
 import { emptyState } from './parts';
 import { INTENT_API } from './types';
 import type { IntentApi, IntentReadResult, ListFilter, Route, SheetCtx, SheetSession, SheetSettings } from './types';
+import { renderLevers } from './levers';
 import { renderMetrics } from './metrics';
 import { renderInvariants, renderReputation, renderRules } from './world';
 
@@ -51,7 +53,8 @@ function routeFrom(params: Record<string, unknown>): Route {
         params.page === 'rules' ||
         params.page === 'reputation' ||
         params.page === 'invariants' ||
-        params.page === 'metrics'
+        params.page === 'metrics' ||
+        params.page === 'levers'
     ) {
         return { page: params.page };
     }
@@ -205,6 +208,8 @@ export class SheetView {
                 return renderInvariants(ctx);
             case 'metrics':
                 return renderMetrics(ctx);
+            case 'levers':
+                return renderLevers(ctx);
             default:
                 return renderList(ctx, this.intentPanel(view.card.card), this.deps.settings.filter, (filter) =>
                     this.setFilter(filter),
@@ -221,7 +226,7 @@ export class SheetView {
             lang: app.i18n.locale(),
             engine,
             view,
-            secrets: app.settings.get().secrets,
+            secrets: chatLevers(app.settings.get(), view.state.overrides).secrets,
             session: this.session,
             settings,
             navigate: (route) => this.navigate(route),

@@ -56,6 +56,16 @@ export const SHEET_STRINGS: I18nParts = {
         'sheet.nav.reputation': 'Reputation ({n})',
         'sheet.nav.invariants': 'Invariants ({n})',
         'sheet.nav.metrics': 'Measurements',
+        'sheet.nav.levers': 'This chat’s levers ({n})',
+        'sheet.levers.title': 'This chat’s levers',
+        'sheet.levers.intro':
+            'Values for this chat only. «As in the general settings» follows Dramatis’ settings, also when they change later.',
+        'sheet.levers.general': 'As in the general settings — {value}',
+        'sheet.levers.on': 'on',
+        'sheet.levers.off': 'off',
+        'sheet.levers.count': 'Own levers: {n}. Mode of this chat: {mode}.',
+        'sheet.levers.none': 'This chat follows the general settings.',
+        'sheet.levers.reset': 'All as in the general settings',
         'sheet.metrics.title': 'Measurements',
         'sheet.metrics.intro':
             'How the engine does in this chat, counted on committed turns together with the turn pass. To compare two runs (another mode, other levers), reset the measurements, play 20 turns and look again.',
@@ -568,6 +578,16 @@ export const SHEET_STRINGS: I18nParts = {
         'sheet.nav.reputation': 'Репутация ({n})',
         'sheet.nav.invariants': 'Инварианты ({n})',
         'sheet.nav.metrics': 'Замеры',
+        'sheet.nav.levers': 'Рычаги этого чата ({n})',
+        'sheet.levers.title': 'Рычаги этого чата',
+        'sheet.levers.intro':
+            'Свои значения только для этого чата. «Как в общих» — берётся из настроек Dramatis, в том числе когда они потом изменятся.',
+        'sheet.levers.general': 'Как в общих — {value}',
+        'sheet.levers.on': 'вкл',
+        'sheet.levers.off': 'выкл',
+        'sheet.levers.count': 'Своих рычагов: {n}. Режим этого чата: {mode}.',
+        'sheet.levers.none': 'Этот чат следует общим настройкам.',
+        'sheet.levers.reset': 'Всё как в общих',
         'sheet.metrics.title': 'Замеры',
         'sheet.metrics.intro':
             'Как движок справляется в этом чате. Считается по отправленным ходам вместе с проходом хода. Чтобы сравнить два прогона (другой режим, другие рычаги), сбрось замеры, сыграй 20 ходов и посмотри снова.',

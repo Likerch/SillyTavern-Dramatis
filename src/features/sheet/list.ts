@@ -10,6 +10,7 @@ import { button, el } from '../../ui/dom';
 import { textInput } from '../../ui/form';
 import { addCharacter, nameOf, setWorldTone, toggleCardLock } from './edits';
 import { emptyState, keyed, stanceChip, summarize, unitBlock } from './parts';
+import { overrideCount } from './levers';
 import { isHiddenAppetite, spoiler } from './secrets';
 import { FILTERS } from './types';
 import type { IntentApi, IntentReadResult, ListFilter, SheetCtx } from './types';
@@ -350,13 +351,14 @@ function worldLinks(ctx: SheetCtx): HTMLElement {
     const rules =
         view.card.rules.length +
         view.state.rules.filter((rule) => !view.card.rules.some((r) => r.id === rule.id)).length;
-    const link = (page: 'rules' | 'reputation' | 'invariants' | 'metrics', icon: string, label: string) =>
+    const link = (page: 'rules' | 'reputation' | 'invariants' | 'metrics' | 'levers', icon: string, label: string) =>
         keyed(button({ icon, label, kind: 'ghost', onClick: () => ctx.navigate({ page }) }), `nav:${page}`);
     return el('div', { class: 'dramatis-sheet-links' }, [
         link('rules', 'fa-people-group', t('sheet.nav.rules', { n: rules })),
         link('reputation', 'fa-bullhorn', t('sheet.nav.reputation', { n: view.state.reputation.length })),
         link('invariants', 'fa-anchor', t('sheet.nav.invariants', { n: view.card.invariants.length })),
         link('metrics', 'fa-chart-simple', t('sheet.nav.metrics')),
+        link('levers', 'fa-sliders', t('sheet.nav.levers', { n: overrideCount(ctx) })),
     ]);
 }
 

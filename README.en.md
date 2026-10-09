@@ -70,6 +70,7 @@ The **Dramatis** block of the extensions panel:
 - **Basics:** enable Dramatis, interface language, **mode** (Economy / Balanced / Cinema), motive card language (English with names as the story writes them, or Russian), a connection profile for work without Maestro, merging with Maestro's voice cards, CarrotKernel archives for portraits, card budget and depth.
 - **Levers:** world tone toward the player, player gravity, stance inertia, fidelity to the author, diversity of new faces, drift response (correct / stress / redo), secrets visibility, appetite strength, hunters per scene, corruption.
 - **Author's intent:** read the intent automatically.
+- **Per-chat levers:** any lever, the mode and the card's parameters can be set for one chat only — the intent sheet window → «This chat's levers».
 - **Living world:** how often the world ticks, whether to announce its events.
 
 ## Commands

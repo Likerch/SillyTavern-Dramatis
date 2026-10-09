@@ -15,6 +15,7 @@
 // In the «Кино» mode the director module (stage 5) is asked for this beat's calls once per generation (in the producer,
 // after the reply being answered is committed); they go into this generation's card only.
 import { buildCastCard } from '../../domain/render';
+import { chatLevers } from '../../domain/levers';
 import type { MaestroApiV1, MaestroQuietFunction } from '../../shared/apis';
 import type { App, DramatisModule, GenerationInfo, I18nParts, Logger, Unsubscribe } from '../../shared/contracts';
 import { DIRECTOR_API } from '../director/api';
@@ -88,7 +89,7 @@ export function castCardText(
 ): string {
     const present = castOf(view);
     if (!view || !present.length) return '';
-    const settings = app.settings.get();
+    const settings = chatLevers(app.settings.get(), view.state.overrides);
     const state = view.state;
     const next = state.next && state.next.turn === state.turn ? state.next : undefined;
     const api = app.maestro.api();
@@ -171,7 +172,7 @@ export const castModule: DramatisModule<CastSettings> = {
             if (api && active) {
                 // One block per character (motives + speech) replaces both — only while the speech is merged in;
                 // without it CK's consistency block keeps the speech side (Maestro's contract, §5.4).
-                if (app.settings.get().mergeVoices) {
+                if (chatLevers(app.settings.get(), attach()?.view()?.state.overrides).mergeVoices) {
                     wanted.add('voices');
                     wanted.add('ck.consistency');
                 }
@@ -235,7 +236,7 @@ export const castModule: DramatisModule<CastSettings> = {
             app.ephemeral.setInjection(CAST_INJECTION, {
                 text,
                 position: 1,
-                depth: app.settings.get().depth,
+                depth: chatLevers(app.settings.get(), current?.view()?.state.overrides).depth,
                 role: 0,
             });
         }
@@ -247,7 +248,14 @@ export const castModule: DramatisModule<CastSettings> = {
          */
         async function direct(gen: GenerationInfo): Promise<void> {
             const director = app.modules.api<DirectorApi>(DIRECTOR_API);
-            if (!director || gen.dryRun || gen.quiet || stopped || app.settings.get().mode !== 'cinema') return;
+            if (
+                !director ||
+                gen.dryRun ||
+                gen.quiet ||
+                stopped ||
+                chatLevers(app.settings.get(), attach()?.view()?.state.overrides).mode !== 'cinema'
+            )
+                return;
             const turn = app.modules.api<TurnApi>(TURN_API);
             if (turn && gen.type === 'normal') await within(turn.settle(), SETTLE_MS);
             directorCalls = await director.beat(gen).catch(() => undefined);
