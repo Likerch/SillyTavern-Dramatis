@@ -27,6 +27,7 @@ describe('defaults', () => {
             mode: 'balanced',
             profile: '',
             cardLanguage: 'en',
+            textLanguage: 'auto',
             mergeVoices: true,
             worldTone: 'indifferent',
             playerGravity: 'low',

@@ -9,6 +9,7 @@ import { generatorModule } from '../features/generator';
 import { intentModule } from '../features/intent';
 import { metricsModule } from '../features/metrics';
 import { sheetModule } from '../features/sheet';
+import { translateModule } from '../features/translate';
 import { turnModule } from '../features/turn';
 import { world as worldModule } from '../features/world';
 
@@ -17,6 +18,7 @@ export const MODULES: DramatisModule[] = [
     castModule,
     intentModule,
     sheetModule,
+    translateModule,
     turnModule,
     generatorModule,
     worldModule,

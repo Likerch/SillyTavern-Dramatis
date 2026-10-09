@@ -5,10 +5,11 @@
 // (the scene from the chat state, mood, a live emotion, notable stress, corruption), «Влечения» (each appetite with its
 // pressure word and target), «Кто это» (values, temperament extremes, drives, the wound, signatures, tactics, keys) and
 // «Тайны» (agenda secrets, what happens if nobody intervenes, running schemes).
-// Scales come as ladder words; free text (reasons, goals, the scene…) stays as stored, often English. Lines that give a
-// secret away carry `secret` (the chat's «Видимость тайного» lever, `secrets`, says how to show them; with «только
-// известное» they are left out here already). At most DESCRIBE_MAX_LINES lines: the longest sections give up their
-// last lines first.
+// Scales come as ladder words; free text (reasons, goals, the scene…) is stored in English and goes through `tr`, the
+// display translation (features/translate: the Russian when the story is Russian and the line is translated already,
+// else the text as stored); names stay as the story writes them. Lines that give a secret away carry `secret` (the
+// chat's «Видимость тайного» lever, `secrets`, says how to show them; with «только известное» they are left out here
+// already). At most DESCRIBE_MAX_LINES lines: the longest sections give up their last lines first.
 import { STRESS_BREAK } from '../../domain/drift';
 import {
     appetiteKindLabel,
@@ -58,6 +59,8 @@ export interface DescribeInput {
     secrets: DramatisCharacterView['secrets'];
     /** The player's name as the story writes it (or the generic word). */
     player: string;
+    /** Free text as the player reads it (the display translation); absent = as stored. Gets the cleaned text. */
+    tr?: (text: string) => string;
 }
 
 type Section = DramatisCharacterView['sections'][number];
@@ -73,6 +76,12 @@ function clean(value: string | undefined): string {
         .replace(/\s+/g, ' ')
         .trim()
         .replace(/[\s.;,]+$/u, '');
+}
+
+/** Stored free text cleaned (clean()) and as the player reads it (the input's `tr`). */
+function show(ctx: Pick<DescribeInput, 'tr'>, value: string | undefined): string {
+    const text = clean(value);
+    return text && ctx.tr ? ctx.tr(text) : text;
 }
 
 function line(text: string, secret = false): DramatisViewLine {
@@ -91,9 +100,12 @@ function stanceLines(ctx: Ctx): DramatisViewLine[] {
     if (!tie) return [];
     const out: DramatisViewLine[] = [];
     const stance = stanceLabel(tie.stance, lang, profile.gender);
-    const reasons = strongestReasons(tie.reasons ?? [], MAX_REASONS);
+    const stored = strongestReasons(tie.reasons ?? [], MAX_REASONS);
+    const reasons = ctx.tr ? stored.map((reason) => show(ctx, reason)).filter(Boolean) : stored;
     out.push(line(reasons.length ? t('engine.describe.stance', { stance, reasons: reasons.join('; ') }) : stance));
-    out.push(line(t('engine.describe.behaviour', { text: clean(tie.behaviour) || stanceBehaviour(tie.stance, lang) })));
+    out.push(
+        line(t('engine.describe.behaviour', { text: show(ctx, tie.behaviour) || stanceBehaviour(tie.stance, lang) })),
+    );
 
     const appetite = tie.appetite ? profile.appetites.find((item) => item.id === tie.appetite) : undefined;
     const desire: string[] = [];
@@ -124,7 +136,7 @@ function wantsLines(ctx: Ctx): DramatisViewLine[] {
         const key = text.toLowerCase();
         if (!text || keys.includes(key)) continue;
         keys.push(key);
-        out.push(line(text));
+        out.push(line(show(ctx, text)));
         if (out.length >= MAX_GOALS) break;
     }
     let intentions = 0;
@@ -132,8 +144,8 @@ function wantsLines(ctx: Ctx): DramatisViewLine[] {
         if (intentions >= MAX_INTENTIONS) break;
         const text = clean(intention.text);
         if (!text) continue;
-        const next = clean(intention.nextStep);
-        const shown = next ? t('engine.describe.intention', { text, next }) : text;
+        const next = show(ctx, intention.nextStep);
+        const shown = next ? t('engine.describe.intention', { text: show(ctx, text), next }) : show(ctx, text);
         const hidden = isHiddenIntention(intention);
         const same = keys.indexOf(text.toLowerCase());
         if (same >= 0 && !hidden) {
@@ -145,7 +157,7 @@ function wantsLines(ctx: Ctx): DramatisViewLine[] {
         out.push(line(shown, hidden));
         intentions++;
     }
-    const dream = clean(agenda.dream);
+    const dream = show(ctx, agenda.dream);
     if (dream) out.push(line(t('engine.describe.dream', { text: dream })));
     return out;
 }
@@ -154,19 +166,21 @@ function nowLines(ctx: Ctx): DramatisViewLine[] {
     const { profile, live, lang, t, view } = ctx;
     const out: DramatisViewLine[] = [];
     const scene = live?.scene;
-    const doing = clean(scene?.doing);
-    const goal = clean(scene?.goal);
-    const obstacle = clean(scene?.obstacle);
+    const doing = show(ctx, scene?.doing);
+    const goal = show(ctx, scene?.goal);
+    const obstacle = show(ctx, scene?.obstacle);
     if (doing) out.push(line(t('engine.describe.doing', { text: doing })));
     if (goal) out.push(line(t('engine.describe.sceneGoal', { text: goal })));
     if (obstacle) out.push(line(t('engine.describe.obstacle', { text: obstacle })));
     const mood = live?.mood ?? profile.core.baselineMood;
-    if (mood) out.push(line(t('engine.describe.mood', { mood: clean(mood.label) || moodLabel(mood.octant, lang) })));
+    if (mood) {
+        out.push(line(t('engine.describe.mood', { mood: show(ctx, mood.label) || moodLabel(mood.octant, lang) })));
+    }
     const emotion = live?.emotion;
     if (emotionActive(emotion, view.state.turn) && clean(emotion.type)) {
         const target = nameOf(ctx, emotion.target);
-        const cause = clean(emotion.cause);
-        const text = `${clean(emotion.type)}${target ? ` (${target})` : ''}${cause ? ` — ${cause}` : ''}`;
+        const cause = show(ctx, emotion.cause);
+        const text = `${show(ctx, emotion.type)}${target ? ` (${target})` : ''}${cause ? ` — ${cause}` : ''}`;
         out.push(line(t('engine.describe.emotion', { text })));
     }
     const stress = live?.stress ?? 0;
@@ -192,11 +206,11 @@ function appetiteLines(ctx: Ctx): DramatisViewLine[] {
         .sort((a, b) => b.pressure - a.pressure || a.index - b.index)
         .slice(0, MAX_APPETITES)
         .map(({ appetite, pressure }) => {
-            const what = clean(appetite.label) || appetiteKindLabel(appetite.kind, lang);
+            const what = show(ctx, appetite.label) || appetiteKindLabel(appetite.kind, lang);
             const word = pressureLabel(pressure, lang, profile.gender);
             const target =
                 appetite.target.mode === 'class'
-                    ? clean(appetite.target.class)
+                    ? show(ctx, appetite.target.class)
                     : appetite.target.mode === 'player'
                       ? ctx.player
                       : '';
@@ -229,16 +243,17 @@ function coreLines(ctx: Ctx): DramatisViewLine[] {
     if (poles.length) out.push(line(t('engine.describe.temperament', { list: poles.join(', ') })));
     const drives = (core.drives?.high ?? []).map((drive) => driveLabel(drive, lang)).filter(Boolean);
     if (drives.length) out.push(line(t('engine.describe.drives', { list: drives.join(', ') })));
-    const ghost = clean(core.wound?.ghost);
-    const lie = clean(core.wound?.lie);
+    const ghost = show(ctx, core.wound?.ghost);
+    const lie = show(ctx, core.wound?.lie);
     if (ghost) out.push(line(t('engine.describe.wound', { text: ghost })));
     if (lie) out.push(line(t('engine.describe.lie', { text: lie }), true));
-    for (const signature of (core.signatures ?? []).map(clean).filter(Boolean).slice(0, MAX_SIGNATURES)) {
+    const signatures = (core.signatures ?? []).map(clean).filter(Boolean).slice(0, MAX_SIGNATURES);
+    for (const signature of signatures.map((text) => show(ctx, text))) {
         out.push(line(t('engine.describe.signature', { text: signature })));
     }
-    const tactics = (core.tactics ?? []).map(clean).filter(Boolean);
+    const tactics = (core.tactics ?? []).map((text) => show(ctx, text)).filter(Boolean);
     if (tactics.length) out.push(line(t('engine.describe.tactics', { list: tactics.join(', ') })));
-    const keys = (core.keys ?? []).map(clean).filter(Boolean);
+    const keys = (core.keys ?? []).map((text) => show(ctx, text)).filter(Boolean);
     if (keys.length) out.push(line(t('engine.describe.keys', { list: keys.join('; ') })));
     return out;
 }
@@ -250,15 +265,15 @@ function secretLines(ctx: Ctx): DramatisViewLine[] {
         .map(clean)
         .filter(Boolean)
         .slice(0, MAX_SECRETS)
-        .map((text) => line(text, true));
+        .map((text) => line(show(ctx, text), true));
     const front = agenda.front && !agenda.front.done ? agenda.front : undefined;
-    const doom = clean(front?.doom) || clean(agenda.ifIgnored);
+    const doom = show(ctx, front?.doom) || show(ctx, agenda.ifIgnored);
     if (doom) out.push(line(t('engine.describe.doom', { text: doom }), true));
     const schemes = (view.state.schemes ?? []).filter(
         (scheme) => scheme.owner === profile.id && (scheme.state === 'running' || scheme.state === 'ready'),
     );
     for (const scheme of schemes.slice(0, MAX_SCHEMES)) {
-        const text = clean(scheme.text);
+        const text = show(ctx, scheme.text);
         if (text) out.push(line(t('engine.describe.scheme', { target: nameOf(ctx, scheme.target), text }), true));
     }
     return out;
@@ -302,7 +317,7 @@ export function describeCharacter(input: DescribeInput): DramatisCharacterView |
         sections: fitSections(sections, DESCRIBE_MAX_LINES),
         secrets: input.secrets,
     };
-    const headline = clean(profile.core.concept) || clean(profile.role);
+    const headline = show(ctx, profile.core.concept) || show(ctx, profile.role);
     if (headline) view.headline = headline;
     view.detail = lodLabel(profile.lod, lang).toLocaleLowerCase(lang);
     return view;

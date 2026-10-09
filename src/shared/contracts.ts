@@ -46,6 +46,11 @@ export interface DramatisSettings {
     profile: string;
     /** Language of the motive card. */
     cardLanguage: 'en' | 'ru';
+    /**
+     * «Язык описаний в окнах»: the language free text (concepts, roles, goals, reasons…) is shown in to the player — the
+     * intent sheet and DRAMATIS_API.describe. 'auto' follows Maestro's story language, else the UI language.
+     */
+    textLanguage: 'auto' | 'ru' | 'en';
     /** One block with Maestro's voice cards (speech + motives). */
     mergeVoices: boolean;
     worldTone: 'hostile' | 'indifferent' | 'neutral' | 'welcoming';
