@@ -338,7 +338,17 @@ export interface Agenda {
 
 /* ------------------------------------------------------------------ ties (§4.3) */
 
-export const TIE_INTENTS = ['none', 'recruit', 'extract', 'use', 'avenge', 'avoid', 'protect', 'seduce', 'court'] as const;
+export const TIE_INTENTS = [
+    'none',
+    'recruit',
+    'extract',
+    'use',
+    'avenge',
+    'avoid',
+    'protect',
+    'seduce',
+    'court',
+] as const;
 export type TieIntent = (typeof TIE_INTENTS)[number];
 
 export interface Reason {
@@ -626,4 +636,31 @@ export interface ChatState {
     /** Starting greeting the chat began with. */
     greeting: number;
     log: StateEvent[];
+    /** What the passes prepared for the next generation; the motive card reads it (stage 2+). */
+    next?: NextTurn;
+    /** Per-chat lever overrides (docs/model.md §14: «любой рычаг можно переопределить для чата»). */
+    overrides?: Record<string, unknown>;
+}
+
+/** One appetite as it matters this turn (mirrors render.ts AppetiteNow). */
+export interface AppetiteNowState {
+    appetite: string;
+    target?: string;
+    method?: number;
+    methodText?: string;
+    brakes?: string[];
+    justification?: string;
+}
+
+/** Results of the turn/scene passes for the next generation, keyed by character id. */
+export interface NextTurn {
+    /** Committed turn these were computed after. */
+    turn: number;
+    bands?: Record<string, AttentionBand>;
+    moves?: Record<string, { move: Move; target?: string; text?: string }>;
+    appetites?: Record<string, AppetiteNowState[]>;
+    /** Drift corrections (§8 «Поправка»), already rendered lines per character. */
+    corrections?: Record<string, string[]>;
+    /** Director pre-pass (cinema): who acts this beat, rendered lines. */
+    director?: string[];
 }

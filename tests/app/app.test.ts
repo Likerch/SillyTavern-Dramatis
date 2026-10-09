@@ -70,13 +70,14 @@ describe('startDramatis', () => {
         expect(runtime.app.settings.get().inertia).toBe('low');
     });
 
-    it('registers /dramatis that opens the cast window placeholder', async () => {
+    it('registers /dramatis that opens the cast window (the intent sheet of the sheet module)', async () => {
         runtime = await startDramatis();
         const command = mock.slashCommands.get('dramatis');
         expect(command).toBeDefined();
         expect(await command!.callback({}, '')).toBe('');
         const win = document.querySelector(`[data-window="${CAST_WINDOW_ID}"]`);
-        expect(win?.querySelector('.dramatis-window-title')?.textContent).toBe('Действующие лица');
+        expect(win?.querySelector('.dramatis-window-title')?.textContent).toBe('Лист замысла');
+        expect(win?.querySelector('.dramatis-sheet')).not.toBeNull();
         expect(win?.querySelector('.dramatis-placeholder')).not.toBeNull();
     });
 

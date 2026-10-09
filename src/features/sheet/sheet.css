@@ -1,0 +1,643 @@
+/*
+ * The intent sheet («Состав / Лист замысла»), added by the `sheet` module through app.ui.style and removed with it.
+ * Colours come from the ST theme (SmartTheme variables via the --dramatis-* tokens of src/ui/style.css; hostile and
+ * friendly from ST's --warning and --active). Phones (< 768px): one column, sections as an accordion.
+ */
+
+.dramatis-sheet {
+    --dramatis-hostile: var(--warning, rgb(225, 80, 80));
+    --dramatis-friendly: var(--active, rgb(88, 182, 0));
+    display: flex;
+    flex-direction: column;
+    gap: var(--dramatis-gap);
+    min-width: 0;
+}
+
+.dramatis-sheet h3,
+.dramatis-sheet h4 {
+    margin: 0;
+}
+
+.dramatis-sheet-title {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.dramatis-sheet-heading {
+    margin-top: var(--dramatis-gap-sm);
+    color: var(--dramatis-muted);
+    font-size: 0.95em;
+    font-weight: 600;
+    text-transform: none;
+}
+
+.dramatis-sheet-empty {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--dramatis-gap-sm);
+    padding: var(--dramatis-gap) var(--dramatis-gap-sm);
+    text-align: center;
+}
+
+.dramatis-sheet-big {
+    min-height: var(--dramatis-tap);
+    padding: 8px 20px;
+    font-size: 1.1em;
+}
+
+/* ------------------------------------------------------------------ header and list */
+
+.dramatis-sheet-header,
+.dramatis-sheet-page-head {
+    display: flex;
+    flex-direction: column;
+    gap: var(--dramatis-gap-sm);
+}
+
+.dramatis-sheet-header-top {
+    display: flex;
+    align-items: center;
+    gap: var(--dramatis-gap-sm);
+    min-width: 0;
+}
+
+.dramatis-sheet-back {
+    align-self: flex-start;
+}
+
+.dramatis-sheet-intent {
+    display: flex;
+    flex-direction: column;
+    gap: var(--dramatis-gap-sm);
+    padding: var(--dramatis-gap-sm) var(--dramatis-gap);
+    border: 1px solid var(--dramatis-border);
+    border-left: 3px solid var(--dramatis-accent);
+    border-radius: var(--dramatis-radius-sm);
+    background: var(--dramatis-raised);
+}
+
+.dramatis-sheet-intent > .dramatis-btn {
+    align-self: flex-end;
+}
+
+.dramatis-sheet-warnings,
+.dramatis-sheet-diff,
+.dramatis-sheet-quotes,
+.dramatis-sheet-reasons,
+.dramatis-sheet-list,
+.dramatis-sheet-log {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.dramatis-sheet-warnings li {
+    padding-left: 1em;
+    text-indent: -1em;
+}
+
+.dramatis-sheet-warnings li::before {
+    content: '• ';
+}
+
+.dramatis-sheet-diff {
+    display: flex;
+    flex-direction: column;
+    gap: var(--dramatis-gap-sm);
+}
+
+.dramatis-sheet-diff-item {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 6px 8px;
+    border: 1px solid var(--dramatis-border);
+    border-radius: var(--dramatis-radius-sm);
+}
+
+.dramatis-sheet-diff-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: var(--dramatis-gap-sm);
+}
+
+.dramatis-sheet-diff-values {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: 2px var(--dramatis-gap-sm);
+    overflow-wrap: anywhere;
+}
+
+.dramatis-sheet-take {
+    align-self: flex-start;
+}
+
+.dramatis-sheet-links,
+.dramatis-sheet-filter {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+}
+
+.dramatis-sheet-filter .dramatis-btn[aria-pressed='true'] {
+    background: color-mix(in srgb, var(--dramatis-accent) 16%, transparent);
+}
+
+.dramatis-sheet-list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.dramatis-sheet-row {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 6px 8px;
+    border: 1px solid var(--dramatis-border);
+    border-radius: var(--dramatis-radius-sm);
+}
+
+.dramatis-sheet-row-present {
+    border-left: 3px solid var(--dramatis-accent);
+}
+
+.dramatis-sheet-row-main {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--dramatis-gap-sm);
+}
+
+.dramatis-sheet-row-open {
+    padding: 2px 4px;
+    font-weight: 600;
+    text-align: left;
+    white-space: normal;
+}
+
+.dramatis-sheet-row-facts {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px var(--dramatis-gap);
+}
+
+.dramatis-sheet-fact {
+    display: inline-flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 4px;
+}
+
+.dramatis-sheet-tags {
+    display: inline-flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px;
+}
+
+.dramatis-sheet-tag {
+    display: inline-block;
+    padding: 0 6px;
+    border: 1px solid var(--dramatis-border);
+    border-radius: 999px;
+    color: var(--dramatis-muted);
+    font-size: 0.82em;
+    line-height: 1.6;
+    white-space: nowrap;
+}
+
+.dramatis-sheet-tag-on {
+    border-color: var(--dramatis-accent);
+    color: var(--dramatis-text);
+}
+
+.dramatis-sheet-tag[data-band='focus'] {
+    border-color: var(--dramatis-accent);
+    color: var(--dramatis-accent);
+}
+
+.dramatis-sheet-lod {
+    width: auto;
+    max-width: 12em;
+    margin: 0;
+    padding: 0 4px;
+    font-size: 0.85em;
+}
+
+.dramatis-stance {
+    font-weight: 600;
+}
+
+.dramatis-stance[data-stance='-3'],
+.dramatis-stance[data-stance='-2'] {
+    color: var(--dramatis-hostile);
+}
+
+.dramatis-stance[data-stance='-1'] {
+    color: color-mix(in srgb, var(--dramatis-hostile) 60%, var(--dramatis-text));
+}
+
+.dramatis-stance[data-stance='0'] {
+    color: var(--dramatis-muted);
+}
+
+.dramatis-stance[data-stance='1'] {
+    color: color-mix(in srgb, var(--dramatis-friendly) 60%, var(--dramatis-text));
+}
+
+.dramatis-stance[data-stance='2'],
+.dramatis-stance[data-stance='3'] {
+    color: var(--dramatis-friendly);
+}
+
+.dramatis-sheet-pressure {
+    font-style: italic;
+}
+
+.dramatis-sheet-add {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--dramatis-gap-sm);
+}
+
+.dramatis-sheet-add > .dramatis-input,
+.dramatis-sheet-add > .dramatis-select {
+    flex: 1 1 10em;
+    width: auto;
+    margin: 0;
+}
+
+/* ------------------------------------------------------------------ sections: tabs and accordion */
+
+.dramatis-sheet-tabs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 2px;
+    border-bottom: 1px solid var(--dramatis-border);
+}
+
+.dramatis-sheet-tab {
+    border-bottom: 2px solid transparent;
+    border-radius: var(--dramatis-radius-sm) var(--dramatis-radius-sm) 0 0;
+}
+
+.dramatis-sheet-tab[aria-selected='true'] {
+    border-bottom-color: var(--dramatis-accent);
+    color: var(--dramatis-accent);
+}
+
+.dramatis-sheet-panel {
+    display: flex;
+    flex-direction: column;
+    gap: var(--dramatis-gap-sm);
+    padding-top: var(--dramatis-gap-sm);
+}
+
+.dramatis-sheet-accordion {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.dramatis-sheet-acc {
+    border: 1px solid var(--dramatis-border);
+    border-radius: var(--dramatis-radius-sm);
+}
+
+.dramatis-sheet-acc-head {
+    justify-content: flex-start;
+    width: 100%;
+    min-height: var(--dramatis-tap);
+    font-weight: 600;
+}
+
+.dramatis-sheet-acc > .dramatis-sheet-panel {
+    padding: 0 8px 8px;
+}
+
+/* ------------------------------------------------------------------ units, fields, items */
+
+.dramatis-sheet-unit {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+    padding: 6px 0;
+    border-bottom: 1px solid color-mix(in srgb, var(--dramatis-border) 60%, transparent);
+}
+
+.dramatis-sheet-card {
+    padding: 8px;
+    border: 1px solid var(--dramatis-border);
+    border-radius: var(--dramatis-radius-sm);
+    background: var(--dramatis-raised);
+}
+
+.dramatis-sheet-unit-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px;
+    min-width: 0;
+}
+
+.dramatis-sheet-unit-title {
+    flex: 1 1 auto;
+    min-width: 0;
+    font-weight: 600;
+    overflow-wrap: anywhere;
+}
+
+.dramatis-sheet-unit-actions {
+    display: inline-flex;
+    gap: 2px;
+}
+
+.dramatis-sheet-unit-body {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+}
+
+.dramatis-sheet-origin {
+    padding: 0 6px;
+    border-radius: 999px;
+    font-size: 0.78em;
+    line-height: 1.6;
+    white-space: nowrap;
+    border: 1px solid var(--dramatis-border);
+    color: var(--dramatis-muted);
+}
+
+.dramatis-sheet-origin[data-origin='author'] {
+    border-color: var(--dramatis-accent);
+    color: var(--dramatis-accent);
+}
+
+.dramatis-sheet-origin[data-origin='user'] {
+    border-color: var(--dramatis-friendly);
+    color: var(--dramatis-friendly);
+}
+
+.dramatis-sheet-origin[data-origin='story'] {
+    border-style: dashed;
+}
+
+.dramatis-sheet-lock,
+.dramatis-sheet-quotes-toggle {
+    min-width: 28px;
+    padding: 2px 6px;
+    color: var(--dramatis-muted);
+}
+
+.dramatis-sheet-locked {
+    color: var(--dramatis-accent);
+}
+
+.dramatis-sheet-quotes {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 4px 8px;
+    border-left: 2px solid var(--dramatis-accent);
+    font-style: italic;
+    overflow-wrap: anywhere;
+}
+
+.dramatis-sheet-field {
+    display: grid;
+    grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.4fr);
+    align-items: center;
+    gap: 2px var(--dramatis-gap-sm);
+    min-width: 0;
+}
+
+.dramatis-sheet-label {
+    min-width: 0;
+    color: var(--dramatis-muted);
+    font-size: 0.92em;
+    overflow-wrap: anywhere;
+}
+
+.dramatis-sheet-control {
+    min-width: 0;
+}
+
+.dramatis-sheet-control > .dramatis-select,
+.dramatis-sheet-unit-body > .dramatis-select {
+    width: 100%;
+    margin: 0;
+}
+
+.dramatis-sheet-field > .dramatis-field-hint {
+    grid-column: 1 / -1;
+}
+
+/* Lists, sub-lists and groups of small fields need the full width: label on top. */
+.dramatis-sheet-field:has(> .dramatis-sheet-control > .dramatis-sheet-sublist),
+.dramatis-sheet-field:has(> .dramatis-sheet-control > .dramatis-list),
+.dramatis-sheet-field:has(> .dramatis-sheet-control > .dramatis-chips),
+.dramatis-sheet-field:has(> .dramatis-sheet-control > .dramatis-sheet-inline),
+.dramatis-sheet-field:has(> .dramatis-sheet-control > .dramatis-sheet-shares),
+.dramatis-sheet-field:has(> .dramatis-sheet-control > .dramatis-sheet-styles) {
+    grid-template-columns: minmax(0, 1fr);
+}
+
+.dramatis-sheet-check {
+    margin: 2px 0;
+}
+
+.dramatis-sheet-inline {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px var(--dramatis-gap-sm);
+    min-width: 0;
+}
+
+.dramatis-sheet-inline > .dramatis-select {
+    width: auto;
+    margin: 0;
+}
+
+.dramatis-sheet-inline > .dramatis-input:not(.dramatis-number) {
+    flex: 1 1 8em;
+    width: auto;
+}
+
+.dramatis-sheet-item,
+.dramatis-sheet-subitem {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 6px;
+    border: 1px dashed var(--dramatis-border);
+    border-radius: var(--dramatis-radius-sm);
+}
+
+.dramatis-sheet-item-title {
+    font-weight: 600;
+}
+
+.dramatis-sheet-item-remove {
+    align-self: flex-start;
+}
+
+.dramatis-sheet-sublist {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+}
+
+.dramatis-sheet-now {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding-left: 8px;
+    border-left: 2px solid var(--dramatis-accent);
+}
+
+.dramatis-sheet-reason {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 2px var(--dramatis-gap-sm);
+}
+
+.dramatis-sheet-reason-delta {
+    min-width: 2.5em;
+    font-variant-numeric: tabular-nums;
+    font-weight: 600;
+}
+
+.dramatis-sheet-reason-text {
+    flex: 1 1 10em;
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.dramatis-sheet-shares,
+.dramatis-sheet-styles {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px var(--dramatis-gap);
+}
+
+.dramatis-sheet-shares {
+    flex-direction: column;
+}
+
+.dramatis-sheet-share {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    margin: 0;
+}
+
+.dramatis-sheet-share > .dramatis-number {
+    width: 5em;
+}
+
+.dramatis-sheet-sum-error {
+    font-weight: 600;
+}
+
+.dramatis-sheet-log {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.dramatis-sheet-log-line {
+    display: flex;
+    gap: var(--dramatis-gap-sm);
+    overflow-wrap: anywhere;
+}
+
+.dramatis-sheet-log-turn {
+    flex: 0 0 auto;
+    color: var(--dramatis-muted);
+    font-size: 0.85em;
+    font-variant-numeric: tabular-nums;
+}
+
+/* ------------------------------------------------------------------ secrets */
+
+.dramatis-spoiler {
+    position: relative;
+    min-height: 2.4em;
+    border-radius: var(--dramatis-radius-sm);
+}
+
+.dramatis-spoiler:not(.dramatis-spoiler-open) > .dramatis-spoiler-content {
+    max-height: 6em;
+    overflow: hidden;
+    filter: blur(6px);
+    opacity: 0.6;
+    pointer-events: none;
+    user-select: none;
+}
+
+.dramatis-spoiler-reveal {
+    position: absolute;
+    inset: 0;
+    margin: auto;
+    width: fit-content;
+    height: fit-content;
+    background: var(--dramatis-surface);
+    border: 1px dashed var(--dramatis-accent);
+}
+
+.dramatis-sheet-row-facts .dramatis-spoiler {
+    display: inline-block;
+    min-height: 0;
+}
+
+.dramatis-sheet-row-facts .dramatis-spoiler:not(.dramatis-spoiler-open) > .dramatis-spoiler-content {
+    filter: blur(4px);
+}
+
+.dramatis-sheet-row-facts .dramatis-spoiler-reveal {
+    position: static;
+    padding: 0 6px;
+    font-size: 0.85em;
+}
+
+.dramatis-sheet-row-facts .dramatis-spoiler:not(.dramatis-spoiler-open) > .dramatis-spoiler-content {
+    display: none;
+}
+
+/* ------------------------------------------------------------------ keyboard */
+
+.dramatis-sheet .dramatis-btn:focus-visible,
+.dramatis-sheet select:focus-visible {
+    outline: 2px solid var(--dramatis-accent);
+    outline-offset: 1px;
+}
+
+/* ------------------------------------------------------------------ phones */
+
+@media (max-width: 767px) {
+    .dramatis-sheet-field {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .dramatis-sheet-row-open,
+    .dramatis-sheet-filter .dramatis-btn,
+    .dramatis-sheet-links .dramatis-btn,
+    .dramatis-sheet-lock,
+    .dramatis-sheet-quotes-toggle {
+        min-height: var(--dramatis-tap);
+    }
+
+    .dramatis-sheet-diff-values {
+        grid-template-columns: minmax(0, 1fr);
+    }
+}

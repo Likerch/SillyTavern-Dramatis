@@ -252,4 +252,125 @@
 .dramatis-confirm-body {
     white-space: pre-wrap;
 }
+/* Editor controls (src/ui/form.ts). Theme colours only through the --dramatis-* tokens of style.css. */
+
+.dramatis-input {
+    width: 100%;
+    min-width: 0;
+    margin: 0;
+    box-sizing: border-box;
+}
+
+.dramatis-textarea {
+    min-height: 2.6em;
+    resize: vertical;
+    field-sizing: content;
+}
+
+.dramatis-number {
+    max-width: 7em;
+}
+
+.dramatis-range {
+    display: flex;
+    align-items: center;
+    gap: var(--dramatis-gap-sm);
+    min-width: 0;
+}
+
+.dramatis-range-input {
+    flex: 1 1 auto;
+    min-width: 0;
+    margin: 0;
+    accent-color: var(--dramatis-accent);
+}
+
+.dramatis-range-word {
+    flex: 0 0 auto;
+    min-width: 6em;
+    max-width: 50%;
+    color: var(--dramatis-muted);
+    font-size: 0.9em;
+    text-align: right;
+    overflow-wrap: anywhere;
+}
+
+.dramatis-list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+}
+
+.dramatis-list-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 4px;
+    min-width: 0;
+}
+
+.dramatis-list-item > .dramatis-input {
+    flex: 1 1 auto;
+}
+
+.dramatis-list-new > .dramatis-input {
+    border-style: dashed;
+}
+
+.dramatis-list-remove,
+.dramatis-list-add {
+    flex: 0 0 auto;
+    min-width: 32px;
+}
+
+.dramatis-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+}
+
+.dramatis-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    margin: 0;
+    padding: 2px 8px;
+    border: 1px solid var(--dramatis-border);
+    border-radius: 999px;
+    cursor: pointer;
+    font-size: 0.9em;
+    user-select: none;
+}
+
+.dramatis-chip input {
+    margin: 0;
+}
+
+.dramatis-chip-on {
+    border-color: var(--dramatis-accent);
+    background: color-mix(in srgb, var(--dramatis-accent) 14%, transparent);
+}
+
+.dramatis-chip:has(input:disabled) {
+    opacity: 0.55;
+    cursor: default;
+}
+
+.dramatis-chip:has(input:focus-visible),
+.dramatis-range-input:focus-visible {
+    outline: 2px solid var(--dramatis-accent);
+    outline-offset: 1px;
+}
+
+@media (max-width: 767px) {
+    .dramatis-list-remove,
+    .dramatis-list-add {
+        min-width: var(--dramatis-tap);
+        min-height: var(--dramatis-tap);
+    }
+
+    .dramatis-chip {
+        padding: 6px 10px;
+    }
+}
 /*$vite$:1*/
