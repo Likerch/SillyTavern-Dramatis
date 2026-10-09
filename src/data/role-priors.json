@@ -1,0 +1,2286 @@
+{
+  "version": 1,
+  "notes": "Generator priors (docs/model.md §10.3): per role, weights the sampler draws from before any text is written. values/drives: extra weight over a base of 1 for every Schwartz value / Reiss desire. temperament: HEXACO ranges [min, max] for axes the role leans on (other axes use the default bell). proactivity: [min, max] of 0–10. styles: appetite pursuit styles by weight. moods: baseline mood octants by weight. strangerBias: −1…+1, a chance to move the stance toward strangers one step down or up from the world tone's draw. duty: the role obliges them to deal with newcomers (innkeeper serves, guard checks papers). words: role detection; a word ending in * is a prefix (Russian stems), other words match whole (English plurals -s/-es/-ies/-men included). doing/want/tell: sketch templates (story words), tell as an «if → then» signature. Adult roles only.",
+  "roles": {
+    "guard": {
+      "words": {
+        "en": [
+          "guard",
+          "guardsman",
+          "sentry",
+          "watchman",
+          "warden",
+          "gatekeeper",
+          "gaoler",
+          "jailer",
+          "bouncer",
+          "bodyguard",
+          "doorman"
+        ],
+        "ru": [
+          "стражник*",
+          "стражниц*",
+          "караульн*",
+          "привратник*",
+          "привратниц*",
+          "тюремщик*",
+          "охранник*",
+          "охранниц*",
+          "вышибал*",
+          "телохранител*",
+          "дозорн*",
+          "страж",
+          "стража",
+          "стражи",
+          "стражу",
+          "стражей",
+          "стражам",
+          "стражами"
+        ]
+      },
+      "values": {
+        "security": 4,
+        "conformity": 4,
+        "power": 1,
+        "tradition": 1
+      },
+      "temperament": {
+        "conscientiousness": [0, 2],
+        "agreeableness": [-2, 1],
+        "openness": [-2, 0]
+      },
+      "drives": {
+        "order": 3,
+        "tranquility": 2,
+        "saving": 1,
+        "status": 1
+      },
+      "tactics": ["procedure", "pressure", "bribe-taking", "bluntness"],
+      "duty": true,
+      "proactivity": [2, 5],
+      "styles": {
+        "buyer": 2,
+        "honest": 2,
+        "insider": 2,
+        "raider": 1
+      },
+      "moods": {
+        "bored": 3,
+        "disdainful": 2,
+        "relaxed": 1,
+        "hostile": 1
+      },
+      "strangerBias": -0.3,
+      "doing": {
+        "en": [
+          "watching the gate and eyeing passers-by",
+          "leaning on a spear, half-listening to the gossip",
+          "checking papers with a bored frown"
+        ],
+        "ru": [
+          "стоит у ворот и разглядывает прохожих",
+          "опирается на копьё и вполуха слушает сплетни",
+          "со скучающим видом проверяет бумаги"
+        ]
+      },
+      "want": {
+        "en": [
+          "to get through the shift without trouble",
+          "a bigger share of the tolls",
+          "the captain's notice and a better post"
+        ],
+        "ru": [
+          "достоять смену без неприятностей",
+          "урвать долю пошлины побольше",
+          "добиться внимания капитана и поста получше"
+        ]
+      },
+      "tell": {
+        "en": [
+          "if someone argues → repeats the rule louder and blocks the way",
+          "if offered coin → glances around before taking it",
+          "if a stranger lingers → asks for papers a second time"
+        ],
+        "ru": [
+          "если спорят → повторяет правило громче и загораживает дорогу",
+          "если предлагают монету → оглядывается, прежде чем взять",
+          "если чужак задерживается → второй раз требует бумаги"
+        ]
+      }
+    },
+    "soldier": {
+      "words": {
+        "en": [
+          "soldier",
+          "trooper",
+          "legionnaire",
+          "legionary",
+          "infantryman",
+          "sergeant",
+          "lieutenant",
+          "officer",
+          "archer",
+          "crossbowman",
+          "militiaman",
+          "warrior",
+          "veteran",
+          "footsoldier"
+        ],
+        "ru": [
+          "солдат*",
+          "воин*",
+          "легионер*",
+          "сержант*",
+          "лейтенант*",
+          "офицер*",
+          "лучник*",
+          "арбалетчик*",
+          "ополченц*",
+          "ополченец",
+          "пехотинц*",
+          "пехотинец",
+          "дружинник*",
+          "ратник*",
+          "ветеран*",
+          "служивы*"
+        ]
+      },
+      "values": {
+        "security": 3,
+        "conformity": 3,
+        "achievement": 2,
+        "power": 2,
+        "tradition": 1
+      },
+      "temperament": {
+        "conscientiousness": [0, 2],
+        "emotionality": [-2, 0],
+        "agreeableness": [-2, 1]
+      },
+      "drives": {
+        "honor": 3,
+        "physical": 3,
+        "order": 2,
+        "status": 1,
+        "social": 1
+      },
+      "tactics": ["bluntness", "intimidation", "following orders", "comradeship"],
+      "duty": true,
+      "proactivity": [3, 6],
+      "styles": {
+        "raider": 2,
+        "duelist": 2,
+        "honest": 1,
+        "buyer": 1
+      },
+      "moods": {
+        "bored": 2,
+        "relaxed": 2,
+        "hostile": 1,
+        "anxious": 1
+      },
+      "strangerBias": -0.2,
+      "doing": {
+        "en": [
+          "cleaning a blade by the fire",
+          "drilling with the squad under a sergeant's eye",
+          "dicing with comrades between watches"
+        ],
+        "ru": [
+          "чистит клинок у костра",
+          "отрабатывает строй под взглядом сержанта",
+          "играет в кости с сослуживцами между караулами"
+        ]
+      },
+      "want": {
+        "en": [
+          "to survive the campaign and get paid",
+          "a promotion out of the line",
+          "to settle a score with a rival in the unit"
+        ],
+        "ru": [
+          "пережить поход и получить жалованье",
+          "выбиться из рядовых",
+          "свести счёты с соперником из своего отряда"
+        ]
+      },
+      "tell": {
+        "en": [
+          "if given an order → obeys first, grumbles later",
+          "if mocked by a civilian → answers with a shove",
+          "if the fight turns → looks for the nearest officer"
+        ],
+        "ru": [
+          "если приказывают → сначала выполняет, потом ворчит",
+          "если штатский насмехается → отвечает тычком",
+          "если бой оборачивается плохо → ищет глазами ближайшего командира"
+        ]
+      }
+    },
+    "innkeeper": {
+      "words": {
+        "en": [
+          "innkeeper",
+          "tavernkeeper",
+          "barkeep",
+          "barkeeper",
+          "bartender",
+          "barmaid",
+          "publican",
+          "landlady",
+          "landlord",
+          "waitress",
+          "waiter",
+          "hostess"
+        ],
+        "ru": [
+          "трактирщик*",
+          "трактирщиц*",
+          "корчмар*",
+          "кабатчик*",
+          "кабатчиц*",
+          "бармен*",
+          "барменш*",
+          "подавальщиц*",
+          "официант*",
+          "целовальник*"
+        ]
+      },
+      "values": {
+        "security": 3,
+        "achievement": 2,
+        "benevolence": 2,
+        "hedonism": 1
+      },
+      "temperament": {
+        "extraversion": [0, 2],
+        "conscientiousness": [0, 2],
+        "honesty": [-1, 1]
+      },
+      "drives": {
+        "saving": 3,
+        "social": 3,
+        "family": 2,
+        "order": 1,
+        "eating": 1
+      },
+      "tactics": ["bargaining", "favours owed", "gossip", "flattery"],
+      "duty": true,
+      "proactivity": [4, 7],
+      "styles": {
+        "buyer": 3,
+        "insider": 2,
+        "honest": 2,
+        "shepherd": 1
+      },
+      "moods": {
+        "relaxed": 2,
+        "exuberant": 2,
+        "bored": 1,
+        "anxious": 1
+      },
+      "strangerBias": 0.2,
+      "doing": {
+        "en": [
+          "wiping the counter and keeping an eye on the till",
+          "pouring ale while listening to every table",
+          "shouting orders toward the kitchen"
+        ],
+        "ru": [
+          "протирает стойку и не спускает глаз с выручки",
+          "разливает эль и прислушивается к каждому столу",
+          "покрикивает в сторону кухни"
+        ]
+      },
+      "want": {
+        "en": [
+          "to keep the house full and the fights outside",
+          "to pay off the debt on the place",
+          "to hear every rumour before anyone else"
+        ],
+        "ru": [
+          "чтобы зал был полон, а драки — за дверью",
+          "расплатиться с долгом за заведение",
+          "узнавать все слухи раньше других"
+        ]
+      },
+      "tell": {
+        "en": [
+          "if a guest can't pay → remembers the face and the debt",
+          "if trouble starts → reaches under the counter",
+          "if asked about another guest → names a price first"
+        ],
+        "ru": [
+          "если гость не может заплатить → запоминает лицо и долг",
+          "если начинается заварушка → тянется под стойку",
+          "если расспрашивают о другом госте → сперва называет цену"
+        ]
+      }
+    },
+    "merchant": {
+      "words": {
+        "en": [
+          "merchant",
+          "trader",
+          "shopkeeper",
+          "peddler",
+          "pedlar",
+          "vendor",
+          "moneylender",
+          "banker",
+          "broker",
+          "dealer",
+          "salesman",
+          "saleswoman",
+          "stallholder",
+          "caravaneer",
+          "haggler"
+        ],
+        "ru": [
+          "купец",
+          "купца",
+          "купцу",
+          "купцом",
+          "купцы",
+          "купцов",
+          "купчих*",
+          "торговец",
+          "торговц*",
+          "торговк*",
+          "лавочник*",
+          "лавочниц*",
+          "коробейник*",
+          "ростовщик*",
+          "ростовщиц*",
+          "меняла",
+          "менялы",
+          "меняле",
+          "менялу",
+          "барыг*",
+          "продавец",
+          "продавц*",
+          "продавщиц*",
+          "приказчик*"
+        ]
+      },
+      "values": {
+        "achievement": 4,
+        "power": 2,
+        "security": 2,
+        "self-direction": 1
+      },
+      "temperament": {
+        "extraversion": [0, 2],
+        "honesty": [-2, 1],
+        "conscientiousness": [0, 2]
+      },
+      "drives": {
+        "saving": 4,
+        "status": 3,
+        "power": 1,
+        "independence": 1
+      },
+      "tactics": ["bargaining", "flattery", "lies by omission", "favours owed"],
+      "duty": true,
+      "proactivity": [5, 8],
+      "styles": {
+        "buyer": 4,
+        "spider": 1,
+        "honest": 1
+      },
+      "moods": {
+        "exuberant": 2,
+        "anxious": 2,
+        "relaxed": 1,
+        "disdainful": 1
+      },
+      "strangerBias": 0.3,
+      "doing": {
+        "en": [
+          "haggling over a crate of goods",
+          "counting coins into a strongbox",
+          "laying out wares and calling to passers-by"
+        ],
+        "ru": [
+          "торгуется из-за ящика с товаром",
+          "пересчитывает монеты в сундучке",
+          "раскладывает товар и зазывает прохожих"
+        ]
+      },
+      "want": {
+        "en": [
+          "a deal that doubles the season's profit",
+          "to undercut a rival trader",
+          "a safe road for the next caravan"
+        ],
+        "ru": [
+          "сделку, которая удвоит доход за сезон",
+          "перебить цену соперника",
+          "безопасную дорогу для следующего каравана"
+        ]
+      },
+      "tell": {
+        "en": [
+          "if someone haggles well → respects them a little more",
+          "if the goods are criticised → praises them twice as loudly",
+          "if a buyer is short of money → offers credit with a hook"
+        ],
+        "ru": [
+          "если торгуются умело → начинает уважать чуть больше",
+          "если ругают товар → хвалит его вдвое громче",
+          "если у покупателя нет денег → предлагает в долг с подвохом"
+        ]
+      }
+    },
+    "servant": {
+      "words": {
+        "en": [
+          "servant",
+          "maid",
+          "maidservant",
+          "butler",
+          "valet",
+          "footman",
+          "steward",
+          "housekeeper",
+          "cook",
+          "chambermaid",
+          "porter",
+          "stablehand",
+          "lackey",
+          "attendant",
+          "handmaiden"
+        ],
+        "ru": [
+          "слуга",
+          "слуги",
+          "слугу",
+          "слугой",
+          "слуге",
+          "слуг",
+          "служанк*",
+          "горничн*",
+          "дворецк*",
+          "лакей*",
+          "камердинер*",
+          "прислуг*",
+          "кухарк*",
+          "повар*",
+          "конюх*",
+          "экономк*",
+          "ключниц*",
+          "челядин*",
+          "челядь*"
+        ]
+      },
+      "values": {
+        "conformity": 4,
+        "security": 3,
+        "tradition": 2,
+        "benevolence": 1
+      },
+      "temperament": {
+        "extraversion": [-2, 0],
+        "agreeableness": [-1, 2],
+        "conscientiousness": [0, 2]
+      },
+      "drives": {
+        "acceptance": 3,
+        "order": 2,
+        "family": 2,
+        "tranquility": 2,
+        "saving": 1
+      },
+      "tactics": ["obedience", "eavesdropping", "feigned helplessness", "gossip"],
+      "duty": true,
+      "proactivity": [1, 4],
+      "styles": {
+        "insider": 3,
+        "honest": 2,
+        "shadow": 1
+      },
+      "moods": {
+        "docile": 3,
+        "anxious": 2,
+        "dependent": 2
+      },
+      "strangerBias": 0,
+      "doing": {
+        "en": [
+          "carrying a tray and keeping eyes down",
+          "scrubbing a floor that is already clean",
+          "waiting by the door for the next order"
+        ],
+        "ru": [
+          "несёт поднос, не поднимая глаз",
+          "оттирает и без того чистый пол",
+          "ждёт у двери следующего распоряжения"
+        ]
+      },
+      "want": {
+        "en": [
+          "to stay clear of the master's temper today",
+          "to save enough to leave service",
+          "to learn a secret worth selling"
+        ],
+        "ru": [
+          "не попасть сегодня под горячую руку хозяина",
+          "скопить достаточно, чтобы уйти со службы",
+          "узнать тайну, которую можно продать"
+        ]
+      },
+      "tell": {
+        "en": [
+          "if spoken to kindly → grows wary of what is wanted in return",
+          "if the master is near → falls silent mid-word",
+          "if overlooked → listens more closely"
+        ],
+        "ru": [
+          "если говорят ласково → настораживается: чего хотят взамен",
+          "если рядом хозяин → замолкает на полуслове",
+          "если не замечают → слушает внимательнее"
+        ]
+      }
+    },
+    "noble": {
+      "words": {
+        "en": [
+          "noble",
+          "nobleman",
+          "noblewoman",
+          "lord",
+          "lady",
+          "duke",
+          "duchess",
+          "countess",
+          "baron",
+          "baroness",
+          "prince",
+          "princess",
+          "king",
+          "queen",
+          "aristocrat",
+          "knight",
+          "earl",
+          "marquis",
+          "marquess",
+          "heir",
+          "heiress",
+          "viscount",
+          "courtier"
+        ],
+        "ru": [
+          "дворянин*",
+          "дворянк*",
+          "дворян*",
+          "аристократ*",
+          "лорд*",
+          "леди",
+          "герцог*",
+          "граф",
+          "графа",
+          "графу",
+          "графом",
+          "графе",
+          "барон*",
+          "князь",
+          "князя",
+          "князю",
+          "князем",
+          "княгин*",
+          "княжн*",
+          "король",
+          "короля",
+          "королю",
+          "королём",
+          "королем",
+          "рыцар*",
+          "наследник*",
+          "наследниц*",
+          "вельмож*",
+          "боярин*",
+          "боярын*",
+          "придворн*",
+          "принц",
+          "принца",
+          "принцу",
+          "принцем",
+          "принцы",
+          "принцесс*",
+          "графиня",
+          "графини",
+          "графиню",
+          "графиней",
+          "королева",
+          "королевы",
+          "королеве",
+          "королеву",
+          "королевой"
+        ]
+      },
+      "values": {
+        "power": 4,
+        "tradition": 3,
+        "achievement": 2,
+        "security": 1
+      },
+      "temperament": {
+        "honesty": [-2, 1],
+        "extraversion": [-1, 2],
+        "agreeableness": [-2, 1],
+        "openness": [-1, 2]
+      },
+      "drives": {
+        "status": 4,
+        "power": 4,
+        "honor": 2,
+        "family": 2
+      },
+      "tactics": ["rank and status", "patronage", "veiled threats", "flattery"],
+      "duty": false,
+      "proactivity": [4, 8],
+      "styles": {
+        "buyer": 2,
+        "shepherd": 2,
+        "spider": 2,
+        "siren": 1
+      },
+      "moods": {
+        "disdainful": 3,
+        "relaxed": 2,
+        "bored": 2
+      },
+      "strangerBias": -0.3,
+      "doing": {
+        "en": [
+          "receiving petitioners with visible impatience",
+          "studying a letter sealed with a rival's crest",
+          "sipping wine while servants hover"
+        ],
+        "ru": [
+          "принимает просителей с плохо скрытым нетерпением",
+          "изучает письмо с печатью соперника",
+          "потягивает вино, пока вокруг суетятся слуги"
+        ]
+      },
+      "want": {
+        "en": [
+          "to raise the family's standing at court",
+          "to ruin a rival house quietly",
+          "an advantageous marriage alliance"
+        ],
+        "ru": ["поднять положение рода при дворе", "тихо разорить соперничающий дом", "выгодный брачный союз"]
+      },
+      "tell": {
+        "en": [
+          "if addressed without courtesy → answers through a servant",
+          "if flattered → grants a small favour and expects a large one",
+          "if challenged in public → smiles and remembers"
+        ],
+        "ru": [
+          "если обращаются без учтивости → отвечает через слугу",
+          "если льстят → дарует мелкую милость и ждёт большой",
+          "если бросают вызов прилюдно → улыбается и запоминает"
+        ]
+      }
+    },
+    "priest": {
+      "words": {
+        "en": [
+          "priest",
+          "priestess",
+          "cleric",
+          "monk",
+          "nun",
+          "abbot",
+          "abbess",
+          "bishop",
+          "preacher",
+          "acolyte",
+          "friar",
+          "shaman",
+          "druid",
+          "oracle",
+          "templar",
+          "chaplain",
+          "deacon"
+        ],
+        "ru": [
+          "жрец",
+          "жреца",
+          "жрецу",
+          "жрецом",
+          "жрецы",
+          "жрецов",
+          "жриц*",
+          "священник*",
+          "монах*",
+          "монахин*",
+          "послушник*",
+          "послушниц*",
+          "аббат*",
+          "настоятел*",
+          "епископ*",
+          "проповедник*",
+          "шаман*",
+          "друид*",
+          "оракул*",
+          "храмовник*",
+          "батюшк*",
+          "дьякон*",
+          "диакон*"
+        ]
+      },
+      "values": {
+        "tradition": 4,
+        "conformity": 3,
+        "benevolence": 2,
+        "universalism": 1,
+        "power": 1
+      },
+      "temperament": {
+        "conscientiousness": [0, 2],
+        "honesty": [-1, 2],
+        "openness": [-2, 1]
+      },
+      "drives": {
+        "idealism": 3,
+        "honor": 2,
+        "order": 2,
+        "acceptance": 1,
+        "power": 1
+      },
+      "tactics": ["scripture and duty", "guilt", "patience", "charity with strings"],
+      "duty": true,
+      "proactivity": [3, 7],
+      "styles": {
+        "honest": 3,
+        "insider": 2,
+        "shepherd": 2
+      },
+      "moods": {
+        "relaxed": 2,
+        "docile": 2,
+        "disdainful": 1,
+        "anxious": 1
+      },
+      "strangerBias": 0.1,
+      "doing": {
+        "en": [
+          "lighting candles at the altar",
+          "hearing a whispered confession",
+          "copying a passage from a worn holy book"
+        ],
+        "ru": [
+          "зажигает свечи у алтаря",
+          "выслушивает шёпот исповеди",
+          "переписывает строки из потрёпанной священной книги"
+        ]
+      },
+      "want": {
+        "en": [
+          "to fill the temple's coffers before the festival",
+          "to bring a stray soul back to the faith",
+          "to rise within the order"
+        ],
+        "ru": ["наполнить казну храма до праздника", "вернуть заблудшую душу в веру", "подняться в иерархии ордена"]
+      },
+      "tell": {
+        "en": [
+          "if the faith is mocked → answers with a cold quotation",
+          "if someone confesses → files the secret away",
+          "if given a donation → blesses the giver loudly"
+        ],
+        "ru": [
+          "если насмехаются над верой → отвечает холодной цитатой",
+          "если исповедуются → откладывает тайну про запас",
+          "если жертвуют → громко благословляет дарителя"
+        ]
+      }
+    },
+    "thief": {
+      "words": {
+        "en": [
+          "thief",
+          "thieves",
+          "pickpocket",
+          "burglar",
+          "cutpurse",
+          "smuggler",
+          "rogue",
+          "conman",
+          "swindler",
+          "grifter",
+          "spy",
+          "cutthroat"
+        ],
+        "ru": [
+          "вор",
+          "вора",
+          "вору",
+          "вором",
+          "воры",
+          "воров",
+          "воровк*",
+          "карманник*",
+          "карманниц*",
+          "домушник*",
+          "контрабандист*",
+          "скупщик*",
+          "мошенник*",
+          "мошенниц*",
+          "аферист*",
+          "шпион*",
+          "шпионк*",
+          "плут",
+          "плута",
+          "плуту",
+          "плутом",
+          "плутовк*",
+          "жулик*"
+        ]
+      },
+      "values": {
+        "self-direction": 3,
+        "stimulation": 3,
+        "hedonism": 2,
+        "power": 1
+      },
+      "temperament": {
+        "honesty": [-2, 0],
+        "conscientiousness": [-2, 1],
+        "openness": [0, 2],
+        "emotionality": [-2, 0]
+      },
+      "drives": {
+        "independence": 4,
+        "saving": 2,
+        "curiosity": 1,
+        "physical": 1
+      },
+      "tactics": ["charm", "lies", "misdirection", "theft"],
+      "duty": false,
+      "proactivity": [5, 8],
+      "styles": {
+        "shadow": 3,
+        "spider": 2,
+        "insider": 1
+      },
+      "moods": {
+        "anxious": 2,
+        "exuberant": 2,
+        "relaxed": 1,
+        "disdainful": 1
+      },
+      "strangerBias": -0.3,
+      "doing": {
+        "en": [
+          "loitering near the crowd, watching purses",
+          "sizing up the room from a dark corner",
+          "selling a trinket in a low voice"
+        ],
+        "ru": [
+          "отирается у толпы и присматривается к кошелькам",
+          "оценивает зал из тёмного угла",
+          "вполголоса сбывает безделушку"
+        ]
+      },
+      "want": {
+        "en": ["one big score and out of the city", "to pay off a debt to the guild", "to stay clear of the watch"],
+        "ru": [
+          "одно крупное дело — и прочь из города",
+          "расплатиться с долгом перед гильдией",
+          "держаться подальше от стражи"
+        ]
+      },
+      "tell": {
+        "en": [
+          "if the watch appears → drifts toward the exit",
+          "if someone flashes coin → moves closer with a friendly word",
+          "if caught → lies first, runs second"
+        ],
+        "ru": [
+          "если появляется стража → незаметно смещается к выходу",
+          "если кто-то светит монетой → подходит ближе с дружелюбным словом",
+          "если ловят → сперва врёт, потом бежит"
+        ]
+      }
+    },
+    "mercenary": {
+      "words": {
+        "en": ["mercenary", "sellsword", "hireling", "freelancer", "condottiero"],
+        "ru": ["наёмник*", "наемник*", "наёмниц*", "наемниц*", "ландскнехт*", "кондотьер*", "головорез*"]
+      },
+      "values": {
+        "achievement": 3,
+        "power": 2,
+        "stimulation": 2,
+        "self-direction": 2,
+        "hedonism": 1
+      },
+      "temperament": {
+        "honesty": [-2, 1],
+        "emotionality": [-2, 0],
+        "agreeableness": [-2, 1]
+      },
+      "drives": {
+        "saving": 3,
+        "independence": 3,
+        "physical": 2,
+        "vengeance": 1
+      },
+      "tactics": ["bargaining", "intimidation", "bluntness", "switching sides"],
+      "duty": false,
+      "proactivity": [4, 7],
+      "styles": {
+        "buyer": 2,
+        "raider": 2,
+        "duelist": 2
+      },
+      "moods": {
+        "bored": 2,
+        "relaxed": 2,
+        "disdainful": 2,
+        "hostile": 1
+      },
+      "strangerBias": 0,
+      "doing": {
+        "en": [
+          "sharpening a sword and listening for work",
+          "arguing over the terms of a contract",
+          "drinking alone with the back to the wall"
+        ],
+        "ru": [
+          "точит меч и прислушивается, нет ли работы",
+          "спорит об условиях найма",
+          "пьёт в одиночку, сидя спиной к стене"
+        ]
+      },
+      "want": {
+        "en": [
+          "a well-paid contract with little risk",
+          "enough gold to settle somewhere warm",
+          "payback on an employer who cheated them"
+        ],
+        "ru": [
+          "хорошо оплачиваемый наём без лишнего риска",
+          "столько золота, чтобы осесть где-нибудь в тепле",
+          "расплаты с нанимателем, который обманул"
+        ]
+      },
+      "tell": {
+        "en": [
+          "if offered work → asks the price before the job",
+          "if a fight starts → sides with whoever pays",
+          "if threatened → measures the distance to the threat"
+        ],
+        "ru": [
+          "если предлагают работу → спрашивает цену раньше, чем суть",
+          "если начинается драка → встаёт на сторону того, кто платит",
+          "если угрожают → прикидывает расстояние до угрозы"
+        ]
+      }
+    },
+    "peasant": {
+      "words": {
+        "en": [
+          "peasant",
+          "farmer",
+          "farmhand",
+          "villager",
+          "serf",
+          "shepherd",
+          "herdsman",
+          "milkmaid",
+          "woodcutter",
+          "miller",
+          "carter",
+          "laborer",
+          "labourer",
+          "ploughman",
+          "plowman",
+          "drover",
+          "swineherd"
+        ],
+        "ru": [
+          "крестьян*",
+          "фермер*",
+          "селянин*",
+          "селянк*",
+          "селян*",
+          "сельчан*",
+          "батрак*",
+          "батрачк*",
+          "пастух*",
+          "пастушк*",
+          "мельник*",
+          "мельничих*",
+          "дровосек*",
+          "возчик*",
+          "извозчик*",
+          "возниц*",
+          "пахар*",
+          "доярк*",
+          "свинопас*",
+          "погонщик*"
+        ]
+      },
+      "values": {
+        "security": 4,
+        "tradition": 3,
+        "conformity": 2,
+        "benevolence": 2
+      },
+      "temperament": {
+        "openness": [-2, 0],
+        "conscientiousness": [0, 2],
+        "extraversion": [-1, 1]
+      },
+      "drives": {
+        "family": 4,
+        "tranquility": 3,
+        "saving": 2,
+        "eating": 1
+      },
+      "tactics": ["stonewalling", "feigned ignorance", "complaint", "bargaining"],
+      "duty": false,
+      "proactivity": [1, 4],
+      "styles": {
+        "honest": 3,
+        "buyer": 1,
+        "insider": 1
+      },
+      "moods": {
+        "anxious": 2,
+        "docile": 2,
+        "bored": 2,
+        "relaxed": 1
+      },
+      "strangerBias": -0.2,
+      "doing": {
+        "en": ["hauling sacks to a cart", "mending a fence by the road", "haggling over the price of eggs"],
+        "ru": ["таскает мешки к телеге", "чинит изгородь у дороги", "торгуется из-за цены на яйца"]
+      },
+      "want": {
+        "en": [
+          "a good harvest and no soldiers at the door",
+          "to get the tax collector off the family's back",
+          "a scrap of land of their own"
+        ],
+        "ru": [
+          "хороший урожай, и чтобы солдаты не стучали в дверь",
+          "избавить семью от сборщика податей",
+          "клочок собственной земли"
+        ]
+      },
+      "tell": {
+        "en": [
+          "if a stranger asks questions → answers vaguely and watches the hands",
+          "if the lord is mentioned → spits or bows, depending on who listens",
+          "if offered work → asks who else is hiring"
+        ],
+        "ru": [
+          "если чужак задаёт вопросы → отвечает уклончиво и следит за руками",
+          "если поминают господина → сплёвывает или кланяется, смотря кто слушает",
+          "если предлагают работу → спрашивает, кто ещё нанимает"
+        ]
+      }
+    },
+    "scholar": {
+      "words": {
+        "en": [
+          "scholar",
+          "scribe",
+          "librarian",
+          "sage",
+          "student",
+          "teacher",
+          "tutor",
+          "professor",
+          "archivist",
+          "alchemist",
+          "astronomer",
+          "philosopher",
+          "chronicler",
+          "historian",
+          "researcher"
+        ],
+        "ru": [
+          "учёный",
+          "ученый",
+          "учёного",
+          "ученого",
+          "учёному",
+          "ученому",
+          "учёные",
+          "ученые",
+          "писар*",
+          "писц*",
+          "писец",
+          "книжник*",
+          "библиотекар*",
+          "мудрец*",
+          "студент*",
+          "учител*",
+          "наставник*",
+          "наставниц*",
+          "профессор*",
+          "архивариус*",
+          "алхимик*",
+          "звездочёт*",
+          "звездочет*",
+          "философ*",
+          "летописц*",
+          "летописец",
+          "историк*"
+        ]
+      },
+      "values": {
+        "self-direction": 4,
+        "universalism": 2,
+        "achievement": 2
+      },
+      "temperament": {
+        "openness": [1, 2],
+        "extraversion": [-2, 0],
+        "conscientiousness": [0, 2]
+      },
+      "drives": {
+        "curiosity": 5,
+        "independence": 2,
+        "status": 1,
+        "order": 1
+      },
+      "tactics": ["argument", "pedantry", "trading knowledge", "patience"],
+      "duty": false,
+      "proactivity": [3, 6],
+      "styles": {
+        "spider": 2,
+        "honest": 2,
+        "buyer": 1
+      },
+      "moods": {
+        "anxious": 2,
+        "relaxed": 2,
+        "disdainful": 1,
+        "bored": 1
+      },
+      "strangerBias": 0.1,
+      "doing": {
+        "en": [
+          "squinting at a crumbling manuscript",
+          "arguing with a colleague over a footnote",
+          "scribbling notes by candlelight"
+        ],
+        "ru": ["щурится над крошащейся рукописью", "спорит с коллегой из-за сноски", "строчит заметки при свече"]
+      },
+      "want": {
+        "en": [
+          "access to a forbidden archive",
+          "recognition for a discovery someone else claimed",
+          "a patron to fund the research"
+        ],
+        "ru": [
+          "доступ к запретному архиву",
+          "признания за открытие, которое присвоил другой",
+          "покровителя, который оплатит исследования"
+        ]
+      },
+      "tell": {
+        "en": [
+          "if corrected → asks for the source",
+          "if shown something rare → forgets everyone in the room",
+          "if mocked as bookish → answers with a cutting fact"
+        ],
+        "ru": [
+          "если поправляют → требует источник",
+          "если показывают редкость → забывает обо всех вокруг",
+          "если дразнят книжной крысой → отвечает колким фактом"
+        ]
+      }
+    },
+    "healer": {
+      "words": {
+        "en": ["healer", "doctor", "physician", "surgeon", "nurse", "herbalist", "midwife", "apothecary", "medic"],
+        "ru": [
+          "лекарк*",
+          "целител*",
+          "врач*",
+          "доктор*",
+          "хирург*",
+          "медсестр*",
+          "сиделк*",
+          "травник*",
+          "травниц*",
+          "знахар*",
+          "повитух*",
+          "аптекар*",
+          "лекарь",
+          "лекаря",
+          "лекарю",
+          "лекарем",
+          "лекари",
+          "лекарей",
+          "медик",
+          "медика",
+          "медику",
+          "медиком",
+          "медики"
+        ]
+      },
+      "values": {
+        "benevolence": 4,
+        "universalism": 3,
+        "security": 1
+      },
+      "temperament": {
+        "agreeableness": [0, 2],
+        "emotionality": [0, 2],
+        "conscientiousness": [0, 2],
+        "honesty": [0, 2]
+      },
+      "drives": {
+        "idealism": 3,
+        "family": 2,
+        "curiosity": 2,
+        "honor": 1
+      },
+      "tactics": ["persuasion", "patience", "favours owed", "guilt"],
+      "duty": true,
+      "proactivity": [3, 6],
+      "styles": {
+        "honest": 3,
+        "insider": 2,
+        "shadow": 1
+      },
+      "moods": {
+        "relaxed": 2,
+        "anxious": 2,
+        "docile": 1
+      },
+      "strangerBias": 0.3,
+      "doing": {
+        "en": ["grinding herbs in a mortar", "binding a wound with practised hands", "sorting vials by smell"],
+        "ru": ["растирает травы в ступке", "умело перевязывает рану", "сортирует склянки по запаху"]
+      },
+      "want": {
+        "en": [
+          "enough supplies for the coming season of sickness",
+          "payment from patients who never pay",
+          "a cure for the disease that took someone close"
+        ],
+        "ru": [
+          "запасов на грядущий сезон хворей",
+          "платы от пациентов, которые никогда не платят",
+          "лекарство от болезни, что отняла близкого человека"
+        ]
+      },
+      "tell": {
+        "en": [
+          "if someone is hurt → acts first, asks questions later",
+          "if treatment is refused → shrugs and moves on",
+          "if paid in gossip → listens closely"
+        ],
+        "ru": [
+          "если кто-то ранен → сначала действует, потом спрашивает",
+          "если отказываются от лечения → пожимает плечами и идёт дальше",
+          "если платят сплетнями → слушает внимательно"
+        ]
+      }
+    },
+    "raider": {
+      "words": {
+        "en": [
+          "raider",
+          "bandit",
+          "brigand",
+          "marauder",
+          "pirate",
+          "reaver",
+          "highwayman",
+          "outlaw",
+          "slaver",
+          "looter",
+          "corsair",
+          "plunderer",
+          "warband"
+        ],
+        "ru": [
+          "налётчик*",
+          "налетчик*",
+          "налётчиц*",
+          "налетчиц*",
+          "разбойник*",
+          "разбойниц*",
+          "бандит*",
+          "мародёр*",
+          "мародер*",
+          "пират*",
+          "грабител*",
+          "работорговц*",
+          "работорговец",
+          "душегуб*",
+          "лиходе*",
+          "ватажник*"
+        ]
+      },
+      "values": {
+        "power": 4,
+        "stimulation": 3,
+        "hedonism": 3,
+        "self-direction": 1
+      },
+      "temperament": {
+        "honesty": [-2, 0],
+        "agreeableness": [-2, 0],
+        "emotionality": [-2, 0],
+        "conscientiousness": [-2, 0]
+      },
+      "drives": {
+        "power": 3,
+        "physical": 3,
+        "eating": 2,
+        "vengeance": 2,
+        "status": 1
+      },
+      "tactics": ["intimidation", "ambush", "threats", "brute force"],
+      "duty": false,
+      "proactivity": [6, 9],
+      "styles": {
+        "raider": 5,
+        "shadow": 1,
+        "duelist": 1
+      },
+      "moods": {
+        "hostile": 3,
+        "exuberant": 2,
+        "disdainful": 2
+      },
+      "strangerBias": -0.8,
+      "doing": {
+        "en": [
+          "counting the night's loot",
+          "watching the road from cover",
+          "sharpening an axe and joking about the last raid"
+        ],
+        "ru": ["пересчитывает ночную добычу", "следит за дорогой из укрытия", "точит топор и шутит о прошлом набеге"]
+      },
+      "want": {
+        "en": [
+          "a rich caravan with a weak escort",
+          "a bigger share than the chief allows",
+          "a name feared along the road"
+        ],
+        "ru": [
+          "богатый караван со слабой охраной",
+          "долю больше, чем позволяет вожак",
+          "имя, которого боятся на дороге"
+        ]
+      },
+      "tell": {
+        "en": [
+          "if someone looks weak → closes in with a grin",
+          "if outnumbered → melts back into cover",
+          "if the chief speaks → obeys and resents it"
+        ],
+        "ru": [
+          "если кто-то выглядит слабым → подходит ближе с ухмылкой",
+          "если врагов больше → растворяется в укрытии",
+          "если говорит вожак → подчиняется и злится"
+        ]
+      }
+    },
+    "cultist": {
+      "words": {
+        "en": ["cultist", "zealot", "fanatic", "heretic", "devotee", "sectarian", "worshipper", "worshiper"],
+        "ru": ["культист*", "сектант*", "фанатик*", "фанатичк*", "еретик*", "еретичк*", "адепт*"]
+      },
+      "values": {
+        "tradition": 3,
+        "conformity": 3,
+        "power": 2,
+        "security": 1
+      },
+      "temperament": {
+        "honesty": [-2, 0],
+        "openness": [-2, 0],
+        "conscientiousness": [0, 2]
+      },
+      "drives": {
+        "idealism": 4,
+        "acceptance": 3,
+        "power": 2,
+        "order": 1
+      },
+      "tactics": ["charm", "recruitment", "secrecy", "guilt"],
+      "duty": false,
+      "proactivity": [5, 9],
+      "styles": {
+        "spider": 3,
+        "shepherd": 3,
+        "insider": 2
+      },
+      "moods": {
+        "exuberant": 2,
+        "docile": 2,
+        "anxious": 1,
+        "hostile": 1
+      },
+      "strangerBias": -0.5,
+      "doing": {
+        "en": [
+          "murmuring a prayer under the breath",
+          "watching newcomers with a fixed smile",
+          "passing a token to another believer"
+        ],
+        "ru": [
+          "бормочет молитву себе под нос",
+          "наблюдает за новичками с застывшей улыбкой",
+          "тайком передаёт знак другому верующему"
+        ]
+      },
+      "want": {
+        "en": [
+          "a worthy offering before the dark of the moon",
+          "to recruit someone useful to the cause",
+          "to rise to the inner circle"
+        ],
+        "ru": [
+          "достойное подношение до новолуния",
+          "завербовать кого-то полезного для дела",
+          "войти во внутренний круг"
+        ]
+      },
+      "tell": {
+        "en": [
+          "if the cult is questioned → changes the subject with warmth",
+          "if someone seems lost → offers belonging",
+          "if an outsider learns too much → reports it at once"
+        ],
+        "ru": [
+          "если расспрашивают о культе → тепло переводит разговор",
+          "если кто-то кажется потерянным → предлагает место среди своих",
+          "если чужак узнаёт слишком много → сразу докладывает"
+        ]
+      }
+    },
+    "craftsman": {
+      "words": {
+        "en": [
+          "smith",
+          "blacksmith",
+          "carpenter",
+          "tailor",
+          "seamstress",
+          "weaver",
+          "potter",
+          "mason",
+          "stonemason",
+          "cobbler",
+          "tanner",
+          "jeweler",
+          "jeweller",
+          "baker",
+          "brewer",
+          "craftsman",
+          "craftswoman",
+          "artisan",
+          "glassblower",
+          "fletcher",
+          "cooper",
+          "apprentice"
+        ],
+        "ru": [
+          "кузнец*",
+          "плотник*",
+          "портн*",
+          "швея",
+          "швеи",
+          "швею",
+          "швеёй",
+          "ткач*",
+          "гончар*",
+          "каменщик*",
+          "сапожник*",
+          "кожевник*",
+          "ювелир*",
+          "пекар*",
+          "пивовар*",
+          "ремесленник*",
+          "ремесленниц*",
+          "мастеровой",
+          "мастерового",
+          "столяр*",
+          "бондар*",
+          "подмастерь*"
+        ]
+      },
+      "values": {
+        "achievement": 3,
+        "security": 2,
+        "self-direction": 2,
+        "tradition": 1
+      },
+      "temperament": {
+        "conscientiousness": [1, 2],
+        "openness": [-1, 1],
+        "extraversion": [-1, 1]
+      },
+      "drives": {
+        "order": 3,
+        "status": 2,
+        "saving": 2,
+        "independence": 1
+      },
+      "tactics": ["bargaining", "bluntness", "stubbornness", "favours owed"],
+      "duty": false,
+      "proactivity": [3, 6],
+      "styles": {
+        "honest": 3,
+        "buyer": 2
+      },
+      "moods": {
+        "relaxed": 2,
+        "bored": 2,
+        "disdainful": 1
+      },
+      "strangerBias": 0,
+      "doing": {
+        "en": ["hammering at the forge", "measuring a length of cloth", "shaping clay at the wheel"],
+        "ru": ["стучит молотом у горна", "отмеряет отрез ткани", "лепит на гончарном круге"]
+      },
+      "want": {
+        "en": ["an order big enough to take on an apprentice", "to outdo a rival workshop", "a seat in the guild"],
+        "ru": ["заказ, ради которого можно взять подмастерье", "превзойти соседнюю мастерскую", "место в гильдии"]
+      },
+      "tell": {
+        "en": [
+          "if the work is praised → names a higher price",
+          "if rushed → slows down on purpose",
+          "if shown shoddy work → criticises it unasked"
+        ],
+        "ru": [
+          "если хвалят работу → поднимает цену",
+          "если торопят → нарочно замедляется",
+          "если видит халтуру → ругает её без спроса"
+        ]
+      }
+    },
+    "sailor": {
+      "words": {
+        "en": [
+          "sailor",
+          "seaman",
+          "mariner",
+          "boatswain",
+          "bosun",
+          "deckhand",
+          "fisherman",
+          "fisherwoman",
+          "ferryman",
+          "navigator",
+          "helmsman",
+          "boatman",
+          "shipwright"
+        ],
+        "ru": [
+          "моряк*",
+          "матрос*",
+          "боцман*",
+          "рыбак*",
+          "рыбачк*",
+          "паромщик*",
+          "лоцман*",
+          "рулев*",
+          "мореход*",
+          "лодочник*",
+          "корабел*"
+        ]
+      },
+      "values": {
+        "stimulation": 3,
+        "hedonism": 3,
+        "self-direction": 2,
+        "benevolence": 1
+      },
+      "temperament": {
+        "extraversion": [0, 2],
+        "conscientiousness": [-2, 1],
+        "emotionality": [-2, 0]
+      },
+      "drives": {
+        "social": 3,
+        "independence": 3,
+        "physical": 2,
+        "romance": 1,
+        "eating": 1
+      },
+      "tactics": ["bluntness", "bravado", "bargaining", "fists"],
+      "duty": false,
+      "proactivity": [3, 6],
+      "styles": {
+        "buyer": 2,
+        "raider": 1,
+        "siren": 1,
+        "honest": 1
+      },
+      "moods": {
+        "exuberant": 3,
+        "relaxed": 2,
+        "bored": 1
+      },
+      "strangerBias": 0,
+      "doing": {
+        "en": ["coiling rope on the dock", "telling a loud tale over a mug", "mending a net"],
+        "ru": ["сворачивает канат на пристани", "громко травит байку над кружкой", "чинит сеть"]
+      },
+      "want": {
+        "en": [
+          "a berth on a ship heading far from here",
+          "to spend the pay before the next voyage",
+          "to settle a quarrel with the bosun"
+        ],
+        "ru": [
+          "место на корабле, что уходит подальше отсюда",
+          "прогулять жалованье до следующего рейса",
+          "уладить ссору с боцманом"
+        ]
+      },
+      "tell": {
+        "en": [
+          "if land folk boast → laughs at them",
+          "if the weather turns → falls silent and watches the sky",
+          "if bought a drink → shares a rumour"
+        ],
+        "ru": [
+          "если сухопутные хвастаются → смеётся над ними",
+          "если меняется погода → замолкает и смотрит на небо",
+          "если угощают выпивкой → делится слухом"
+        ]
+      }
+    },
+    "hunter": {
+      "words": {
+        "en": [
+          "hunter",
+          "huntress",
+          "trapper",
+          "ranger",
+          "tracker",
+          "scout",
+          "poacher",
+          "forester",
+          "woodsman",
+          "falconer"
+        ],
+        "ru": [
+          "охотник*",
+          "охотниц*",
+          "звероло*",
+          "следопыт*",
+          "разведчик*",
+          "разведчиц*",
+          "браконьер*",
+          "лесничи*",
+          "егер*",
+          "сокольник*"
+        ]
+      },
+      "values": {
+        "self-direction": 4,
+        "security": 2,
+        "stimulation": 1,
+        "tradition": 1
+      },
+      "temperament": {
+        "extraversion": [-2, 0],
+        "emotionality": [-2, 0],
+        "openness": [-1, 1]
+      },
+      "drives": {
+        "independence": 4,
+        "physical": 3,
+        "tranquility": 2
+      },
+      "tactics": ["silence", "patience", "bargaining", "traps"],
+      "duty": false,
+      "proactivity": [4, 7],
+      "styles": {
+        "spider": 2,
+        "shadow": 2,
+        "duelist": 1
+      },
+      "moods": {
+        "relaxed": 2,
+        "disdainful": 2,
+        "bored": 1
+      },
+      "strangerBias": -0.1,
+      "doing": {
+        "en": ["skinning the day's catch", "checking snares at the edge of the forest", "reading tracks in the mud"],
+        "ru": ["свежует дневную добычу", "проверяет силки на опушке", "читает следы в грязи"]
+      },
+      "want": {
+        "en": [
+          "a trophy beast no one else could take",
+          "to keep poachers out of the woods",
+          "a buyer for a winter's worth of pelts"
+        ],
+        "ru": [
+          "трофейного зверя, которого никто другой не взял бы",
+          "не пускать браконьеров в лес",
+          "покупателя на шкуры за целую зиму"
+        ]
+      },
+      "tell": {
+        "en": [
+          "if someone is noisy → winces and moves away",
+          "if asked the way → names a price or a favour",
+          "if threatened → goes still and waits"
+        ],
+        "ru": [
+          "если кто-то шумит → морщится и отходит",
+          "если спрашивают дорогу → называет цену или услугу",
+          "если угрожают → замирает и выжидает"
+        ]
+      }
+    },
+    "entertainer": {
+      "words": {
+        "en": [
+          "bard",
+          "minstrel",
+          "musician",
+          "singer",
+          "dancer",
+          "actor",
+          "actress",
+          "performer",
+          "juggler",
+          "jester",
+          "storyteller",
+          "courtesan",
+          "entertainer",
+          "troubadour",
+          "acrobat",
+          "lutist",
+          "fiddler"
+        ],
+        "ru": [
+          "менестрел*",
+          "музыкант*",
+          "певец",
+          "певца",
+          "певцу",
+          "певцом",
+          "певцы",
+          "певиц*",
+          "танцор*",
+          "танцовщиц*",
+          "актёр*",
+          "актер*",
+          "актрис*",
+          "артист*",
+          "жонглёр*",
+          "жонглер*",
+          "шут",
+          "шута",
+          "шуту",
+          "шутом",
+          "шуты",
+          "сказител*",
+          "куртизанк*",
+          "акробат*",
+          "скоморох*",
+          "гусляр*",
+          "бард",
+          "барда",
+          "барду",
+          "бардом",
+          "барды"
+        ]
+      },
+      "values": {
+        "stimulation": 3,
+        "hedonism": 3,
+        "achievement": 3,
+        "self-direction": 2
+      },
+      "temperament": {
+        "extraversion": [1, 2],
+        "openness": [1, 2],
+        "emotionality": [0, 2],
+        "conscientiousness": [-2, 0]
+      },
+      "drives": {
+        "acceptance": 4,
+        "romance": 3,
+        "social": 3,
+        "status": 2
+      },
+      "tactics": ["charm", "flattery", "mockery", "gossip"],
+      "duty": false,
+      "proactivity": [5, 8],
+      "styles": {
+        "siren": 4,
+        "buyer": 1,
+        "shepherd": 1
+      },
+      "moods": {
+        "exuberant": 3,
+        "anxious": 1,
+        "dependent": 1
+      },
+      "strangerBias": 0.3,
+      "doing": {
+        "en": [
+          "tuning a lute and scanning the crowd",
+          "murmuring the lines of a new song",
+          "collecting coins in a hat"
+        ],
+        "ru": [
+          "настраивает лютню и оглядывает публику",
+          "бормочет под нос строки новой песни",
+          "собирает монеты в шляпу"
+        ]
+      },
+      "want": {
+        "en": ["a patron with deep pockets", "fame beyond this town", "a song nobody will forget"],
+        "ru": ["покровителя с толстым кошельком", "славы за пределами этого городка", "песню, которую не забудут"]
+      },
+      "tell": {
+        "en": [
+          "if the crowd is cold → turns to mockery",
+          "if flattered → performs one more piece",
+          "if a rich guest enters → finds a reason to sit nearby"
+        ],
+        "ru": [
+          "если публика холодна → переходит на насмешки",
+          "если льстят → играет ещё одну вещь",
+          "если входит богатый гость → находит повод сесть рядом"
+        ]
+      }
+    },
+    "official": {
+      "words": {
+        "en": [
+          "official",
+          "clerk",
+          "magistrate",
+          "bailiff",
+          "mayor",
+          "reeve",
+          "envoy",
+          "ambassador",
+          "inspector",
+          "notary",
+          "constable",
+          "sheriff",
+          "guildmaster",
+          "alderman",
+          "taxman",
+          "chancellor"
+        ],
+        "ru": [
+          "чиновник*",
+          "чиновниц*",
+          "клерк*",
+          "сборщик*",
+          "мытар*",
+          "судья",
+          "судьи",
+          "судью",
+          "судьёй",
+          "судьей",
+          "бургомистр*",
+          "староста",
+          "старосты",
+          "старосту",
+          "старостой",
+          "посол",
+          "посла",
+          "послу",
+          "послом",
+          "посланник*",
+          "посланниц*",
+          "инспектор*",
+          "нотариус*",
+          "шериф*",
+          "канцлер*",
+          "управител*",
+          "управляющ*",
+          "наместник*",
+          "тиун*",
+          "пристав",
+          "пристава",
+          "приставу",
+          "приставом",
+          "приставы"
+        ]
+      },
+      "values": {
+        "conformity": 4,
+        "power": 3,
+        "security": 2,
+        "achievement": 1
+      },
+      "temperament": {
+        "conscientiousness": [1, 2],
+        "openness": [-2, 0],
+        "agreeableness": [-2, 1],
+        "honesty": [-2, 1]
+      },
+      "drives": {
+        "order": 4,
+        "status": 3,
+        "power": 2,
+        "saving": 1
+      },
+      "tactics": ["procedure", "delay", "bribe-taking", "veiled threats"],
+      "duty": true,
+      "proactivity": [3, 6],
+      "styles": {
+        "insider": 3,
+        "buyer": 2,
+        "spider": 1
+      },
+      "moods": {
+        "bored": 3,
+        "disdainful": 3,
+        "anxious": 1
+      },
+      "strangerBias": -0.2,
+      "doing": {
+        "en": [
+          "stamping documents with a steady rhythm",
+          "going over a ledger of debts",
+          "lecturing a petitioner on the regulations"
+        ],
+        "ru": ["размеренно штампует бумаги", "просматривает книгу долгов", "читает просителю нотацию о правилах"]
+      },
+      "want": {
+        "en": ["a clean report for the superiors", "a bribe that nobody can trace", "a posting in the capital"],
+        "ru": ["чистый отчёт для начальства", "взятку, которую никто не отследит", "перевод в столицу"]
+      },
+      "tell": {
+        "en": [
+          "if a rule is broken → writes it down",
+          "if offered a gift → names a fee instead",
+          "if pressed for speed → finds a missing form"
+        ],
+        "ru": [
+          "если нарушают правило → записывает",
+          "если предлагают подарок → называет взамен «сбор»",
+          "если торопят → находит недостающую бумагу"
+        ]
+      }
+    },
+    "mage": {
+      "words": {
+        "en": [
+          "mage",
+          "wizard",
+          "witch",
+          "sorcerer",
+          "sorceress",
+          "warlock",
+          "magician",
+          "enchanter",
+          "enchantress",
+          "necromancer",
+          "conjurer",
+          "mystic",
+          "seer",
+          "magus",
+          "occultist"
+        ],
+        "ru": [
+          "маг",
+          "мага",
+          "магу",
+          "магом",
+          "маги",
+          "магов",
+          "волшебник*",
+          "волшебниц*",
+          "ведьм*",
+          "колдун*",
+          "колдунья",
+          "чародей*",
+          "чародейк*",
+          "некромант*",
+          "заклинател*",
+          "провидиц*",
+          "провидец",
+          "провидца",
+          "ведун*",
+          "оккультист*",
+          "чернокнижник*",
+          "колдунь*"
+        ]
+      },
+      "values": {
+        "self-direction": 3,
+        "power": 3,
+        "achievement": 2,
+        "universalism": 1
+      },
+      "temperament": {
+        "openness": [1, 2],
+        "extraversion": [-2, 0],
+        "agreeableness": [-2, 1],
+        "honesty": [-2, 1]
+      },
+      "drives": {
+        "curiosity": 4,
+        "power": 4,
+        "independence": 2
+      },
+      "tactics": ["secrecy", "intimidation", "trading knowledge", "manipulation"],
+      "duty": false,
+      "proactivity": [4, 8],
+      "styles": {
+        "spider": 3,
+        "siren": 1,
+        "shepherd": 1
+      },
+      "moods": {
+        "disdainful": 3,
+        "anxious": 1,
+        "relaxed": 1
+      },
+      "strangerBias": -0.1,
+      "doing": {
+        "en": [
+          "tracing symbols on a slate",
+          "muttering over a smoking bowl",
+          "studying a stranger as if taking measurements"
+        ],
+        "ru": [
+          "чертит символы на грифельной доске",
+          "бормочет над дымящейся чашей",
+          "изучает чужака, будто снимает мерку"
+        ]
+      },
+      "want": {
+        "en": ["a forbidden text", "power enough to answer to no one", "a rare reagent for the next working"],
+        "ru": [
+          "запретный трактат",
+          "достаточно силы, чтобы ни перед кем не отчитываться",
+          "редкий реагент для следующего обряда"
+        ]
+      },
+      "tell": {
+        "en": [
+          "if magic is mocked → demonstrates it, unpleasantly",
+          "if a secret is offered → trades one back",
+          "if interrupted → goes cold and silent"
+        ],
+        "ru": [
+          "если насмехаются над магией → показывает её, неприятно",
+          "если предлагают тайну → отвечает тайной",
+          "если перебивают → холодеет и замолкает"
+        ]
+      }
+    },
+    "beggar": {
+      "words": {
+        "en": ["beggar", "vagrant", "tramp", "drifter", "vagabond", "panhandler"],
+        "ru": [
+          "нищий",
+          "нищего",
+          "нищему",
+          "нищим",
+          "нищие",
+          "нищих",
+          "нищенк*",
+          "попрошайк*",
+          "бродяг*",
+          "бездомн*",
+          "оборванец",
+          "оборванц*",
+          "побирушк*"
+        ]
+      },
+      "values": {
+        "security": 4,
+        "hedonism": 2,
+        "benevolence": 1,
+        "conformity": 1
+      },
+      "temperament": {
+        "extraversion": [-1, 1],
+        "conscientiousness": [-2, 0],
+        "emotionality": [0, 2]
+      },
+      "drives": {
+        "eating": 3,
+        "tranquility": 2,
+        "acceptance": 2,
+        "saving": 1
+      },
+      "tactics": ["pleading", "flattery", "eavesdropping", "petty theft"],
+      "duty": false,
+      "proactivity": [2, 5],
+      "styles": {
+        "shadow": 2,
+        "insider": 2,
+        "buyer": 1
+      },
+      "moods": {
+        "dependent": 3,
+        "anxious": 2,
+        "docile": 2,
+        "hostile": 1
+      },
+      "strangerBias": 0.1,
+      "doing": {
+        "en": ["holding out a cracked bowl", "dozing in a doorway with one eye open", "watching who comes and goes"],
+        "ru": ["протягивает треснувшую миску", "дремлет в дверном проёме вполглаза", "следит, кто приходит и уходит"]
+      },
+      "want": {
+        "en": ["a warm place for the night", "enough coin for a hot meal", "to sell what was overheard"],
+        "ru": ["тёплое место на ночь", "монет на горячую похлёбку", "продать подслушанное"]
+      },
+      "tell": {
+        "en": [
+          "if given a coin → blesses loudly and remembers the face",
+          "if ignored → mutters a curse",
+          "if the watch passes → shrinks into the shadows"
+        ],
+        "ru": [
+          "если подают монету → громко благословляет и запоминает лицо",
+          "если не замечают → бормочет проклятие",
+          "если проходит стража → вжимается в тень"
+        ]
+      }
+    },
+    "unknown": {
+      "words": {
+        "en": [],
+        "ru": []
+      },
+      "values": {},
+      "temperament": {},
+      "drives": {},
+      "tactics": ["bargaining", "bluntness", "flattery", "evasion", "pressure"],
+      "duty": false,
+      "proactivity": [2, 7],
+      "styles": {
+        "honest": 2,
+        "buyer": 2,
+        "siren": 1,
+        "insider": 1,
+        "spider": 1,
+        "raider": 1,
+        "shadow": 1
+      },
+      "moods": {
+        "relaxed": 2,
+        "bored": 2,
+        "anxious": 1,
+        "disdainful": 1,
+        "exuberant": 1
+      },
+      "strangerBias": 0,
+      "doing": {
+        "en": [
+          "going about their own business",
+          "talking quietly with an acquaintance",
+          "waiting for someone who is late"
+        ],
+        "ru": ["занимается своими делами", "негромко беседует со знакомым", "ждёт кого-то, кто опаздывает"]
+      },
+      "want": {
+        "en": ["to finish today's business without trouble", "money owed by someone nearby", "news from home"],
+        "ru": ["закончить сегодняшние дела без хлопот", "получить долг с кого-то из присутствующих", "весточку из дома"]
+      },
+      "tell": {
+        "en": [
+          "if approached → answers briefly and returns to their business",
+          "if trouble starts → steps back and watches",
+          "if offered help → asks what it will cost"
+        ],
+        "ru": [
+          "если заговаривают → коротко отвечает и возвращается к делам",
+          "если начинается заварушка → отступает и наблюдает",
+          "если предлагают помощь → спрашивает, чего это будет стоить"
+        ]
+      }
+    }
+  },
+  "tones": {
+    "hostile": {
+      "0": 0.27,
+      "1": 0.05,
+      "-3": 0.04,
+      "-2": 0.26,
+      "-1": 0.38
+    },
+    "indifferent": {
+      "0": 0.5,
+      "1": 0.12,
+      "2": 0.03,
+      "-2": 0.08,
+      "-1": 0.27
+    },
+    "neutral": {
+      "0": 0.55,
+      "1": 0.2,
+      "2": 0.05,
+      "-2": 0.04,
+      "-1": 0.16
+    },
+    "welcoming": {
+      "0": 0.35,
+      "1": 0.4,
+      "2": 0.17,
+      "3": 0.03,
+      "-1": 0.05
+    }
+  },
+  "stanceTells": {
+    "0": {
+      "en": "treats the stranger as one more face in the crowd",
+      "ru": "видит в чужаке ещё одно лицо в толпе"
+    },
+    "1": {
+      "en": "helps the stranger if it costs next to nothing",
+      "ru": "поможет чужаку, если это почти ничего не стоит"
+    },
+    "2": {
+      "en": "greets the stranger warmly and helps unless it brings trouble",
+      "ru": "приветливо встречает чужака и поможет, если это не грозит бедой"
+    },
+    "3": {
+      "en": "takes the stranger's side even at a cost",
+      "ru": "встанет на сторону чужака даже себе в ущерб"
+    },
+    "-3": {
+      "en": "watches the stranger's every move, waiting for a chance to strike",
+      "ru": "следит за каждым движением чужака и ждёт случая ударить"
+    },
+    "-2": {
+      "en": "looks for a safe way to make the stranger pay",
+      "ru": "ищет безопасный способ насолить чужаку"
+    },
+    "-1": {
+      "en": "answers the stranger curtly and makes small trouble when it costs nothing",
+      "ru": "отвечает чужаку сквозь зубы и мелко пакостит, когда это ничего не стоит"
+    }
+  },
+  "stanceReasons": {
+    "negative": {
+      "en": "a stranger, and strangers mean trouble",
+      "ru": "чужак, а от чужаков одни беды"
+    },
+    "neutral": {
+      "en": "a stranger",
+      "ru": "чужак"
+    },
+    "positive": {
+      "en": "a newcomer who seems harmless",
+      "ru": "новичок, с виду безобидный"
+    }
+  }
+}

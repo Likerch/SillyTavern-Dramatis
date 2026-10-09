@@ -579,6 +579,22 @@ export interface CharacterState {
     selfControl: number;
     /** Places this character knows the player from / heard about him (desirability spreads with knowledge). */
     knowsPlayer: boolean;
+    /** What the generator counts for promotion (§10.2); absent until first counted. */
+    stats?: CharacterStats;
+}
+
+/** Promotion counters of one character in one chat (docs/model.md §10.2 «Повышение уровня»). */
+export interface CharacterStats {
+    /** Distinct scenes they were present in at a committed turn. */
+    scenes: number;
+    /** Scene counter of the last scene counted. */
+    lastScene: number;
+    /** Committed turns in which the player addressed them by name. */
+    interactions: number;
+    /** Present at the last counted turn (a return after an absence is a new scene). */
+    present?: boolean;
+    /** The user pinned them: promoted to a portrait. */
+    pinned?: boolean;
 }
 
 export interface Rumour {
@@ -644,6 +660,14 @@ export interface ChatState {
     next?: NextTurn;
     /** Per-chat lever overrides (docs/model.md §14: «любой рычаг можно переопределить для чата»). */
     overrides?: Record<string, unknown>;
+    /** Generator bookkeeping (stage 3); absent until the generator writes it. */
+    generator?: GeneratorState;
+}
+
+/** What the generator keeps per chat. */
+export interface GeneratorState {
+    /** Names whose generated face the user undid: never sketched again in this chat. */
+    dismissed: string[];
 }
 
 /** One appetite as it matters this turn (mirrors render.ts AppetiteNow). */

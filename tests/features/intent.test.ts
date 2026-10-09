@@ -127,7 +127,11 @@ async function setup(
         ...options,
         maestro: maestro ?? undefined,
         before: (mock) => {
-            mock.extensionSettings.dramatis = { slices: { intent: { autoRead: options.autoRead ?? false } } };
+            mock.extensionSettings.dramatis = {
+                slices: { intent: { autoRead: options.autoRead ?? false } },
+                // Only the stage-1 modules: the generator and the passes make their own requests and records.
+                modules: { generator: false, turn: false, world: false },
+            };
             notices = captureNotices();
             options.before?.(mock);
         },
