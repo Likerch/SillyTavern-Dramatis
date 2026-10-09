@@ -7,6 +7,7 @@ import { generatorModule } from '../features/generator';
 import { intentModule } from '../features/intent';
 import { sheetModule } from '../features/sheet';
 import { turnModule } from '../features/turn';
+import { world as worldModule } from '../features/world';
 
 export const MODULES: DramatisModule[] = [
     engineModule,
@@ -15,4 +16,5 @@ export const MODULES: DramatisModule[] = [
     sheetModule,
     turnModule,
     generatorModule,
+    worldModule,
 ];

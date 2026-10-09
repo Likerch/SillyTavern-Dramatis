@@ -315,6 +315,32 @@ export interface Intention {
     clock?: Clock;
 }
 
+/**
+ * What a front's doom does to the story besides the log line (§11 «Полные часы — событие»): a stance change of one
+ * character (default: the front's owner) toward someone, or a step of the player's reputation among a group or place.
+ */
+export type FrontConsequence =
+    | {
+          kind: 'stance';
+          /** Whose tie changes (character or group id); absent = the front's owner. */
+          who?: string;
+          /** Toward whom: a character id, a group id or PLAYER_ID. */
+          target: string;
+          /** ±1 a real step (a doom is a key event: it steps at once). */
+          delta: number;
+          /** Story words for the reason; absent = the doom itself. */
+          text?: string;
+      }
+    | {
+          kind: 'reputation';
+          /** A group or a place. */
+          among: string;
+          delta: number;
+          /** What people there now call the player. */
+          label?: string;
+          text?: string;
+      };
+
 /** A front (Apocalypse World): an agenda that moves the world by itself (§11). */
 export interface Front {
     impulse: string;
@@ -323,6 +349,10 @@ export interface Front {
     /** What happens if nobody intervenes. */
     doom: string;
     clock: Clock;
+    /** Consequences applied when the doom comes (stage 4). */
+    consequences?: FrontConsequence[];
+    /** The doom came (chat state): the front no longer acts. */
+    done?: boolean;
 }
 
 export interface Agenda {
@@ -581,6 +611,8 @@ export interface CharacterState {
     knowsPlayer: boolean;
     /** What the generator counts for promotion (§10.2); absent until first counted. */
     stats?: CharacterStats;
+    /** The last off-screen actions of world ticks (§11), oldest first; absent = none yet. */
+    offscreen?: OffscreenAttempt[];
 }
 
 /** Promotion counters of one character in one chat (docs/model.md §10.2 «Повышение уровня»). */
@@ -595,6 +627,39 @@ export interface CharacterStats {
     present?: boolean;
     /** The user pinned them: promoted to a portrait. */
     pinned?: boolean;
+}
+
+/** One off-screen action of a world tick (§11): what the character or faction tried and how the roll went. */
+export interface OffscreenAttempt {
+    /** Committed turn of the tick. */
+    turn: number;
+    /** What it served: the intention or the front's impulse (story words). */
+    goal: string;
+    /** What they tried: the next step or the front's current step (story words). */
+    attempt: string;
+    outcome: 'success' | 'partial' | 'failure';
+    /** Partial: the price (English); failure: the setback, if any. */
+    complication?: string;
+    /** Clock segments gained (negative = lost ground). */
+    advanced: number;
+    /** The clock after the attempt. */
+    clock?: Clock;
+    /** What the clock belongs to. */
+    source: 'front' | 'intention';
+    /** Success odds the roll was made against (0–1). */
+    chance: number;
+}
+
+/** Living-world bookkeeping of a chat (§11): when the last world tick ran and where the scene was then. */
+export interface WorldClockState {
+    /** Committed turn of the last world tick (0 = none yet: counted from the chat start). */
+    lastTick: number;
+    /** DES place / time / date at the last tick: time skips are measured from it. */
+    place?: string;
+    time?: string;
+    date?: string;
+    /** World ticks run in this chat. */
+    ticks: number;
 }
 
 export interface Rumour {
@@ -662,6 +727,8 @@ export interface ChatState {
     overrides?: Record<string, unknown>;
     /** Generator bookkeeping (stage 3); absent until the generator writes it. */
     generator?: GeneratorState;
+    /** Living world (stage 4): the last world tick; absent until the world module first sees a committed turn. */
+    world?: WorldClockState;
 }
 
 /** What the generator keeps per chat. */

@@ -12,6 +12,7 @@ import type {
     CharacterProfile,
     Core,
     FieldMeta,
+    FrontConsequence,
     Goal,
     HexacoAxis,
     Intention,
@@ -525,6 +526,29 @@ export function normalizeTie(raw: unknown): Tie | null {
     } as Tie);
 }
 
+/** Front consequences (stage 4): stance or reputation changes applied at the doom; garbage dropped. */
+export function normalizeConsequences(raw: unknown): FrontConsequence[] | undefined {
+    if (!Array.isArray(raw)) return undefined;
+    const out: FrontConsequence[] = [];
+    for (const item of raw) {
+        if (!isDict(item)) continue;
+        const delta = intIn(item.delta, -3, 3, 0);
+        if (delta === 0) continue;
+        const text = optionalText(item.text, LIMITS.short);
+        if (item.kind === 'stance') {
+            const target = cleanText(item.target, LIMITS.name);
+            if (!target) continue;
+            out.push(compact({ kind: 'stance', who: optionalText(item.who, LIMITS.name), target, delta, text }));
+        } else if (item.kind === 'reputation') {
+            const among = cleanText(item.among, LIMITS.name);
+            if (!among) continue;
+            out.push(compact({ kind: 'reputation', among, delta, label: optionalText(item.label, LIMITS.name), text }));
+        }
+        if (out.length >= LIMITS.steps) break;
+    }
+    return out.length ? out : undefined;
+}
+
 function normalizeClock(raw: unknown, fallbackSegments: number): { segments: number; filled: number } {
     const dict = isDict(raw) ? raw : {};
     const segments = intIn(dict.segments, 2, 12, fallbackSegments);
@@ -576,12 +600,14 @@ export function normalizeAgenda(raw: unknown): Agenda {
         intentions,
         front:
             front && impulse
-                ? {
+                ? compact({
                       impulse,
                       steps: cleanList(front.steps, LIMITS.steps),
                       doom: cleanText(front.doom, LIMITS.short),
                       clock: normalizeClock(front.clock, 6),
-                  }
+                      consequences: normalizeConsequences(front.consequences),
+                      done: front.done === true ? true : undefined,
+                  })
                 : undefined,
         resources: cleanList(raw.resources, LIMITS.agendaList),
         leverage: cleanList(raw.leverage, LIMITS.agendaList),

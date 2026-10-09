@@ -329,7 +329,10 @@ export interface SettingsSection {
 }
 
 export interface Ui {
-    notice(text: string, options?: { level?: 'info' | 'warn' | 'error'; action?: { label: string; run: () => void } }): void;
+    notice(
+        text: string,
+        options?: { level?: 'info' | 'warn' | 'error'; action?: { label: string; run: () => void } },
+    ): void;
     confirm(title: string, body: string | HTMLElement): Promise<boolean>;
     addWindow(spec: WindowSpec): Unsubscribe;
     openWindow(id: string, params?: Record<string, unknown>): void;
