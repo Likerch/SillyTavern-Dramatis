@@ -31,6 +31,7 @@ Language models are sycophantic: characters warm up for no reason, villains refo
 - **Reading the author's intent.** Reads the whole card — description, greetings, creator's notes, lorebook, tags, CarrotKernel archives — into an "intent sheet": core, values, wound, goals, ties, appetites, group rules, the starting reputation. Every field carries a quote as evidence.
 - **The intent sheet.** A window with the cast and a full editor: fix, lock 🔒 or remove any field; secrets stay under a spoiler. Open it from the extensions menu (the magic wand button by the input field) — **«Intent sheet (Dramatis)»**, with `/dramatis` or with the **«Open the intent sheet»** button in the Dramatis settings.
 - **The motive card.** A short block near the end of the prompt: who is present, what they are doing, what they want and from whom, how they treat you and why, who is busy with their own.
+- **Descriptions in Russian.** Dramatis keeps descriptions in English for the model and shows them to you in Russian in the sheet and the DES tab when the story is Russian: each line is translated once and remembered; editor fields keep the stored text with the translation under them.
 
 **With Maestro — everything live:**
 
@@ -72,6 +73,7 @@ The **Dramatis** block of the extensions panel:
 - **Levers:** world tone toward the player, player gravity, stance inertia, fidelity to the author, diversity of new faces, drift response (correct / stress / redo), secrets visibility, appetite strength, hunters per scene, corruption.
 - **Author's intent:** read the intent automatically, read it now, open the intent sheet.
 - **Per-chat levers:** any lever, the mode and the card's parameters can be set for one chat only — the intent sheet window → «This chat's levers».
+- **Descriptions in windows:** the language of descriptions in the sheet and the DES tab (auto — the story's language from Maestro, else the interface language; Russian; English as stored) and a «Translate now» button.
 - **Living world:** how often the world ticks, whether to announce its events.
 
 ## Commands
@@ -89,6 +91,7 @@ The **Dramatis** block of the extensions panel:
 Everything is stored in SillyTavern's user files (`data/<user>/user/files/`):
 
 - `dramatis-card-<hash>.json` — the card's characters: what was read from the intent, filled by the generator or edited by you;
+- `dramatis-card-<hash>-ru.json` — Russian translations of the card's descriptions for the windows (up to 2000 lines);
 - `dramatis-chat-<hash>-state.json` — the chat state: stances with reasons, moods, appetite pressure, agendas, reputation, the story log, measurements.
 
 Files carry a schema version and are protected against overwriting another tab's save. Cleaning the extension removes its settings only; the files stay.
@@ -96,7 +99,7 @@ Files carry a schema version and are protected against overwriting another tab's
 ## Privacy
 
 - Dramatis sends nothing anywhere except to your own model: requests go through Maestro's profiles or SillyTavern's Connection Manager — wherever you pointed them.
-- The background model sees the last exchange and short sheets of the characters present; reading the intent sees the card's fields, its lorebook and archives.
+- The background model sees the last exchange and short sheets of the characters present; reading the intent sees the card's fields, its lorebook and archives; translating descriptions sees the English lines themselves and the characters' names.
 - No telemetry, no analytics, no external servers. The data stays on your SillyTavern server.
 - With Maestro, its treasurer counts the cost of background requests, and its daily cap applies.
 
