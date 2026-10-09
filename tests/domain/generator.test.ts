@@ -405,6 +405,55 @@ describe('applyGenerated', () => {
         expect(canGenerate(authored, 'core.concept')).toBe(true);
     });
 
+    it('a fill reads the stance toward the player from the card, never from the stranger dice', () => {
+        const authored = profile('neia', 'Нейя', { lod: 'portrait', ties: [] });
+        expect(missingFields(authored)).toContain(`ties.${PLAYER_ID}`);
+        const dice = params({ stance: -1 });
+        const read = applyGenerated(
+            authored,
+            candidate({ playerStance: 2, stanceReason: 'she raises him', stanceBehaviour: 'wakes him gently' }),
+            { lod: 'portrait', origin: 'generated', params: dice, kind: 'fill' },
+        ).profile;
+        const tieRead = read.ties.find((item) => item.target === PLAYER_ID)!;
+        expect(tieRead.stance).toBe(2);
+        expect(tieRead.reasons[0]).toMatchObject({ id: 'gen-context', text: 'she raises him' });
+        expect(tieRead.behaviour).toBe('wakes him gently');
+        // The card says nothing about them and the player: no tie rather than a drawn stranger stance.
+        const silent = applyGenerated(authored, candidate({ playerStance: null }), {
+            lod: 'portrait',
+            origin: 'generated',
+            params: dice,
+            kind: 'fill',
+        }).profile;
+        expect(silent.ties.some((item) => item.target === PLAYER_ID)).toBe(false);
+    });
+
+    it('treats a dice-made stranger tie on a card character as a gap and replaces it', () => {
+        let drawn = profile('neia', 'Нейя', {
+            lod: 'portrait',
+            ties: [
+                tie(PLAYER_ID, -1, {
+                    reasons: [{ id: 'gen-stranger', text: 'a stranger', delta: -1, scenesLeft: null, stacks: 1 }],
+                }),
+            ],
+        });
+        drawn = setMeta(drawn, `ties.${PLAYER_ID}`, { origin: 'generated' });
+        expect(needsFill(drawn)).toBe(true);
+        expect(missingFields(drawn)).toContain(`ties.${PLAYER_ID}`);
+        const after = applyGenerated(drawn, candidate({ playerStance: 2, stanceReason: 'her ward' }), {
+            lod: 'portrait',
+            origin: 'generated',
+            params: params({ stance: -1 }),
+            kind: 'fill',
+        }).profile;
+        const fixed = after.ties.find((item) => item.target === PLAYER_ID)!;
+        expect(fixed.stance).toBe(2);
+        expect(fixed.reasons.map((reason) => reason.id)).toEqual(['gen-context']);
+        // An author's tie is not a gap.
+        const authoredTie = setMeta(drawn, `ties.${PLAYER_ID}`, { origin: 'author' });
+        expect(missingFields(authoredTie)).not.toContain(`ties.${PLAYER_ID}`);
+    });
+
     it('fills only the gaps of an authored character', () => {
         let authored = profile('ilva', 'Ильва', {
             lod: 'draft',

@@ -164,12 +164,14 @@ describe('generatorSchema', () => {
         expect(portraitFields).toEqual(
             expect.arrayContaining(['wound', 'redLinesNever', 'secrets', 'appetites', 'intentions']),
         );
+        // A fill also reads the stance toward the player from the card; portraits have it from the dice.
+        expect(portraitFields).not.toContain('playerStance');
         expect(
             Object.keys(
                 (((generatorSchema('fill').schema.properties as Dict).candidates as Dict).items as Dict)
                     .properties as Dict,
             ),
-        ).toEqual(portraitFields);
+        ).toEqual(expect.arrayContaining([...portraitFields, 'playerStance']));
         expect(GENERATE_TASK).toBe('dramatis.generate');
     });
 });

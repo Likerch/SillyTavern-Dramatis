@@ -475,6 +475,22 @@ function strangerReason(stance: Stance, text: string): Reason {
     return { id: 'gen-stranger', text, delta: stance, scenesLeft: null, stacks: 1 };
 }
 
+/** The reason of a stance the model read from the card (gap fill), not drawn by the dice. */
+function contextReason(stance: Stance, text: string): Reason {
+    return { id: 'gen-context', text, delta: stance, scenesLeft: null, stacks: 1 };
+}
+
+/**
+ * A player tie the dice made for a stranger (reasons only `gen-stranger`, generated): on a card character it is a gap —
+ * the card knows how they relate to the player, so a fill asks the model instead (older builds drew it).
+ */
+export function isDiceStrangerTie(profile: CharacterProfile): boolean {
+    const tie = profile.ties.find((item) => item.target === PLAYER_ID);
+    if (!tie || !tie.reasons.length || !tie.reasons.every((reason) => reason.id === 'gen-stranger')) return false;
+    const meta = metaAt(profile, `ties.${PLAYER_ID}`);
+    return !meta || (meta.origin === 'generated' && !meta.locked);
+}
+
 /**
  * A sketch (§10.2): what they do, one want, their stance toward the player (a stranger) and one tell — from the
  * role's templates, no model — plus the drawn core, so contrast and later levels write around the same dice.
@@ -735,17 +751,30 @@ export function applyGenerated(
     const tiePath = `ties.${PLAYER_ID}`;
     const behaviour = cleanText(candidate.stanceBehaviour, LIMITS.short);
     const reasonText = cleanText(candidate.stanceReason, LIMITS.short);
-    if ((params || behaviour) && canGenerate(profile, tiePath)) {
-        const existing = profile.ties.find((tie) => tie.target === PLAYER_ID);
-        // A drawn stance already on the tie stays: the candidate only words it.
-        const stance = existing?.stance ?? params?.stance;
+    const fill = options.kind === 'fill';
+    const redraw = fill && isDiceStrangerTie(profile) && !isProtected(profile, tiePath);
+    if ((params || behaviour || redraw) && (canGenerate(profile, tiePath) || redraw)) {
+        // A fill reads the stance from the card (the model's playerStance), replacing a dice-made stranger tie;
+        // drafts and portraits keep the drawn stance, the candidate only words it.
+        const replace = fill && (!profile.ties.some((tie) => tie.target === PLAYER_ID) || isDiceStrangerTie(profile));
+        const existing = replace ? undefined : profile.ties.find((tie) => tie.target === PLAYER_ID);
+        const read = typeof candidate.playerStance === 'number' ? clampStance(candidate.playerStance) : undefined;
+        const stance = fill ? (existing?.stance ?? read) : (existing?.stance ?? params?.stance);
         if (stance !== undefined) {
-            const kept = (existing?.reasons ?? []).filter((reason) => reason.id !== 'gen-stranger');
-            const text = reasonText || existing?.reasons.find((reason) => reason.id === 'gen-stranger')?.text;
+            const kept = (existing?.reasons ?? []).filter(
+                (reason) => reason.id !== 'gen-stranger' && reason.id !== 'gen-context',
+            );
+            const text =
+                reasonText ||
+                existing?.reasons.find((reason) => reason.id === 'gen-stranger' || reason.id === 'gen-context')?.text;
+            const why = text || stanceReason(stance, lang);
             const tie: Tie = {
-                ...(existing ?? emptyTie(PLAYER_ID, stance)),
+                ...(existing ?? profile.ties.find((item) => item.target === PLAYER_ID) ?? emptyTie(PLAYER_ID, stance)),
                 stance,
-                reasons: [strangerReason(stance, text || stanceReason(stance, lang)), ...kept].slice(0, LIMITS.reasons),
+                reasons: [
+                    fill && existing === undefined ? contextReason(stance, why) : strangerReason(stance, why),
+                    ...kept,
+                ].slice(0, LIMITS.reasons),
             };
             const words = behaviour || existing?.behaviour || stanceTell(stance, lang);
             if (words) tie.behaviour = words;
@@ -868,14 +897,23 @@ export const CORE_GAPS: readonly string[] = [
 
 /** Gap paths the generator may still fill. */
 export function missingFields(profile: CharacterProfile): string[] {
-    return GAP_PATHS.filter((path) => canGenerate(profile, path) && isEmptyValue(getPath(profile, path)));
+    const missing: string[] = GAP_PATHS.filter(
+        (path) => canGenerate(profile, path) && isEmptyValue(getPath(profile, path)),
+    );
+    // How a card character relates to the player: a gap when the author gave nothing, or the dice drew a stranger.
+    const tiePath = `ties.${PLAYER_ID}`;
+    const noTie = !profile.ties.some((tie) => tie.target === PLAYER_ID);
+    if ((noTie && canGenerate(profile, tiePath)) || (isDiceStrangerTie(profile) && !isProtected(profile, tiePath))) {
+        missing.push(tiePath);
+    }
+    return missing;
 }
 
 /** A character whose core has holes the generator may fill (groups are left to the author). */
 export function needsFill(profile: CharacterProfile): boolean {
     if (profile.kind === 'group') return false;
     const missing = missingFields(profile);
-    return CORE_GAPS.some((path) => missing.includes(path));
+    return CORE_GAPS.some((path) => missing.includes(path)) || isDiceStrangerTie(profile);
 }
 
 /* ------------------------------------------------------------------ promotion */

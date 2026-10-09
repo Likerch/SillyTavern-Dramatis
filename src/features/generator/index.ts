@@ -533,7 +533,15 @@ function startGenerator({ app, settings, log, own }: ModuleContext<GeneratorSett
             if (!toward && !from) relations.push(`${other.name} is present`);
         }
         const card = app.readers.card.current();
-        const story = card ? [`Card: ${card.name}`, card.scenario.trim().slice(0, 600)].filter(Boolean).join('\n') : '';
+        // The opening scene shows how the card's people relate to the player (a fill reads the stance from it).
+        const opening = String(app.host.ctx().chat?.[0]?.mes ?? '')
+            .trim()
+            .slice(0, 1500);
+        const story = card
+            ? [`Card: ${card.name}`, card.scenario.trim().slice(0, 600), opening ? `Opening scene: ${opening}` : '']
+                  .filter(Boolean)
+                  .join('\n')
+            : '';
         return {
             worldTone: view.state.worldTone,
             playerName: view.playerName,

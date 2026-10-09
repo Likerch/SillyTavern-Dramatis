@@ -53,6 +53,8 @@ export interface GenCandidate {
     /** How their stance toward strangers / the player shows in action. */
     stanceBehaviour: string;
     stanceReason: string;
+    /** Fill only: the stance toward the player as the card shows it (−3…+3); null when the card says nothing. */
+    playerStance?: number | null;
     secrets: string[];
     leverage: string[];
     resources: string[];
@@ -91,6 +93,7 @@ export function emptyCandidate(): GenCandidate {
         sceneGoal: '',
         stanceBehaviour: '',
         stanceReason: '',
+        playerStance: null,
         secrets: [],
         leverage: [],
         resources: [],
@@ -175,6 +178,7 @@ const ALL_FIELDS = [
     'resources',
     'ifIgnored',
     'appetites',
+    'playerStance',
     'summary',
     'fit',
     'typicality',
@@ -192,6 +196,7 @@ const PATH_FIELDS: Record<string, FieldName[]> = {
     'core.wound': ['wound'],
     'core.redLines': ['redLinesNever', 'redLinesWould'],
     'core.voice': ['voice'],
+    'ties.@player': ['playerStance', 'stanceReason', 'stanceBehaviour'],
     'agenda.dream': ['dream'],
     'agenda.goals': ['goals'],
     'agenda.intentions': ['intentions'],
@@ -338,7 +343,7 @@ function kindNote(kind: GeneratorKind, subject: GenSubject): string {
         return `Write ${CANDIDATES} candidates at the level of a PORTRAIT — a lasting, important character: every field. wound: ghost (what happened), lie (the false belief it left), triggers, coping (surrender, avoid, or overcompensate = attacks). goals: one external and one internal. intentions: at most 2 goals in work, each with the next step and what would make them drop it. redLinesNever / redLinesWould: what they never do / would do without hesitation. secrets (and from whom), leverage (what can be used against them), resources, ifIgnored (what they do if nobody interferes). appetites: only cravings the role, the species or what was said suggests (drink, food, thrill, luxury, plunder…), [] otherwise. <character> holds what is already known: keep it, add to it.`;
     }
     const fields = fillFields(subject.missing ?? []);
-    return `The author already wrote this character: <character> lists the authored fields; they are fixed and outrank everything. Write ${CANDIDATES} candidates that fill ONLY these empty fields: ${fields.join(', ') || 'summary'}; leave every other field empty ("" or []) and still give summary, fit and typicality. Everything must agree with the authored fields.`;
+    return `The author already wrote this character: <character> lists the authored fields; they are fixed and outrank everything. Write ${CANDIDATES} candidates that fill ONLY these empty fields: ${fields.join(', ') || 'summary'}; leave every other field empty ("" or []) and still give summary, fit and typicality. Everything must agree with the authored fields. playerStance: when the stance toward the player's character is among the empty fields, give it as <story> shows it — the opening scene and the scenario decide (a ward, a lover, a servant, a rival, a jailer…), never as toward a stranger; −3 war … 0 neutral … +3 ally; null only when the story says nothing about them and the player; stanceReason is the story fact behind it and stanceBehaviour how it shows.`;
 }
 
 /** System and user messages of one generator request. */
@@ -424,6 +429,7 @@ const FIELD_SCHEMA: Record<FieldName, Dict> = {
     sceneGoal: str(),
     stanceBehaviour: str(),
     stanceReason: str(),
+    playerStance: { type: ['integer', 'null'], enum: [-3, -2, -1, 0, 1, 2, 3, null] },
     secrets: strings(),
     leverage: strings(),
     resources: strings(),
@@ -446,7 +452,13 @@ const FIELD_SCHEMA: Record<FieldName, Dict> = {
 
 /** Strict schema of the answer: {"candidates": [...]}, each candidate with the fields of the kind. */
 export function generatorSchema(kind: GeneratorKind): { name: string; strict: true; schema: Dict } {
-    const fields: readonly FieldName[] = kind === 'draft' ? DRAFT_FIELDS : ALL_FIELDS;
+    // playerStance is the fill's: drafts and portraits have the stance from the dice.
+    const fields: readonly FieldName[] =
+        kind === 'draft'
+            ? DRAFT_FIELDS
+            : kind === 'fill'
+              ? ALL_FIELDS
+              : ALL_FIELDS.filter((field) => field !== 'playerStance');
     const properties: Record<string, Dict> = {};
     for (const field of fields) properties[field] = FIELD_SCHEMA[field];
     return {
@@ -495,6 +507,12 @@ function readCandidate(raw: Dict): GenCandidate {
         sceneGoal: cleanText(raw.sceneGoal, LIMITS.short),
         stanceBehaviour: cleanText(raw.stanceBehaviour, LIMITS.short),
         stanceReason: cleanText(raw.stanceReason, LIMITS.short),
+        playerStance:
+            typeof raw.playerStance === 'number' &&
+            Number.isInteger(raw.playerStance) &&
+            Math.abs(raw.playerStance) <= 3
+                ? raw.playerStance
+                : null,
         secrets: cleanList(raw.secrets, LIMITS.agendaList, LIMITS.text),
         leverage: cleanList(raw.leverage, LIMITS.agendaList),
         resources: cleanList(raw.resources, LIMITS.agendaList),
