@@ -39,7 +39,7 @@ export interface EngineApi {
     updateProfiles(mutate: (profiles: CardProfiles, view: EngineView | null) => CardProfiles | void): Promise<boolean>;
     /** Recomputes presence and bands now (after a committed turn, a reply, a chat load). */
     refresh(): Promise<void>;
-    /** Story name → profile id (presence matching, plus Maestro's names when present). */
+    /** Story name → profile id (presence matching, then Maestro's names when present, then DES's own aliases). */
     resolve(name: string): string | null;
     /** Appends story log lines inside the next save (kept to the last 300). */
     log(events: StateEvent[]): void;

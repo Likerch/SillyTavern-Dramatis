@@ -174,6 +174,8 @@ export interface Harness {
     slice: SheetSettings;
     settings: DramatisSettings;
     notices: { text: string; level?: string }[];
+    /** What the module exposed (`api`: its DRAMATIS_API part). */
+    exposed: Map<string, unknown>;
     open(params?: Record<string, unknown>): HTMLElement;
     body(): HTMLElement;
     setSetting<K extends keyof DramatisSettings>(key: K, value: DramatisSettings[K]): void;
@@ -222,6 +224,7 @@ export function harness(options: HarnessOptions = {}): Harness {
     const engine = options.engine === undefined ? tavernEngine() : options.engine;
     const intent = options.intent === undefined ? fakeIntent() : options.intent;
     const notices: { text: string; level?: string }[] = [];
+    const exposed = new Map<string, unknown>();
     const app = {
         version: 'test',
         host,
@@ -240,7 +243,7 @@ export function harness(options: HarnessOptions = {}): Harness {
             disable: async () => undefined,
             api: <T>(key: string) =>
                 (key === 'engine' ? engine : key === 'intent' ? intent : undefined) as T | undefined,
-            expose: () => undefined,
+            expose: (key: string, api: unknown) => void exposed.set(key, api),
         },
         rng: () => 0.5,
     } as unknown as App;
@@ -256,6 +259,7 @@ export function harness(options: HarnessOptions = {}): Harness {
         slice,
         settings: root,
         notices,
+        exposed,
         open(params) {
             ui.openWindow('cast', params);
             return this.body();

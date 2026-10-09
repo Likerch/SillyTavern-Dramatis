@@ -1,28 +1,12 @@
-// What the sheet treats as secret (docs/model.md §0.1 В3, §14 «Видимость тайного»): agenda secrets, appetites the
-// character hides or keeps secret, the doom of a front, schemes, hidden intentions and covert intents toward the
-// player. The lever decides how they show: `open` as is, `spoiler` blurred until clicked, `known` not at all (the
-// player's character knowing them is not modelled yet, so «only what he knows» hides every secret).
-import { PLAYER_ID } from '../../domain/model';
-import type { Appetite, Intention, Tie, TieIntent } from '../../domain/model';
+// What the sheet treats as secret (docs/model.md §0.1 В3, §14 «Видимость тайного»; the predicates live in
+// domain/secrets.ts): agenda secrets, appetites the character hides or keeps secret, the doom of a front, schemes,
+// hidden intentions and covert intents toward the player. The lever decides how they show: `open` as is, `spoiler`
+// blurred until clicked, `known` not at all (the player's character knowing them is not modelled yet, so «only what
+// he knows» hides every secret).
 import { button, el } from '../../ui/dom';
 import type { SheetCtx } from './types';
 
-/** Intents toward the player a character would not show him. */
-export const COVERT_INTENTS: readonly TieIntent[] = ['extract', 'use', 'avenge', 'seduce'];
-
-export function isHiddenAppetite(appetite: Pick<Appetite, 'visibility'>): boolean {
-    return appetite.visibility !== 'open';
-}
-
-/** An intention marked hidden or secret (an extra flag the generator or the user may set). */
-export function isHiddenIntention(intention: Intention): boolean {
-    const flags = intention as Intention & { hidden?: unknown; secret?: unknown };
-    return flags.hidden === true || flags.secret === true;
-}
-
-export function isCovertTie(tie: Pick<Tie, 'target' | 'intent'>): boolean {
-    return tie.target === PLAYER_ID && COVERT_INTENTS.includes(tie.intent);
-}
+export { COVERT_INTENTS, isCovertTie, isHiddenAppetite, isHiddenIntention } from '../../domain/secrets';
 
 /**
  * Wraps secret content by the lever: open → the content; known → null (render nothing); spoiler → a blurred, inert

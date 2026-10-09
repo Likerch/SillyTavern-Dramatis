@@ -136,4 +136,23 @@ describe('DesReader', () => {
         mock.extensionSettings.disabledExtensions = ['third-party/Dooms-Enhancement-Suite'];
         expect(reader.available()).toBe(false);
     });
+
+    it('reads DES’s own aliases from its settings (its folder or the old tracker key), cleaned', () => {
+        const reader = createDesReader(mockHost(), memoryLogger());
+        expect(reader.aliases()).toEqual({});
+        mock.extensionSettings['third-party/Dooms-Enhancement-Suite'] = {
+            characterAliases: {
+                ' Ilva Holm ': [' Ильва ', 'хозяйка', '', 7, 'Ильва'],
+                Bram: 'not a list',
+                '': ['nobody'],
+            },
+        };
+        mock.extensionSettings['third-party/dooms-character-tracker'] = {
+            characterAliases: { 'Ilva Holm': ['Хольм'], Sota: ['Сотка'] },
+        };
+        mock.extensionSettings['third-party/other-extension'] = { characterAliases: { Fenn: ['Фенн'] } };
+        expect(reader.aliases()).toEqual({ 'Ilva Holm': ['Ильва', 'хозяйка', 'Хольм'], Sota: ['Сотка'] });
+        mock.extensionSettings.disabledExtensions = ['third-party/Dooms-Enhancement-Suite'];
+        expect(reader.aliases()).toEqual({});
+    });
 });

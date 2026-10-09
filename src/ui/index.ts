@@ -1,7 +1,9 @@
 // Dramatis' own UI shell (no Maestro dependency): notices (toastr), confirmations (ST Popup), windows, the settings
-// drawer in the Extensions panel, slash commands and styles. Everything it adds to the page goes away on dispose().
+// drawer in the Extensions panel, slash commands, items of ST's extensions menu and styles. Everything it adds to the
+// page goes away on dispose().
 import type { Host, I18n, Logger, SettingsSection, Ui, Unsubscribe, WindowSpec } from '../shared/contracts';
 import { el, setButtonErrorHandler } from './dom';
+import { MenuItems } from './menu';
 import { SettingsDrawer } from './settings-drawer';
 import { SlashCommands } from './slash';
 import { WindowManager } from './windows';
@@ -39,6 +41,7 @@ export function createUi(deps: UiDeps): UiImpl {
     const windows = new WindowManager({ i18n, log: log.scope('windows') });
     const drawer = new SettingsDrawer(i18n, log.scope('settings'));
     const slash = new SlashCommands(host, i18n, log.scope('slash'));
+    const menu = new MenuItems({ i18n, log: log.scope('menu') });
     const styles = new Map<string, HTMLStyleElement>();
     const popups = new Set<PopupHandle>();
     let disposed = false;
@@ -157,6 +160,11 @@ export function createUi(deps: UiDeps): UiImpl {
             };
         },
 
+        addMenuItem(item): Unsubscribe {
+            if (disposed) return () => {};
+            return menu.add(item);
+        },
+
         mount(): void {
             drawer.mount();
         },
@@ -164,6 +172,7 @@ export function createUi(deps: UiDeps): UiImpl {
         relabel(): void {
             drawer.render();
             windows.retitle();
+            menu.relabel();
         },
 
         dispose(): void {
@@ -175,6 +184,7 @@ export function createUi(deps: UiDeps): UiImpl {
             windows.dispose();
             drawer.dispose();
             slash.dispose();
+            menu.dispose();
             for (const node of styles.values()) node.remove();
             styles.clear();
         },

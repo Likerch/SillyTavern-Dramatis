@@ -29,7 +29,7 @@ Language models are sycophantic: characters warm up for no reason, villains refo
 **Without Maestro:**
 
 - **Reading the author's intent.** Reads the whole card — description, greetings, creator's notes, lorebook, tags, CarrotKernel archives — into an "intent sheet": core, values, wound, goals, ties, appetites, group rules, the starting reputation. Every field carries a quote as evidence.
-- **The intent sheet.** A window with the cast and a full editor: fix, lock 🔒 or remove any field; secrets stay under a spoiler.
+- **The intent sheet.** A window with the cast and a full editor: fix, lock 🔒 or remove any field; secrets stay under a spoiler. Open it from the extensions menu (the magic wand button by the input field) — **«Intent sheet (Dramatis)»**, with `/dramatis` or with the **«Open the intent sheet»** button in the Dramatis settings.
 - **The motive card.** A short block near the end of the prompt: who is present, what they are doing, what they want and from whom, how they treat you and why, who is busy with their own.
 
 **With Maestro — everything live:**
@@ -42,6 +42,7 @@ Language models are sycophantic: characters warm up for no reason, villains refo
 - **Corruption with gifts and brands.** At 3, 5 and 7 a character is branded and decides whether to take the gift; at 7 the craving becomes part of who they are.
 - **Director in Cinema mode.** Right before the reply a short request decides who acts this beat, with what intent and toward whom.
 - **Measurements.** The share of NPC lines addressed to you, initiative, drift, distinguishable voices — on the "Measurements" page and with `/dramatis-stats`.
+- **Chat preparation and the Character Sheet.** Maestro's chat preparation reads the intent too and shows the result with an **«Open»** link to the sheet; DES's Character Sheet / Workshop gets a **«Dramatis»** tab: how they stand toward you, what they want, what is going on now, appetites, who they are and their secrets.
 
 ## How it works
 
@@ -69,7 +70,7 @@ The **Dramatis** block of the extensions panel:
 
 - **Basics:** enable Dramatis, interface language, **mode** (Economy / Balanced / Cinema), motive card language (English with names as the story writes them, or Russian), a connection profile for work without Maestro, merging with Maestro's voice cards, CarrotKernel archives for portraits, card budget and depth.
 - **Levers:** world tone toward the player, player gravity, stance inertia, fidelity to the author, diversity of new faces, drift response (correct / stress / redo), secrets visibility, appetite strength, hunters per scene, corruption.
-- **Author's intent:** read the intent automatically.
+- **Author's intent:** read the intent automatically, read it now, open the intent sheet.
 - **Per-chat levers:** any lever, the mode and the card's parameters can be set for one chat only — the intent sheet window → «This chat's levers».
 - **Living world:** how often the world ticks, whether to announce its events.
 

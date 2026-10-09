@@ -160,6 +160,17 @@ describe('core vocabularies', () => {
         expect(ladders.hexacoPole('openness', 1, 'en', 1)).toBe('curious and unconventional');
         expect(ladders.hexacoPole('openness', Number.NaN, 'en')).toBe('');
     });
+
+    it('puts the temperament poles in a woman’s gender in Russian', () => {
+        expect(ladders.hexacoPole('honesty', -2, 'ru', 2, 'female')).toBe('хитрая и жадная');
+        expect(ladders.hexacoPole('extraversion', -2, 'ru', 2, 'male')).toBe('замкнутый');
+        expect(ladders.hexacoPole('extraversion', -2, 'ru')).toBe('замкнутый');
+        expect(ladders.hexacoPole('agreeableness', 2, 'en', 2, 'female')).toBe('patient and forgiving');
+        expect(ladders.hexacoPole('openness', 1, 'ru', 2, 'female')).toBe('');
+        for (const axis of HEXACO) {
+            for (const level of [-2, 2]) expect(ladders.hexacoPole(axis, level, 'ru', 2, 'female')).toMatch(CYRILLIC);
+        }
+    });
 });
 
 describe('appetites, ties, world and provenance', () => {
@@ -181,7 +192,36 @@ describe('appetites, ties, world and provenance', () => {
         expect(ladders.vowLabel('none', 'en')).toBe('no vow');
         expect(ladders.visibilityLabel('secret', 'ru')).toBe('тайна');
         expect(ladders.claimLabel('claimed', 'ru')).toBe('застолбил');
+        expect(ladders.claimLabel('claimed', 'ru', 'female')).toBe('застолбила');
+        expect(ladders.claimLabel('owned', 'ru', 'female')).toBe('владеет');
+        expect(ladders.claimLabel('claimed', 'en', 'female')).toBe('has staked a claim');
         expect(ladders.onsetLabel('rare', 'en')).toBe('rarely');
+    });
+
+    it('words desirability and corruption the way the sheet does', () => {
+        expect([0, 1, 2, 3, 4, 5].map((n) => ladders.wantLabel(n, 'ru'))).toEqual([
+            'нет',
+            'едва',
+            'немного',
+            'заметно',
+            'сильно',
+            'неодолимо',
+        ]);
+        expect(ladders.wantLabel(9, 'en')).toBe('overpoweringly');
+        expect([0, 1, 2, 3, 5, 7, 10].map((n) => ladders.corruptionLabel(n, 'en'))).toEqual([
+            'clean',
+            'keeps to principles',
+            'keeps to principles',
+            'excuses are habitual',
+            'strangers are almost things',
+            'the craving is part of who they are',
+            'lost',
+        ]);
+        expect(ladders.corruptionLabel(10, 'ru')).toBe('потерян');
+        expect(ladders.corruptionLabel(10, 'ru', 'female')).toBe('потеряна');
+        expect(ladders.corruptionLabel(0, 'ru', 'female')).toBe('чиста');
+        expect(ladders.corruptionLabel(4, 'ru', 'female')).toBe('оправдания привычны');
+        expect(ladders.corruptionLabel(Number.NaN, 'en')).toBe('clean');
     });
 
     it('words tie intents, world tone, coping, arcs, levels of detail and origins', () => {

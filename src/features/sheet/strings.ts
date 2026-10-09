@@ -7,6 +7,8 @@ export const SHEET_STRINGS: I18nParts = {
     en: {
         'sheet.title': 'Intent sheet',
         'sheet.window': 'Intent sheet',
+        'sheet.menu': 'Intent sheet (Dramatis)',
+        'sheet.menuHint': 'The cast of this chat: who wants what, how they stand toward you and why',
         'sheet.slash.help':
             'Opens the intent sheet of a character: /dramatis-sheet Ilva. Without a name — the whole cast.',
         'sheet.slash.noCast': 'There is no cast yet: open a chat with a character first.',
@@ -529,6 +531,8 @@ export const SHEET_STRINGS: I18nParts = {
     ru: {
         'sheet.title': 'Лист замысла',
         'sheet.window': 'Лист замысла',
+        'sheet.menu': 'Лист замысла (Dramatis)',
+        'sheet.menuHint': 'Состав этого чата: кто чего хочет, как относится к тебе и почему',
         'sheet.slash.help': 'Открывает лист замысла персонажа: /dramatis-sheet Ильва. Без имени — весь состав.',
         'sheet.slash.noCast': 'Состава пока нет: сначала открой чат с персонажем.',
         'sheet.slash.notFound': 'В составе нет никого по имени «{name}».',

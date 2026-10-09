@@ -225,6 +225,7 @@ async function setup(
                 lastCast: () => result.des,
                 scene: () => ({}),
                 roster: () => [],
+                aliases: () => ({}),
             },
         },
         ui: { notice: vi.fn() },

@@ -440,14 +440,26 @@ const HEXACO_POLES: Record<HexacoAxis, [Word, Word]> = {
     ],
 };
 
+/** Feminine Russian forms of the poles (the masculine ones above also serve an unknown gender). */
+const HEXACO_POLES_RU_FEMININE: Record<HexacoAxis, [string, string]> = {
+    honesty: ['хитрая и жадная', 'честная до щепетильности'],
+    emotionality: ['бесстрашная и отстранённая', 'тревожная и чувствительная'],
+    extraversion: ['замкнутая', 'общительная и смелая'],
+    agreeableness: ['вспыльчивая, не прощает', 'терпеливая, прощает'],
+    conscientiousness: ['небрежная и импульсивная', 'усердная и аккуратная'],
+    openness: ['консервативная', 'любознательная и необычная'],
+};
+
 export function hexacoLabel(axis: HexacoAxis, lang: Lang): string {
     return pick(HEXACO_LABEL[axis], lang);
 }
 
-/** Pole words for a strong level (|level| ≥ 2 by default), '' for the middle. */
-export function hexacoPole(axis: HexacoAxis, level: number, lang: Lang, threshold = 2): string {
+/** Pole words for a strong level (|level| ≥ 2 by default), '' for the middle; Russian in the character's gender. */
+export function hexacoPole(axis: HexacoAxis, level: number, lang: Lang, threshold = 2, gender?: Gender): string {
     if (!Number.isFinite(level) || Math.abs(level) < threshold) return '';
-    return pick(HEXACO_POLES[axis][level > 0 ? 1 : 0], lang);
+    const pole = level > 0 ? 1 : 0;
+    if (lang === 'ru' && gender === 'female') return HEXACO_POLES_RU_FEMININE[axis][pole];
+    return pick(HEXACO_POLES[axis][pole], lang);
 }
 
 /* ------------------------------------------------------------------ appetites (§4.5) */
@@ -526,8 +538,42 @@ const CLAIM: Record<Claim, Word> = {
     owned: { en: 'owns', ru: 'владеет' },
 };
 
-export function claimLabel(value: Claim, lang: Lang): string {
+/** Claim word; Russian «застолбила» for a female character. */
+export function claimLabel(value: Claim, lang: Lang, gender?: Gender): string {
+    if (lang === 'ru' && gender === 'female' && value === 'claimed') return 'застолбила';
     return pick(CLAIM[value], lang);
+}
+
+/** Desirability 0 none … 5 overpowering (a tie's `want`), the sheet's words. */
+const WANT: Word[] = [
+    { en: 'none', ru: 'нет' },
+    { en: 'barely', ru: 'едва' },
+    { en: 'a little', ru: 'немного' },
+    { en: 'noticeably', ru: 'заметно' },
+    { en: 'strongly', ru: 'сильно' },
+    { en: 'overpoweringly', ru: 'неодолимо' },
+];
+
+export function wantLabel(want: number, lang: Lang): string {
+    return pick(WANT[index(want, 0, 5)], lang);
+}
+
+/** Corruption 0–10 in six steps (edges 1, 3, 5, 7, 10), the sheet's words; Russian in the character's gender. */
+const CORRUPTION: Word[] = [
+    { en: 'clean', ru: 'чист' },
+    { en: 'keeps to principles', ru: 'держится принципов' },
+    { en: 'excuses are habitual', ru: 'оправдания привычны' },
+    { en: 'strangers are almost things', ru: 'чужие — почти вещи' },
+    { en: 'the craving is part of who they are', ru: 'влечение — часть «я»' },
+    { en: 'lost', ru: 'потерян' },
+];
+const CORRUPTION_EDGES = [1, 3, 5, 7, 10];
+
+export function corruptionLabel(level: number, lang: Lang, gender?: Gender): string {
+    const value = Number.isFinite(level) ? level : 0;
+    const step = CORRUPTION_EDGES.filter((edge) => value >= edge).length;
+    if (lang === 'ru' && gender === 'female' && (step === 0 || step === 5)) return step === 0 ? 'чиста' : 'потеряна';
+    return pick(CORRUPTION[step], lang);
 }
 
 const ONSET: Record<AffectionOnset, Word> = {

@@ -1,33 +1,29 @@
 // Module «engine» (stage 1, works without Maestro): the current card profiles + chat state and the scene view behind
 // EngineApi (engine.ts), plus its part of DRAMATIS_API — whether the chat has a cast, every stance with its reasons
 // (NPC → player and NPC ↔ NPC, for Maestro's relations graph), goals, the dependences the engine owns (BunnyMo's
-// Medicine Check stays quiet for them) and the «relationships»/«social» mechanics templates it replaces.
+// Medicine Check stays quiet for them), the «relationships»/«social» mechanics templates it replaces, the starting
+// scenes' cast and a display-ready summary of one character (describe.ts, for the «Dramatis» tab Maestro adds to
+// DES's Character Sheet).
 import { moodLabel, stanceLabel } from '../../domain/ladders';
+import { chatLevers } from '../../domain/levers';
 import { PLAYER_ID } from '../../domain/model';
 import type { AppetiteKind } from '../../domain/model';
 import { strongestReasons } from '../../domain/render';
 import { startFor } from '../../domain/state-init';
-import type { DramatisApiV1, DramatisStanceInfo, DramatisStartMember } from '../../shared/apis';
-import type { App, DramatisModule, I18nParts } from '../../shared/contracts';
+import type { DramatisApiV1, DramatisCharacterView, DramatisStanceInfo, DramatisStartMember } from '../../shared/apis';
+import type { App, DramatisModule } from '../../shared/contracts';
 import { ENGINE_API } from './api';
 import type { EngineApi } from './api';
+import { describeCharacter } from './describe';
 import { createEngine } from './engine';
+import { ENGINE_STRINGS } from './strings';
+
+export { ENGINE_STRINGS } from './strings';
 
 export type EngineSettings = Record<string, never>;
 
 /** Appetites whose dependence the engine leads (BunnyMo's Medicine Check is silenced for their owners). */
 const DEPENDENCE_KINDS: readonly AppetiteKind[] = ['drink', 'substance'];
-
-export const ENGINE_STRINGS: I18nParts = {
-    en: {
-        'engine.title': 'Engine',
-        'engine.player': 'the player',
-    },
-    ru: {
-        'engine.title': 'Движок',
-        'engine.player': 'игрок',
-    },
-};
 
 type ApiPart = Partial<Omit<DramatisApiV1, 'version' | 'dramatisVersion' | 'onChange'>>;
 
@@ -125,6 +121,23 @@ export function engineApiPart(engine: EngineApi, app: App): ApiPart {
                 if (owned && !out.includes(profile.name)) out.push(profile.name);
             }
             return out;
+        },
+
+        describe(name: string): DramatisCharacterView | null {
+            const view = engine.view();
+            const query = typeof name === 'string' ? name.trim() : '';
+            if (!view || !query) return null;
+            const resolved = engine.resolve(query);
+            const id = resolved && view.byId.has(resolved) ? resolved : view.byId.has(query) ? query : null;
+            if (!id) return null;
+            return describeCharacter({
+                view,
+                id,
+                lang: app.i18n.locale(),
+                t: (key, params) => app.i18n.t(key, params),
+                secrets: chatLevers(app.settings.get(), view.state.overrides).secrets,
+                player: view.playerName.trim() || app.i18n.t('engine.player'),
+            });
         },
 
         replacesSocialMechanics: active,

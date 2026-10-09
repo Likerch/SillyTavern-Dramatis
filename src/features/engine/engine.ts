@@ -9,6 +9,8 @@
 //   load): the DES tracker of the last reply when there is one (names nobody has a profile for stay in `unknown` for the
 //   generator; Maestro's name gluing gets a second try), else the names in the last 3 messages with the card's own
 //   character always present; until the user's first message the starting scene's `present` flags count too.
+// - resolve(): a story name → profile id by presence matching, then Maestro's names, then DES's own aliases (a DES
+//   canonical name or alias whose other names match exactly one profile: what Maestro asks about from DES's sheet).
 // - Bands: the turn pass's `state.next.bands` when computed after the current turn, else static ones (view.ts).
 // - Updates are serialised. Each mutator gets a deep clone; a state save that lost the version race to another tab
 //   reloads and retries once. Queued log lines go into the next state save (the last 300 are kept).
@@ -87,6 +89,34 @@ export function createEngine(deps: EngineDeps): EngineImpl {
     function resolveIn(name: string, profiles: readonly CharacterProfile[]): string | null {
         if (!name?.trim()) return null;
         return matchName(name, profiles) ?? maestroMatch(name, profiles);
+    }
+
+    /** The other names DES's own aliases give this name (it is a DES canonical name or one of its aliases). */
+    function desNames(name: string): string[] {
+        let map: Record<string, string[]> = {};
+        try {
+            map = app.readers.des.aliases();
+        } catch (error) {
+            log.debug('DES aliases unavailable', error);
+        }
+        const key = name.trim().toLowerCase();
+        const out: string[] = [];
+        for (const [canonical, aliases] of Object.entries(map)) {
+            const names = [canonical, ...aliases].map((item) => item.trim()).filter(Boolean);
+            if (!names.some((item) => item.toLowerCase() === key)) continue;
+            for (const item of names) if (item.toLowerCase() !== key && !out.includes(item)) out.push(item);
+        }
+        return out;
+    }
+
+    /** The one profile the other DES names of `name` point to, or null. */
+    function desMatch(name: string, profiles: readonly CharacterProfile[]): string | null {
+        const found = new Set<string>();
+        for (const other of desNames(name)) {
+            const id = matchName(other, profiles);
+            if (id) found.add(id);
+        }
+        return found.size === 1 ? [...found][0]! : null;
     }
 
     /** The one profile Maestro's world model calls the same person, or null. */
@@ -367,7 +397,8 @@ export function createEngine(deps: EngineDeps): EngineImpl {
         refresh,
 
         resolve(name: string): string | null {
-            return view ? resolveIn(name, view.profiles) : null;
+            if (!view || typeof name !== 'string' || !name.trim()) return null;
+            return resolveIn(name, view.profiles) ?? desMatch(name, view.profiles);
         },
 
         log(events: StateEvent[]): void {

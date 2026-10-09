@@ -19,6 +19,8 @@ export const CORE_STRINGS: I18nParts = {
         'core.llm.empty': 'The model returned an empty answer.',
         'core.llm.transport': 'Could not reach the model: {error}',
         'core.llm.failed': 'The AI request failed: {error}',
+        'core.api.noReading':
+            'The author’s intent cannot be read now: Dramatis or its «Author’s intent» module is switched off.',
     },
     ru: {
         'core.name': 'Dramatis',
@@ -38,6 +40,7 @@ export const CORE_STRINGS: I18nParts = {
         'core.llm.empty': 'Модель вернула пустой ответ.',
         'core.llm.transport': 'Не удалось связаться с моделью: {error}',
         'core.llm.failed': 'Запрос к ИИ не удался: {error}',
+        'core.api.noReading': 'Замысел сейчас не прочитать: Dramatis или его модуль «Замысел автора» выключен.',
     },
 };
 

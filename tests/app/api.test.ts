@@ -2,9 +2,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createApiPublisher } from '../../src/app/api';
 import { createBus } from '../../src/core/bus';
+import { createI18n } from '../../src/core/i18n';
 import { Settings } from '../../src/core/settings';
+import { CORE_STRINGS } from '../../src/core/strings';
 import { DRAMATIS_API_GLOBAL, DRAMATIS_API_READY_EVENT } from '../../src/shared/apis';
-import type { DramatisApiV1 } from '../../src/shared/apis';
+import type { DramatisApiV1, DramatisCharacterView } from '../../src/shared/apis';
 import { memoryLogger } from '../helpers/fakes';
 import { flush, installStMock } from '../helpers/st-mock';
 
@@ -26,9 +28,13 @@ function setup() {
         log,
     );
     const bus = createBus(log);
-    const publisher = createApiPublisher({ version: '0.0.1', settings, bus, log });
+    const i18n = createI18n(() => 'ru');
+    i18n.register(CORE_STRINGS);
+    const publisher = createApiPublisher({ version: '0.0.1', settings, bus, log, i18n });
     return { publisher, settings, bus, log };
 }
+
+const NO_READING = 'Замысел сейчас не прочитать: Dramatis или его модуль «Замысел автора» выключен.';
 
 describe('DRAMATIS_API publication', () => {
     it('publishes v1 with safe defaults and announces it', () => {
@@ -51,6 +57,54 @@ describe('DRAMATIS_API publication', () => {
         expect(api.offscreenBrief('Марта')).toBeNull();
         expect(api.matureAgendas()).toEqual([]);
         expect(api.replacesSocialMechanics()).toBe(false);
+        expect(api.startCast!(0)).toEqual([]);
+        expect(api.intentState!()).toBeNull();
+        expect(api.describe!('Марта')).toBeNull();
+        expect(() => api.openSheet!('Марта')).not.toThrow();
+    });
+
+    it('passes the 1.3 members to the parts: intent state, reading, a character summary, the sheet', async () => {
+        const { publisher } = setup();
+        const view: DramatisCharacterView = { name: 'Марта', sections: [], secrets: 'spoiler' };
+        const opened: (string | undefined)[] = [];
+        publisher.registerPart({
+            intentState: () => ({ read: true, at: 5, characters: 2, groups: 1, running: false }),
+            readIntent: async (options) => ({ ok: true, characters: options?.force ? 3 : 0, skipped: !options?.force }),
+            describe: (name) => (name === 'Марта' ? view : null),
+            openSheet: (name) => void opened.push(name),
+        });
+        const api = publisher.api;
+        expect(api.intentState!()).toEqual({ read: true, at: 5, characters: 2, groups: 1, running: false });
+        expect(await api.readIntent!({ force: true })).toEqual({ ok: true, characters: 3, skipped: false });
+        expect(api.describe!('Марта')).toBe(view);
+        expect(api.describe!('Брам')).toBeNull();
+        api.openSheet!('Марта');
+        api.openSheet!();
+        expect(opened).toEqual(['Марта', undefined]);
+    });
+
+    it('answers readIntent with «not available» without a reader, when switched off or when the reader breaks', async () => {
+        const { publisher, settings, log } = setup();
+        const outcome = { ok: false, characters: 0, error: NO_READING, message: NO_READING };
+        expect(await publisher.api.readIntent!()).toEqual(outcome);
+        publisher.registerPart({ readIntent: async () => ({ ok: true, characters: 1 }) });
+        settings.set('enabled', false);
+        expect(await publisher.api.readIntent!()).toEqual(outcome);
+        settings.set('enabled', true);
+        publisher.registerPart({ readIntent: () => Promise.reject(new Error('boom')) });
+        expect(await publisher.api.readIntent!()).toEqual(outcome);
+        expect(log.lines.some((line) => line.level === 'warn')).toBe(true);
+    });
+
+    it('says the key when it has no words for «not available»', async () => {
+        const log = memoryLogger();
+        const settings = new Settings(
+            () => ({}),
+            () => {},
+            log,
+        );
+        const publisher = createApiPublisher({ version: '0.0.1', settings, bus: createBus(log), log });
+        expect(await publisher.api.readIntent!()).toMatchObject({ ok: false, error: 'core.api.noReading' });
     });
 
     it('answers from the latest part that defines a method, and from defaults when it throws', () => {

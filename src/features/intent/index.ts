@@ -3,18 +3,25 @@
 // - Automatically (setting `autoRead`): a solo chat that opens with no user message yet, with a card never read before,
 //   is read once per card and session — only when an AI connection is ready (and, with Maestro, in its leading tab);
 //   a card whose sources changed since its reading gets an offer to read it again.
-// - `/dramatis-read` and the button in the «Замысел» settings section read again on demand.
+// - `/dramatis-read` and the button in the «Замысел» settings section read again on demand; the section also opens the
+//   «Лист замысла» window.
 // - With Maestro: the task is listed in its profiles («Dramatis: чтение замысла») and every reading goes into its journal
 //   with an undo that restores the profiles as they were. Maestro forgets both when it restarts, so they are
 //   registered again whenever it comes back.
-import type { ApiUnsubscribe } from '../../shared/apis';
+// - DRAMATIS_API: `intentState()` (whether the current card was read, when, how many characters and groups, a reading
+//   running) and `readIntent()` (a reading as the user's action — Maestro's «Подготовка» runs it); DRAMATIS_API
+//   listeners hear when a reading starts and ends.
+import { llmErrorText } from '../../core/strings';
+import type { ApiUnsubscribe, DramatisIntentState, DramatisReadOutcome } from '../../shared/apis';
 import type { DramatisModule } from '../../shared/contracts';
 import { INTENT_TASK } from '../../domain/intent-prompt';
 import { button, el, field, toggle } from '../../ui';
 import { ENGINE_API } from '../engine/api';
 import type { EngineApi } from '../engine/api';
 import { INTENT_API } from './api';
-import { PROFILES_TARGET, createIntentReader } from './reader';
+import type { IntentReadResult } from './api';
+import { CAST_WINDOW, PROFILES_TARGET, createIntentReader } from './reader';
+import type { ReadOptions } from './reader';
 import { INTENT_STRINGS } from './strings';
 
 export interface IntentSettings {
@@ -41,6 +48,75 @@ export const intentModule: DramatisModule<IntentSettings> = {
         const maestroOffs: ApiUnsubscribe[] = [];
 
         const engine = (): EngineApi | null => app.modules.api<EngineApi>(ENGINE_API) ?? null;
+
+        /** Where the reading of the current card stands (from the profiles the engine holds). */
+        function intentState(): DramatisIntentState | null {
+            if (app.host.isGroupChat() || !app.host.chatId()) return null;
+            const cardKey = app.host.cardKey();
+            if (!cardKey) return null;
+            const view = engine()?.view();
+            const card = view && view.card.card === cardKey ? view.card : null;
+            const cast = card?.characters ?? [];
+            const out: DramatisIntentState = {
+                read: !!card?.intent,
+                characters: cast.filter((item) => item.kind !== 'group').length,
+                groups: cast.filter((item) => item.kind === 'group').length,
+                running: reader.running(),
+            };
+            if (card?.intent?.at) out.at = card.intent.at;
+            return out;
+        }
+
+        /** The reading result as DRAMATIS_API reports it: what the user's notice says, the error in words. */
+        function outcomeOf(result: IntentReadResult): DramatisReadOutcome {
+            const outcome: DramatisReadOutcome = { ok: result.ok, characters: result.characters };
+            if (result.ok) {
+                if (result.message) outcome.message = result.message;
+            } else {
+                const error = result.error || llmErrorText(app.i18n, undefined);
+                outcome.error = error;
+                outcome.message = t('intent.failed', { error });
+            }
+            if (result.skipped) outcome.skipped = true;
+            return outcome;
+        }
+
+        const apiPart = {
+            intentState,
+            /** A reading already running (a new chat's own) is waited for, not refused as «already reading». */
+            async readIntent(options?: { force?: boolean }): Promise<DramatisReadOutcome> {
+                try {
+                    return outcomeOf(await (current ?? read({ force: options?.force === true })));
+                } catch (error) {
+                    log.error('intent reading through DRAMATIS_API failed', error);
+                    const text = llmErrorText(app.i18n, error instanceof Error ? error.message : String(error));
+                    return { ok: false, characters: 0, error: text, message: t('intent.failed', { error: text }) };
+                }
+            },
+        };
+
+        /** The reading in progress, started through read(). */
+        let current: Promise<IntentReadResult> | null = null;
+
+        /** DRAMATIS_API listeners hear when a reading starts and when it ends (`intentState().running`). */
+        function announce(): void {
+            if (!stopped) app.modules.expose('api', apiPart);
+        }
+
+        /** Every reading goes through here (a second one while one runs is refused by the reader, as before). */
+        function read(options: ReadOptions = {}): Promise<IntentReadResult> {
+            const starts = !reader.running();
+            const job = reader.read(options);
+            if (!starts) return job;
+            current = job;
+            const done = () => {
+                if (current === job) current = null;
+                announce();
+            };
+            void job.then(done, done);
+            announce();
+            return job;
+        }
 
         function releaseMaestro(): void {
             for (const off of maestroOffs.splice(0)) {
@@ -108,7 +184,7 @@ export const intentModule: DramatisModule<IntentSettings> = {
                 if (hasUserMessages() || autoRead.has(cardKey)) return;
                 if (!app.llm.available(INTENT_TASK, false) || !leads()) return;
                 autoRead.add(cardKey);
-                await reader.read({ auto: true });
+                await read({ auto: true });
                 return;
             }
             const now = await reader.fingerprint();
@@ -117,7 +193,7 @@ export const intentModule: DramatisModule<IntentSettings> = {
             if (offered.has(offer)) return;
             offered.add(offer);
             app.ui.notice(t('intent.changed'), {
-                action: { label: t('intent.reread'), run: () => void reader.read({ force: true }) },
+                action: { label: t('intent.reread'), run: () => void read({ force: true }) },
             });
         }
 
@@ -126,10 +202,11 @@ export const intentModule: DramatisModule<IntentSettings> = {
         };
 
         app.modules.expose(INTENT_API, {
-            read: (options?: { force?: boolean }) => reader.read(options),
+            read: (options?: { force?: boolean }) => read(options),
             running: () => reader.running(),
             lastResult: () => reader.lastResult(),
         });
+        app.modules.expose('api', apiPart);
 
         own(app.bus.on('chat:changed', () => check()));
         own(
@@ -140,7 +217,7 @@ export const intentModule: DramatisModule<IntentSettings> = {
         );
         own(
             app.ui.addSlashCommand('dramatis-read', 'intent.slash.read', async () => {
-                const result = await reader.read({ force: true });
+                const result = await read({ force: true });
                 return result.ok ? (result.message ?? '') : t('intent.failed', { error: result.error ?? '?' });
             }),
         );
@@ -182,14 +259,21 @@ export const intentModule: DramatisModule<IntentSettings> = {
                                 },
                             }),
                             field(t('intent.settings.status'), status),
-                            button({
-                                label: t('intent.settings.readNow'),
-                                icon: 'book-open',
-                                onClick: async () => {
-                                    await reader.read({ force: true });
-                                    await update();
-                                },
-                            }),
+                            el('div', { class: 'dramatis-settings-buttons' }, [
+                                button({
+                                    label: t('intent.settings.readNow'),
+                                    icon: 'book-open',
+                                    onClick: async () => {
+                                        await read({ force: true });
+                                        await update();
+                                    },
+                                }),
+                                button({
+                                    label: t('intent.settings.openSheet'),
+                                    icon: 'masks-theater',
+                                    onClick: () => app.ui.openWindow(CAST_WINDOW),
+                                }),
+                            ]),
                         ]),
                     );
                     void update();

@@ -259,6 +259,8 @@ export interface DesReader {
     scene(): { place?: string; time?: string; date?: string };
     /** DES roster of the chat (known characters). */
     roster(): string[];
+    /** DES's own aliases (its Character Workshop): canonical card name → other names of it; {} without DES. */
+    aliases(): Record<string, string[]>;
 }
 
 /** A character archive (CK repository entry with `<BunnymoTags>`). */
@@ -334,6 +336,18 @@ export interface SettingsSection {
     render(container: HTMLElement): void | Unsubscribe;
 }
 
+/** An item of SillyTavern's extensions («wand») menu. */
+export interface MenuItemSpec {
+    /** Unique among Dramatis' items: an item with the same id replaces the earlier one. */
+    id: string;
+    /** Font Awesome icon ('masks-theater' or 'fa-masks-theater'). */
+    icon: string;
+    labelKey: string;
+    /** Tooltip. */
+    titleKey?: string;
+    onClick(): void;
+}
+
 export interface Ui {
     notice(
         text: string,
@@ -347,6 +361,8 @@ export interface Ui {
     addSlashCommand(name: string, helpKey: string, callback: (value: string) => string | Promise<string>): Unsubscribe;
     /** Adds CSS removed on dispose. */
     style(id: string, css: string): Unsubscribe;
+    /** Adds an item to SillyTavern's extensions («wand») menu; it waits for the menu and survives a rebuild of it. */
+    addMenuItem(item: MenuItemSpec): Unsubscribe;
 }
 
 /* ------------------------------------------------------------------ modules and app */

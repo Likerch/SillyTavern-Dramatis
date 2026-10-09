@@ -3,8 +3,12 @@
 // updates with version races, the profile updates and the engine's part of DRAMATIS_API.
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { PLAYER_ID } from '../../src/domain/model';
-import type { CardProfiles, CharacterProfile, ChatState } from '../../src/domain/model';
+import type { CardProfiles, CharacterProfile, ChatState, Intention } from '../../src/domain/model';
 import { emptyCardProfiles } from '../../src/domain/profile-defaults';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { DESCRIBE_MAX_LINES, fitSections } from '../../src/features/engine/describe';
+import { ENGINE_STRINGS } from '../../src/features/engine/strings';
 import { LOG_CAP } from '../../src/features/engine/engine';
 import { agendaUrgency, effectiveProfiles, freshNext, hasRoleDuty } from '../../src/features/engine/view';
 import { DRAMATIS_API_GLOBAL } from '../../src/shared/apis';
@@ -274,6 +278,27 @@ describe('engine — resolve', () => {
         expect(h.engine.resolve('the carters')).toBe('carters');
         expect(h.engine.resolve('Незнакомец')).toBeNull();
         expect(h.engine.resolve('')).toBeNull();
+    });
+
+    it('takes DES’s own aliases: a DES canonical name or alias whose other names point to one profile', async () => {
+        const h = await startHarness({
+            profiles: tavernCard(),
+            state: tavernState(),
+            before: (mock) => {
+                mock.extensionSettings['third-party/Dooms-Enhancement-Suite'] = {
+                    characterAliases: {
+                        'Ilva Holm': ['Ильва', 'хозяйка'],
+                        'Old Man': ['Фенн'],
+                        'Two Faces': ['Брам', 'Сота'],
+                    },
+                };
+            },
+        });
+        expect(h.engine.resolve('Ilva Holm')).toBe('ilva');
+        expect(h.engine.resolve('хозяйка')).toBe('ilva');
+        expect(h.engine.resolve('old man')).toBe('fenn');
+        expect(h.engine.resolve('Two Faces')).toBeNull();
+        expect(h.engine.resolve('Ilva')).toBeNull();
     });
 });
 
@@ -552,5 +577,297 @@ describe('engine — DRAMATIS_API part', () => {
         const engine = h.app.modules.api<typeof h.engine>('engine')!;
         await engine.ready();
         expect(api().active()).toBe(true);
+    });
+});
+
+describe('engine — DRAMATIS_API.describe', () => {
+    /** The tavern with Ильва written out in full: every section has something, secrets included. */
+    function describedTavern(patch: Partial<ChatState> = {}): { card: CardProfiles; state: ChatState } {
+        const { profiles, state } = tavern();
+        const ilva = profiles.find((item) => item.id === 'ilva')!;
+        ilva.lod = 'portrait';
+        ilva.core = {
+            ...ilva.core,
+            temperament: { agreeableness: -2, extraversion: -2, openness: 1 },
+            drives: { high: ['family', 'vengeance'], low: ['romance'] },
+            wound: {
+                ghost: 'the Empire hanged her husband',
+                lie: 'no imperial can be trusted',
+                triggers: [],
+                coping: 'overcompensate',
+            },
+        };
+        ilva.appetites = [
+            {
+                id: 'drink',
+                kind: 'drink',
+                label: 'брага',
+                sources: ['individual'],
+                target: { mode: 'thing' },
+                baseline: 1,
+                liking: 1,
+                triggers: [],
+                satisfiers: [],
+                drift: 'daily',
+                tolerance: 0,
+                dependence: 1,
+                sensitization: 0,
+                endorsement: 'torn',
+                vow: 'none',
+                visibility: 'hidden',
+                style: 'honest',
+                affectionOnset: 'never',
+            },
+        ];
+        ilva.agenda = {
+            ...ilva.agenda,
+            dream: 'a free town with no garrison.',
+            goals: [
+                { id: 'g2', text: 'Wants Сота out of this town', kind: 'internal', priority: 2 },
+                { id: 'g1', text: 'Must raise the garrison tax by Friday', kind: 'external', priority: 1 },
+            ],
+            intentions: [
+                {
+                    id: 'i1',
+                    goalId: 'g1',
+                    text: 'Must raise the garrison tax by Friday',
+                    nextStep: 'sell the old cart',
+                    dropIf: [],
+                },
+                {
+                    id: 'i2',
+                    text: 'warn the rebels about the courier',
+                    nextStep: 'send Брам with a letter',
+                    dropIf: [],
+                    hidden: true,
+                } as Intention,
+            ],
+            front: {
+                impulse: 'the rebels gather',
+                steps: [],
+                doom: 'the garrison burns on the feast day',
+                clock: { segments: 6, filled: 2 },
+            },
+        };
+        const toPlayer = ilva.ties.find((item) => item.target === PLAYER_ID)!;
+        Object.assign(toPlayer, {
+            intent: 'extract',
+            want: 2,
+            gaze: 'instrument',
+            claim: 'claimed',
+            appetite: 'drink',
+        });
+        state.characters.ilva = liveState(ilva, {
+            scene: {
+                attention: 'business',
+                doing: "counting the week's takings",
+                goal: 'must raise the garrison tax by Friday',
+                obstacle: 'the courier is watching',
+            },
+            emotion: {
+                type: 'suspicion',
+                intensity: 3,
+                target: PLAYER_ID,
+                cause: 'he asked about the letters',
+                until: 5,
+            },
+            stress: 40,
+            corruption: { level: 2, stains: 1, gifts: [], brands: [] },
+            appetites: {
+                drink: {
+                    pressure: 3,
+                    tolerance: 0,
+                    dependence: 1,
+                    sensitization: 0,
+                    lastSated: -1,
+                    edgeCount: 0,
+                    withdrawal: false,
+                },
+            },
+        });
+        state.schemes = [
+            {
+                id: 's1',
+                owner: 'ilva',
+                target: PLAYER_ID,
+                method: 5,
+                text: 'lead the courier into the rebels’ ambush',
+                clock: { segments: 6, filled: 1 },
+                secrecy: 80,
+                breaches: 0,
+                accomplices: ['bram'],
+                state: 'running',
+                startedTurn: 0,
+            },
+        ];
+        return {
+            card: { ...emptyCardProfiles('tavern.png'), characters: profiles },
+            state: { ...state, card: 'tavern.png', ...patch },
+        };
+    }
+
+    const linesOf = (view: ReturnType<NonNullable<DramatisApiV1['describe']>>) =>
+        Object.fromEntries((view?.sections ?? []).map((section) => [section.id, section.lines]));
+
+    it('sums up a character in Russian: stance, wants, now, appetites, who she is and secrets', async () => {
+        const { card, state } = describedTavern();
+        await startHarness({ profiles: card, state, persona: 'Курьер' });
+        const view = api().describe!('Ильвы')!;
+        expect(view).toMatchObject({
+            name: 'Ильва',
+            headline: "a rebel's widow who keeps the inn to spite the occupiers",
+            detail: 'портрет',
+            secrets: 'spoiler',
+        });
+        expect(view.sections.map((section) => [section.id, section.title])).toEqual([
+            ['stance', 'Отношение к тебе'],
+            ['wants', 'Чего хочет'],
+            ['now', 'Сейчас'],
+            ['appetites', 'Влечения'],
+            ['core', 'Кто это'],
+            ['secrets', 'Тайны'],
+        ]);
+        const lines = linesOf(view);
+        expect(lines.stance).toEqual([
+            { text: 'Враждебна — an imperial; the Empire hanged her husband; paid generously' },
+            { text: 'Как проявляется: takes his coin, gives nothing back, never says his name' },
+            {
+                text: 'Хочет тебя: немного, как средство — подойдёт любой такой же; Притязание: застолбила',
+                secret: true,
+            },
+            { text: 'Намерение: выведать', secret: true },
+        ]);
+        expect(lines.wants).toEqual([
+            { text: 'Must raise the garrison tax by Friday → дальше: sell the old cart' },
+            { text: 'Wants Сота out of this town' },
+            { text: 'warn the rebels about the courier → дальше: send Брам with a letter', secret: true },
+            { text: 'Мечта: a free town with no garrison' },
+        ]);
+        expect(lines.now).toEqual([
+            { text: "Занятие: counting the week's takings" },
+            { text: 'Цель в сцене: must raise the garrison tax by Friday' },
+            { text: 'Помеха: the courier is watching' },
+            { text: 'Настроение: grim watchfulness' },
+            { text: 'Чувство: suspicion (Курьер) — he asked about the letters' },
+            { text: 'Напряжение: 40 (срыв на 60)' },
+            { text: 'Разложение: 2 — держится принципов' },
+        ]);
+        expect(lines.appetites).toEqual([{ text: 'брага: поглощена', secret: true }]);
+        // 27 lines in all: the longest sections give up their last ones (the keys, then the tactics).
+        expect(lines.core).toEqual([
+            { text: 'Ценности: забота о близких, самостоятельность, традиция; пожертвует: безопасность' },
+            { text: 'Темперамент: замкнутая, вспыльчивая, не прощает' },
+            { text: 'Двигатели: семья, месть' },
+            { text: 'Рана: the Empire hanged her husband' },
+            { text: 'Ложная вера: no imperial can be trusted', secret: true },
+            { text: 'Если → то: if she is ordered about, does it slowly and badly' },
+        ]);
+        expect(lines.secrets).toEqual([
+            { text: 'passes letters to the rebels', secret: true },
+            { text: 'Если никто не вмешается: the garrison burns on the feast day', secret: true },
+            { text: 'Замысел (Курьер): lead the courier into the rebels’ ambush', secret: true },
+        ]);
+        expect(view.sections.reduce((sum, section) => sum + section.lines.length, 0)).toBe(DESCRIBE_MAX_LINES);
+    });
+
+    it('leaves secrets out under «только известное» (this chat’s lever) and keeps the rest whole', async () => {
+        const { card, state } = describedTavern({ overrides: { secrets: 'known' } });
+        await startHarness({ profiles: card, state, persona: 'Курьер' });
+        const view = api().describe!('Ильва')!;
+        expect(view.secrets).toBe('known');
+        expect(view.sections.map((section) => section.id)).toEqual(['stance', 'wants', 'now', 'core']);
+        expect(view.sections.flatMap((section) => section.lines).some((item) => item.secret)).toBe(false);
+        expect(linesOf(view).core!.slice(-2)).toEqual([
+            { text: 'Тактики: bluntness, silence, refusing small favours' },
+            { text: 'Сдвинуть может: protection of her daughter; honest payment of the town debts' },
+        ]);
+    });
+
+    it('speaks English when the UI does, and words a man and a sketch plainly', async () => {
+        const { card, state } = describedTavern();
+        const h = await startHarness({ profiles: card, state, persona: 'Курьер' });
+        h.app.settings.set('uiLanguage', 'en');
+        const ilva = api().describe!('Ильва')!;
+        expect(ilva.detail).toBe('portrait');
+        expect(ilva.sections.map((section) => section.title)).toEqual([
+            'Toward you',
+            'Wants',
+            'Now',
+            'Appetites',
+            'Who they are',
+            'Secrets',
+        ]);
+        expect(linesOf(ilva).stance![0]).toEqual({
+            text: 'hostile — an imperial; the Empire hanged her husband; paid generously',
+        });
+        expect(linesOf(ilva).appetites).toEqual([{ text: 'брага: preoccupied', secret: true }]);
+
+        h.app.settings.set('uiLanguage', 'ru');
+        const bram = api().describe!('Брам')!;
+        expect(bram).toMatchObject({ name: 'Брам', detail: 'эскиз' });
+        expect(bram.headline).toBeUndefined();
+        expect(linesOf(bram).stance).toEqual([
+            { text: 'Нейтрален — sees a purse' },
+            { text: 'Как проявляется: will offer "protection" at a steep price' },
+        ]);
+        expect(linesOf(bram).now).toEqual([
+            { text: 'Занятие: dicing with the carters' },
+            { text: 'Цель в сцене: wants paid work before winter' },
+            { text: 'Настроение: спокойное' },
+        ]);
+    });
+
+    it('finds the character by a DES alias or an id; nobody, an empty name or no chat give null', async () => {
+        const { card, state } = describedTavern();
+        const h = await startHarness({
+            profiles: card,
+            state,
+            before: (mock) => {
+                mock.extensionSettings['third-party/Dooms-Enhancement-Suite'] = {
+                    characterAliases: { 'Ilva Holm': ['Ильва'] },
+                };
+            },
+        });
+        expect(api().describe!('Ilva Holm')?.name).toBe('Ильва');
+        expect(api().describe!('sota')?.name).toBe('Сота');
+        expect(api().describe!('Никто')).toBeNull();
+        expect(api().describe!('  ')).toBeNull();
+        await switchChat(h.mock, 'group-chat', { group: true });
+        expect(api().describe!('Ильва')).toBeNull();
+    });
+});
+
+describe('engine — strings', () => {
+    it('has every key in both languages and defines every literal key the module uses', () => {
+        expect(Object.keys(ENGINE_STRINGS.ru).sort()).toEqual(Object.keys(ENGINE_STRINGS.en).sort());
+        const used = new Set<string>();
+        for (const file of ['index.ts', 'describe.ts']) {
+            const text = readFileSync(join(__dirname, '../../src/features/engine', file), 'utf8');
+            for (const match of text.matchAll(/'(engine\.[A-Za-z0-9_.-]+)'/g)) used.add(match[1]!);
+        }
+        for (const id of ['stance', 'wants', 'now', 'appetites', 'core', 'secrets']) {
+            used.add(`engine.describe.section.${id}`);
+        }
+        expect([...used].filter((key) => !(key in ENGINE_STRINGS.en))).toEqual([]);
+        expect(used.size).toBeGreaterThan(30);
+    });
+});
+
+describe('engine — fitting a summary', () => {
+    const section = (id: string, n: number) => ({
+        id,
+        title: id,
+        lines: Array.from({ length: n }, (_, i) => ({ text: `${id}${i}` })),
+    });
+
+    it('takes the last lines of the longest sections first, the later one on a tie, and drops empty ones', () => {
+        const fitted = fitSections([section('a', 3), section('b', 5), section('c', 5), section('d', 0)], 9);
+        expect(fitted.map((item) => [item.id, item.lines.length])).toEqual([
+            ['a', 3],
+            ['b', 3],
+            ['c', 3],
+        ]);
+        expect(fitted[2]!.lines.at(-1)!.text).toBe('c2');
+        expect(fitSections([section('a', 2)], 25)[0]!.lines).toHaveLength(2);
     });
 });

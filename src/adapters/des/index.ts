@@ -1,7 +1,8 @@
 // Reader of Doom's Enhancement Suite (DES 2.6): who is in the scene, their relationship label, thoughts and detail
-// fields, the place and time, and the chat's roster. Read-only: nothing here writes DES data.
+// fields, the place and time, the chat's roster and DES's own aliases. Read-only: nothing here writes DES data.
 // The tracker sits on each assistant message per swipe (parse.ts); the roster in chat metadata
-// (`chat_metadata.dooms_tracker.knownCharacters`, DES forces per-chat roster tracking).
+// (`chat_metadata.dooms_tracker.knownCharacters`, DES forces per-chat roster tracking); the aliases in DES's settings
+// (`extension_settings['third-party/<DES folder>'].characterAliases`: canonical card name → other names).
 import type { DesCharacter, DesReader, Host, Logger } from '../../shared/contracts';
 import { desSwipeRecord, isDict, parseDesCharacters, parseDesScene } from './parse';
 import type { ParsedDesCharacter, ParsedDesScene } from './parse';
@@ -17,6 +18,8 @@ export const DES_LOOKBACK = 10;
 /** DES's drawer toggle in the Extensions panel: present once DES has loaded. */
 const DES_DRAWER_SELECTOR = '#rpg-extension-enabled';
 const DES_FOLDER_RE = /dooms[-_ ]?enhancement[-_ ]?suite/i;
+/** DES's settings key: its folder ('third-party/Dooms-Enhancement-Suite'), or the old 'dooms-character-tracker'. */
+const DES_SETTINGS_RE = /^third-party\/(?:dooms[-_ ]?enhancement[-_ ]?suite|dooms[-_ ]?character[-_ ]?tracker)/i;
 
 function toCharacter(parsed: ParsedDesCharacter): DesCharacter {
     const character: DesCharacter = { name: parsed.name, present: !parsed.offScene, details: { ...parsed.details } };
@@ -108,6 +111,29 @@ export function createDesReader(host: Host, log: Logger): DesReader {
             const state = host.ctx().chatMetadata?.[DES_KEYS.chatMetadata];
             const known = isDict(state) ? state.knownCharacters : undefined;
             return isDict(known) ? Object.keys(known) : [];
+        },
+
+        aliases(): Record<string, string[]> {
+            const out: Record<string, string[]> = {};
+            try {
+                if (disabledInSt()) return out;
+                const settings = host.ctx().extensionSettings;
+                for (const [key, value] of Object.entries(isDict(settings) ? settings : {})) {
+                    if (!DES_SETTINGS_RE.test(key) || !isDict(value) || !isDict(value.characterAliases)) continue;
+                    for (const [rawCanonical, list] of Object.entries(value.characterAliases)) {
+                        const canonical = rawCanonical.trim();
+                        if (!canonical || !Array.isArray(list)) continue;
+                        const names = list
+                            .filter((item): item is string => typeof item === 'string')
+                            .map((item) => item.trim())
+                            .filter(Boolean);
+                        if (names.length) out[canonical] = [...new Set([...(out[canonical] ?? []), ...names])];
+                    }
+                }
+            } catch (error) {
+                log.debug('DES aliases could not be read', error);
+            }
+            return out;
         },
     };
 }

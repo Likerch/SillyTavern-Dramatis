@@ -74,7 +74,7 @@ export async function startDramatis(options: { rng?: Rng } = {}): Promise<Runtim
     const ephemeral = createEphemeral({ host, log: log.scope('ephemeral') });
     const turn = createTurnTracker({ host, bus, ephemeral, bridge, log: log.scope('turn') });
     const ui = createUi({ host, i18n, log: log.scope('ui') });
-    const api = createApiPublisher({ version: DRAMATIS_VERSION, settings, bus, log: log.scope('api') });
+    const api = createApiPublisher({ version: DRAMATIS_VERSION, settings, bus, log: log.scope('api'), i18n });
     const modules = new Modules({
         settings,
         bridge,

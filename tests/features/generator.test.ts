@@ -229,6 +229,7 @@ async function rig(options: RigOptions = {}) {
                 castAt: () => cast.list,
                 scene: () => ({}),
                 roster: () => [],
+                aliases: () => ({}),
             },
             lore: {
                 archives: async (names: string[]) =>

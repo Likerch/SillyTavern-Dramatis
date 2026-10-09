@@ -93,6 +93,7 @@ export const INTENT_STRINGS: I18nParts = {
         'intent.settings.status.read': 'Read {date}',
         'intent.settings.status.noCard': 'No chat with one character is open',
         'intent.settings.readNow': 'Read the intent',
+        'intent.settings.openSheet': 'Open the intent sheet',
     },
     ru: {
         'intent.title': 'Замысел автора',
@@ -183,6 +184,7 @@ export const INTENT_STRINGS: I18nParts = {
         'intent.settings.status.read': 'Прочитан {date}',
         'intent.settings.status.noCard': 'Не открыт чат с одним персонажем',
         'intent.settings.readNow': 'Прочитать замысел',
+        'intent.settings.openSheet': 'Открыть лист замысла',
     },
 };
 

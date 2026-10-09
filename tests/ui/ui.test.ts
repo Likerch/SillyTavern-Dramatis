@@ -18,7 +18,10 @@ function makeUi(): UiImpl {
     const i18n = createI18n(() => locale);
     i18n.register(CORE_STRINGS);
     i18n.register(UI_STRINGS);
-    i18n.register({ en: { 'test.window': 'Test' }, ru: { 'test.window': 'Проба' } });
+    i18n.register({
+        en: { 'test.window': 'Test', 'test.menu': 'Sheet', 'test.menuHint': 'Opens the sheet' },
+        ru: { 'test.window': 'Проба', 'test.menu': 'Лист', 'test.menuHint': 'Открывает лист' },
+    });
     return createUi({ host: mockHost(), i18n, log: memoryLogger() });
 }
 
@@ -194,5 +197,91 @@ describe('notices, confirmations, styles, slash commands', () => {
         expect(await command.callback({}, 'x')).toBe('got x');
         off();
         expect(await command.callback({}, 'x')).toBe('Команда /dramatis-test выключена вместе со своим модулем.');
+    });
+});
+
+describe('extensions menu', () => {
+    /** MutationObserver callbacks run after the current task. */
+    const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+    const MENU =
+        '<div id="extensionsMenu" class="options-content"><div id="sd_wand_container" class="extension_container"></div></div>';
+    const items = () => [...document.querySelectorAll<HTMLElement>('[data-dramatis-menu="sheet"]')];
+
+    it('adds an item built like ST’s own ones and runs it on a click and on Space', () => {
+        document.body.insertAdjacentHTML('beforeend', MENU);
+        const onClick = vi.fn();
+        const off = ui.addMenuItem({
+            id: 'sheet',
+            icon: 'masks-theater',
+            labelKey: 'test.menu',
+            titleKey: 'test.menuHint',
+            onClick,
+        });
+        const menu = document.getElementById('extensionsMenu')!;
+        const container = menu.querySelector<HTMLElement>(':scope > #dramatis_wand_sheet')!;
+        expect(container.classList.contains('extension_container')).toBe(true);
+        const item = container.querySelector<HTMLElement>(':scope > div.list-group-item.flex-container.flexGap5')!;
+        expect(item.querySelector('i.fa-solid.fa-masks-theater.extensionsMenuExtensionButton')).not.toBeNull();
+        expect(item.querySelector('span')?.textContent).toBe('Лист');
+        expect(item.getAttribute('title')).toBe('Открывает лист');
+        expect(item.getAttribute('tabindex')).toBe('0');
+        item.click();
+        item.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', bubbles: true }));
+        item.dispatchEvent(new KeyboardEvent('keydown', { key: 'a', bubbles: true }));
+        expect(onClick).toHaveBeenCalledTimes(2);
+        off();
+        expect(menu.querySelector('#dramatis_wand_sheet')).toBeNull();
+        expect(menu.querySelector('#sd_wand_container')).not.toBeNull();
+    });
+
+    it('waits for the menu, comes back when it is emptied or rebuilt, and follows the language', async () => {
+        const off = ui.addMenuItem({ id: 'sheet', icon: 'fa-masks-theater', labelKey: 'test.menu', onClick: () => {} });
+        expect(items()).toEqual([]);
+        document.body.insertAdjacentHTML('beforeend', MENU);
+        await settle();
+        expect(items()).toHaveLength(1);
+        expect(items()[0]!.closest('#extensionsMenu')).not.toBeNull();
+
+        document.getElementById('extensionsMenu')!.replaceChildren();
+        await settle();
+        expect(items()).toHaveLength(1);
+
+        document.getElementById('extensionsMenu')!.remove();
+        await settle();
+        document.body.insertAdjacentHTML('beforeend', MENU);
+        await settle();
+        expect(items()).toHaveLength(1);
+        expect(document.getElementById('extensionsMenu')!.contains(items()[0]!)).toBe(true);
+
+        locale = 'en';
+        ui.relabel();
+        expect(items()[0]!.querySelector('span')?.textContent).toBe('Sheet');
+        expect(items()[0]!.hasAttribute('title')).toBe(false);
+
+        off();
+        expect(items()).toEqual([]);
+        document.getElementById('extensionsMenu')!.replaceChildren();
+        await settle();
+        expect(items()).toEqual([]);
+    });
+
+    it('replaces an item with the same id and removes everything on dispose', () => {
+        document.body.insertAdjacentHTML('beforeend', MENU);
+        const first = vi.fn();
+        const second = vi.fn();
+        const offFirst = ui.addMenuItem({ id: 'sheet', icon: 'book', labelKey: 'test.menu', onClick: first });
+        ui.addMenuItem({ id: 'sheet', icon: 'book', labelKey: 'test.menu', onClick: second });
+        expect(items()).toHaveLength(1);
+        offFirst();
+        expect(items()).toHaveLength(1);
+        items()[0]!.click();
+        expect(first).not.toHaveBeenCalled();
+        expect(second).toHaveBeenCalledOnce();
+        ui.dispose();
+        expect(items()).toEqual([]);
+        expect(ui.addMenuItem({ id: 'late', icon: 'book', labelKey: 'test.menu', onClick: first })).toBeTypeOf(
+            'function',
+        );
+        expect(document.querySelector('[data-dramatis-menu="late"]')).toBeNull();
     });
 });

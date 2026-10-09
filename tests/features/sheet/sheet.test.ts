@@ -282,6 +282,47 @@ describe('empty states', () => {
     });
 });
 
+describe('ways in', () => {
+    const pageTitle = () => h!.body().querySelector('.dramatis-sheet-page-head .dramatis-sheet-title')?.textContent;
+
+    it('puts «Лист замысла (Dramatis)» into ST’s extensions menu; it opens the list and goes with the module', async () => {
+        h = harness();
+        document.body.insertAdjacentHTML('beforeend', '<div id="extensionsMenu" class="options-content"></div>');
+        await flush();
+        const item = document.querySelector<HTMLElement>('#extensionsMenu [data-dramatis-menu="sheet"]')!;
+        expect(item.textContent).toBe('Лист замысла (Dramatis)');
+        expect(item.getAttribute('title')).toBe('Состав этого чата: кто чего хочет, как относится к тебе и почему');
+        expect(item.querySelector('.fa-masks-theater.extensionsMenuExtensionButton')).not.toBeNull();
+        item.click();
+        expect(h.body().querySelectorAll('.dramatis-sheet-row')).toHaveLength(5);
+        await h.dispose();
+        h = null;
+        expect(document.querySelector('[data-dramatis-menu="sheet"]')).toBeNull();
+    });
+
+    it('opens a character or the list through DRAMATIS_API.openSheet', () => {
+        h = harness();
+        const part = h.exposed.get('api') as { openSheet(name?: string): void };
+        part.openSheet('Ильве');
+        expect(pageTitle()).toBe('Ильва');
+        part.openSheet('sota');
+        expect(pageTitle()).toBe('Сота');
+        part.openSheet('Гэндальф');
+        expect(h.body().querySelectorAll('.dramatis-sheet-row')).toHaveLength(5);
+        part.openSheet('Брам');
+        part.openSheet();
+        expect(h.body().querySelectorAll('.dramatis-sheet-row')).toHaveLength(5);
+    });
+
+    it('opens the list while the cast is still loading', () => {
+        h = harness();
+        h.engine!.noView = true;
+        (h.exposed.get('api') as { openSheet(name?: string): void }).openSheet('Ильва');
+        expect(document.querySelector('[data-window="cast"]')).not.toBeNull();
+        expect(pageTitle()).toBeUndefined();
+    });
+});
+
 describe('/dramatis-sheet', () => {
     it('opens a character by name, the list without one, and says when nobody matches', async () => {
         h = harness();

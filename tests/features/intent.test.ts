@@ -2,7 +2,7 @@
 // The intent module on the whole app with a fake LLM answering the fixture readings (tests/domain/intent-fixtures.ts):
 // the multi-part pipeline, merging, protected user fields, Maestro's journal and undo, the own client, the automatic
 // reading and its re-read offer, error paths, the settings section and /dramatis-read.
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { applyIntent } from '../../src/domain/intent-apply';
 import { INTENT_TASK, intentSources } from '../../src/domain/intent-prompt';
 import type { CardProfiles } from '../../src/domain/model';
@@ -13,7 +13,8 @@ import { PARTIAL_MARK, PROFILES_TARGET, archiveNames, sourcesFingerprint } from 
 import { plural } from '../../src/features/intent/strings';
 import { createI18n } from '../../src/core/i18n';
 import { INTENT_STRINGS } from '../../src/features/intent/strings';
-import type { ApiJournalChange, ApiLlmResult } from '../../src/shared/apis';
+import { DRAMATIS_API_GLOBAL } from '../../src/shared/apis';
+import type { ApiJournalChange, ApiLlmResult, DramatisApiV1 } from '../../src/shared/apis';
 import { fakeMaestro } from '../helpers/fakes';
 import type { FakeMaestro } from '../helpers/fakes';
 import { character, flush, message } from '../helpers/st-mock';
@@ -143,6 +144,8 @@ async function setup(
 function profilesOf(mock: StMock): CardProfiles | null {
     return readProfilesFile(mock, 'tavern.png');
 }
+
+const api = () => (globalThis as unknown as Record<string, DramatisApiV1>)[DRAMATIS_API_GLOBAL]!;
 
 describe('intent — reading the card', () => {
     it('reads the card in parts, merges them and saves the profiles through the engine', async () => {
@@ -502,6 +505,100 @@ describe('intent — reading by itself', () => {
     });
 });
 
+describe('intent — DRAMATIS_API', () => {
+    it('tells where the reading of the card stands, before, during and after it', async () => {
+        let release: (value: ApiLlmResult) => void = () => {};
+        const pending = new Promise<ApiLlmResult>((resolve) => {
+            release = resolve;
+        });
+        const maestro = fakeMaestro();
+        const { h } = await setup({ maestro });
+        answering(maestro, [pending, ok(tavernParts()[1])]);
+        expect(api().intentState!()).toEqual({ read: false, characters: 0, groups: 0, running: false });
+
+        const listener = vi.fn();
+        api().onChange(listener);
+        const reading = api().readIntent!({ force: true });
+        await flush();
+        expect(api().intentState!()).toMatchObject({ read: false, running: true });
+        expect(listener).toHaveBeenCalled();
+        listener.mockClear();
+
+        release(ok(tavernParts()[0]));
+        const outcome = await reading;
+        expect(outcome).toEqual({
+            ok: true,
+            characters: 4,
+            message: expect.stringMatching(/^Замысел прочитан: 3 персонажа, 1 группа\./),
+        });
+        await until(() => api().intentState!()?.read === true);
+        const state = api().intentState!()!;
+        expect(state).toMatchObject({ read: true, characters: 3, groups: 1, running: false });
+        expect(state.at).toBe(profilesOf(h.mock)!.intent!.at);
+        expect(listener).toHaveBeenCalled();
+    });
+
+    it('reads as the user’s action, skips an unchanged card unless forced and reports failures in words', async () => {
+        const { maestro } = await setup();
+        expect((await api().readIntent!()).ok).toBe(true);
+        expect(maestro!.requests.every((request) => request.background === false)).toBe(true);
+        expect(await api().readIntent!()).toEqual({
+            ok: true,
+            characters: 0,
+            skipped: true,
+            message: 'Карточка не менялась с тех пор, как замысел был прочитан.',
+        });
+        answering(maestro!, [{ ok: false, error: 'not-leader' }]);
+        expect(await api().readIntent!({ force: true })).toEqual({
+            ok: false,
+            characters: 0,
+            error: 'Этот чат ведёт другая вкладка SillyTavern: фоновые задачи ИИ идут там.',
+            message: 'Замысел не прочитан: Этот чат ведёт другая вкладка SillyTavern: фоновые задачи ИИ идут там.',
+        });
+    });
+
+    it('waits for a reading already running instead of refusing it', async () => {
+        let release: (value: ApiLlmResult) => void = () => {};
+        const pending = new Promise<ApiLlmResult>((resolve) => {
+            release = resolve;
+        });
+        const maestro = fakeMaestro();
+        const { intent, notices } = await setup({ maestro });
+        answering(maestro, [pending, ok(tavernParts()[1])]);
+        const first = intent.read({ force: true });
+        await flush();
+        const waiting = api().readIntent!({ force: true });
+        release(ok(tavernParts()[0]));
+        const [result, outcome] = await Promise.all([first, waiting]);
+        expect(outcome).toMatchObject({ ok: true, characters: 4, message: result.message });
+        expect(maestro.requests).toHaveLength(2);
+        expect(notices.some((item) => item.text === 'Замысел уже читается.')).toBe(false);
+        expect(api().intentState!()?.running).toBe(false);
+    });
+
+    it('has no state outside a solo chat and says why it cannot read there', async () => {
+        const { h } = await setup();
+        await switchChat(h.mock, 'group-chat', { group: true });
+        expect(api().intentState!()).toBeNull();
+        expect(await api().readIntent!()).toMatchObject({
+            ok: false,
+            error: 'Замысел читается только в чате с одним персонажем.',
+        });
+    });
+
+    it('answers «not available» when the module is off', async () => {
+        const { h } = await setup();
+        await h.runtime.modules.disable('intent');
+        expect(api().intentState!()).toBeNull();
+        expect(await api().readIntent!({ force: true })).toEqual({
+            ok: false,
+            characters: 0,
+            error: 'Замысел сейчас не прочитать: Dramatis или его модуль «Замысел автора» выключен.',
+            message: 'Замысел сейчас не прочитать: Dramatis или его модуль «Замысел автора» выключен.',
+        });
+    });
+});
+
 describe('intent — settings and slash command', () => {
     it('shows the «Замысел» section with the switch, the card’s status and the read button', async () => {
         const { h } = await setup();
@@ -520,6 +617,13 @@ describe('intent — settings and slash command', () => {
         await until(() => section.textContent!.includes('Прочитан'));
         expect(profilesOf(h.mock)!.characters).toHaveLength(4);
         expect(section.textContent).toMatch(/Прочитан \d/);
+
+        const open = [...section.querySelectorAll('button')].find(
+            (node) => node.textContent === 'Открыть лист замысла',
+        )!;
+        expect(document.querySelector('[data-window="cast"]')).toBeNull();
+        open.click();
+        expect(document.querySelector('[data-window="cast"] .dramatis-window-title')?.textContent).toBe('Лист замысла');
     });
 
     it('/dramatis-read reads again and answers with the summary or the error', async () => {

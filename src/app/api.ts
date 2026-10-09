@@ -1,11 +1,18 @@
 // DRAMATIS_API v1 (src/shared/apis.ts): published on globalThis while Dramatis runs, with a `dramatis-api-ready` window
 // event, and removed on disable. Every method has a safe default; modules fill them in with parts —
 // `app.modules.expose('api', part)` during init (released automatically when the module stops) — and the latest part
-// that defines a method answers it. While Dramatis is switched off in its settings every method gives its default.
+// that defines a method answers it. While Dramatis is switched off in its settings every method gives its default
+// (readIntent: a failed outcome saying the reading is not available).
 // onChange listeners fire (once per microtask) when the state, the profiles, the chat, the parts or the switch change.
 import { DRAMATIS_API_GLOBAL, DRAMATIS_API_READY_EVENT } from '../shared/apis';
-import type { ApiUnsubscribe, DramatisApiV1 } from '../shared/apis';
-import type { Bus, Logger, SettingsService, Unsubscribe } from '../shared/contracts';
+import type {
+    ApiUnsubscribe,
+    DramatisApiV1,
+    DramatisCharacterView,
+    DramatisIntentState,
+    DramatisReadOutcome,
+} from '../shared/apis';
+import type { Bus, I18n, Logger, SettingsService, Unsubscribe } from '../shared/contracts';
 
 /** What a module may provide (every member optional). */
 export type DramatisApiPart = Partial<Omit<DramatisApiV1, 'version' | 'dramatisVersion' | 'onChange'>>;
@@ -31,6 +38,8 @@ export interface ApiPublisherDeps {
     settings: SettingsService;
     bus: Bus;
     log: Logger;
+    /** For the words of the defaults (readIntent while nothing can read); the key itself without it. */
+    i18n?: I18n;
 }
 
 type Method = keyof DramatisApiPart;
@@ -57,6 +66,12 @@ export function createApiPublisher(deps: ApiPublisherDeps): ApiPublisher {
             }
         }
         return fallback;
+    }
+
+    /** readIntent when no part can read (Dramatis or its intent module is off) or the reading broke. */
+    function noReading(): DramatisReadOutcome {
+        const error = deps.i18n?.t('core.api.noReading') ?? 'core.api.noReading';
+        return { ok: false, characters: 0, error, message: error };
     }
 
     function notify(): void {
@@ -90,6 +105,18 @@ export function createApiPublisher(deps: ApiPublisherDeps): ApiPublisher {
         startCast: (greeting: number) => [
             ...call<'startCast', ReturnType<NonNullable<DramatisApiV1['startCast']>>>('startCast', [], [greeting]),
         ],
+        intentState: () => call<'intentState', DramatisIntentState | null>('intentState', null),
+        readIntent: (options?: { force?: boolean }) =>
+            Promise.resolve(call<'readIntent', Promise<DramatisReadOutcome> | null>('readIntent', null, [options]))
+                .then((outcome) => outcome ?? noReading())
+                .catch((error: unknown) => {
+                    log.warn('DRAMATIS_API.readIntent failed', error);
+                    return noReading();
+                }),
+        describe: (name: string) => call<'describe', DramatisCharacterView | null>('describe', null, [name]),
+        openSheet: (name?: string) => {
+            call<'openSheet', void>('openSheet', undefined, [name]);
+        },
         onChange(listener: () => void): ApiUnsubscribe {
             listeners.add(listener);
             return () => {
