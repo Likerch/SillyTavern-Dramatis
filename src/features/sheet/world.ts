@@ -579,7 +579,7 @@ export function renderReputation(ctx: SheetCtx): HTMLElement[] {
                 el('div', { class: 'dramatis-sheet-unit-head' }, [
                     el('div', {
                         class: 'dramatis-sheet-unit-title',
-                        text: item.among === '*' ? t('sheet.reputation.everyone') : item.among,
+                        text: item.among === '*' ? t('sheet.reputation.everyone') : ctx.tr(item.among),
                     }),
                     el('span', { class: 'dramatis-sheet-unit-actions' }, [
                         button({

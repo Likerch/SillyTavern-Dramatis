@@ -25,7 +25,7 @@ const SOURCES: readonly AppetiteSource[] = ['individual', 'species', 'culture', 
 
 export function appetiteTitle(b: ProfileBind, appetite: Appetite): string {
     const kind = appetiteKindLabel(appetite.kind, b.ctx.lang);
-    return appetite.label ? `${appetite.label} (${kind})` : kind;
+    return appetite.label ? `${b.ctx.tr(appetite.label)} (${kind})` : kind;
 }
 
 export function renderAppetites(b: ProfileBind): HTMLElement[] {

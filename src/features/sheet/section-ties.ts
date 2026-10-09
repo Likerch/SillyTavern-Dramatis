@@ -54,7 +54,7 @@ function reasonLine(b: ProfileBind, reason: Reason, onRemove?: () => Promise<voi
         reason.scenesLeft === null ? t('sheet.reason.permanent') : t('sheet.reason.scenes', { n: reason.scenesLeft });
     return el('li', { class: 'dramatis-sheet-reason' }, [
         el('span', { class: 'dramatis-sheet-reason-delta', text: signed(reason.delta) }),
-        el('span', { class: 'dramatis-sheet-reason-text', text: reason.text }),
+        el('span', { class: 'dramatis-sheet-reason-text', text: b.ctx.tr(reason.text) }),
         el('span', { class: 'dramatis-muted', text: reason.stacks > 1 ? `${when} · ×${reason.stacks}` : when }),
         isUserReason(reason) ? originBadge(b.ctx, 'user') : null,
         onRemove

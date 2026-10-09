@@ -14,6 +14,8 @@ export const SHEET_STRINGS: I18nParts = {
         'sheet.slash.noCast': 'There is no cast yet: open a chat with a character first.',
         'sheet.slash.notFound': 'No one called «{name}» in the cast.',
         'sheet.saveFailed': 'The change was not saved (no chat, or another tab saved first). Look at the sheet again.',
+        'sheet.translation.hint':
+            'Translation for reading. The field holds the stored text the model sees: edit it in English or in Russian.',
 
         'sheet.empty.noEngine': 'The engine is off: turn on the Dramatis «engine» module to see the cast.',
         'sheet.empty.group': 'Group chats are not supported yet: open a chat with one character or a narrator card.',
@@ -537,6 +539,8 @@ export const SHEET_STRINGS: I18nParts = {
         'sheet.slash.noCast': 'Состава пока нет: сначала открой чат с персонажем.',
         'sheet.slash.notFound': 'В составе нет никого по имени «{name}».',
         'sheet.saveFailed': 'Правка не сохранилась (нет чата или другая вкладка успела раньше). Проверь лист ещё раз.',
+        'sheet.translation.hint':
+            'Перевод для чтения. В поле — сохранённый текст, который видит модель: правь его по-английски или по-русски.',
 
         'sheet.empty.noEngine': 'Движок выключен: включи модуль Dramatis «engine», чтобы увидеть состав.',
         'sheet.empty.group':

@@ -2,9 +2,18 @@
 // changes (keeping the scroll position and the focused control, and never under a field the user is typing in),
 // follows the secrets lever and the UI language, switches between tabs and an accordion with the window width, and
 // runs the intent reading for the header.
+//
+// Display translation (features/translate): free text the page shows goes through ctx.tr() and English field values
+// get a Russian hint (translation.ts); after each render the strings on screen without a translation are asked for —
+// interactive when the render is the user's own doing (opening the window, a page, a tab, a filter, a click: it may use
+// the own connection without Maestro and skips Maestro's leader and cap checks), background when a change he did not
+// ask for re-rendered it (a pass, another tab, arriving translations). Arriving translations re-render the window.
 import type { EngineApi } from '../engine/api';
 import { ENGINE_API } from '../engine/api';
+import { TRANSLATE_API, TRANSLATE_DELAYS } from '../translate/api';
+import type { TranslateApi, TranslationSource } from '../translate/api';
 import { chatLevers } from '../../domain/levers';
+import { whoOf } from '../../domain/translate';
 import type { App, Logger, Unsubscribe } from '../../shared/contracts';
 import { clear, el } from '../../ui/dom';
 import { KEY_ATTR } from '../../ui/form';
@@ -18,6 +27,7 @@ import { INTENT_API } from './types';
 import type { IntentApi, IntentReadResult, ListFilter, Route, SheetCtx, SheetSession, SheetSettings } from './types';
 import { renderLevers } from './levers';
 import { renderMetrics } from './metrics';
+import { annotateFields } from './translation';
 import { renderInvariants, renderReputation, renderRules } from './world';
 
 export interface SheetDeps {
@@ -74,6 +84,12 @@ export class SheetView {
     private poll: ReturnType<typeof setTimeout> | null = null;
     private resetScroll = true;
     private waiting = false;
+    private translateRef: TranslateApi | null = null;
+    private translateOff: Unsubscribe | null = null;
+    /** The next render with content is the user's own doing: what it shows may be translated interactively. */
+    private byUser = true;
+    /** Free text the render in progress showed through ctx.tr(). */
+    private shown: TranslationSource[] = [];
 
     constructor(
         private readonly deps: SheetDeps,
@@ -115,6 +131,8 @@ export class SheetView {
         for (const off of this.offs.splice(0)) off();
         this.engineOff?.();
         this.engineOff = null;
+        this.translateOff?.();
+        this.translateOff = null;
         if (this.poll) clearTimeout(this.poll);
         this.poll = null;
     }
@@ -152,8 +170,10 @@ export class SheetView {
         clear(this.container);
         const root = el('div', { class: ['dramatis-sheet', 'dramatis-ui', this.narrow && 'dramatis-sheet-narrow'] });
         this.container.appendChild(root);
+        this.shown = [];
         try {
             for (const node of this.build()) root.appendChild(node);
+            this.translateShown(root);
         } catch (error) {
             this.deps.log.error('sheet render failed', error);
             root.appendChild(
@@ -177,6 +197,42 @@ export class SheetView {
             this.engineRef = engine;
         }
         return engine;
+    }
+
+    private translator(): TranslateApi | null {
+        const api = this.deps.app.modules.api<TranslateApi>(TRANSLATE_API) ?? null;
+        if (api !== this.translateRef) {
+            this.translateOff?.();
+            this.translateOff = api ? api.onChange(() => this.renderSoon()) : null;
+            this.translateRef = api;
+        }
+        return api;
+    }
+
+    /** Whom the page is about (a character's page), for the Russian endings of its translations. */
+    private routeWho(view: NonNullable<ReturnType<EngineApi['view']>>): string | undefined {
+        if (this.route.page !== 'character') return undefined;
+        const profile = view.byId.get(this.route.id);
+        return profile ? whoOf(profile) : undefined;
+    }
+
+    /** Hints under English fields, then asks for what the page shows without a translation yet. */
+    private translateShown(root: HTMLElement): void {
+        const translate = this.translator();
+        const view = this.engineRef?.view();
+        if (!translate || !view || translate.language() !== 'ru') return;
+        const title = this.deps.app.i18n.t('sheet.translation.hint');
+        const shown = [...this.shown, ...annotateFields(root, translate, title, this.routeWho(view))];
+        const interactive = this.byUser;
+        this.byUser = false;
+        if (!shown.some((source) => translate.translation(source.text) === undefined)) return;
+        translate.schedule(() => shown, { interactive, delayMs: TRANSLATE_DELAYS.sheet });
+    }
+
+    /** Re-renders as the user's own doing (a click, a page). */
+    private renderByUser(): void {
+        this.byUser = true;
+        this.render();
     }
 
     private intentApi(): IntentApi | undefined {
@@ -219,6 +275,8 @@ export class SheetView {
 
     private ctx(engine: EngineApi, view: NonNullable<ReturnType<EngineApi['view']>>): SheetCtx {
         const { app, log, settings } = this.deps;
+        const translate = this.translator();
+        const pageWho = this.routeWho(view);
         return {
             app,
             log,
@@ -229,8 +287,15 @@ export class SheetView {
             secrets: chatLevers(app.settings.get(), view.state.overrides).secrets,
             session: this.session,
             settings,
+            tr: (text, who) => {
+                if (!text) return '';
+                if (!translate?.needs(text)) return text;
+                const about = who ?? pageWho;
+                this.shown.push(about ? { text, who: about } : { text });
+                return translate.display(text);
+            },
             navigate: (route) => this.navigate(route),
-            rerender: () => this.render(),
+            rerender: () => this.renderByUser(),
             save: async (job) => {
                 let saved = false;
                 try {
@@ -261,7 +326,7 @@ export class SheetView {
     navigate(route: Route): void {
         this.route = route;
         this.resetScroll = true;
-        this.render();
+        this.renderByUser();
         // The new page starts at its top, focus on its first control.
         this.container.querySelector<HTMLElement>('button, input, select, textarea')?.focus({ preventScroll: true });
     }
@@ -269,7 +334,7 @@ export class SheetView {
     private setFilter(filter: ListFilter): void {
         this.deps.settings.filter = filter;
         this.deps.app.settings.save();
-        this.render();
+        this.renderByUser();
     }
 
     private onChatChanged(): void {
@@ -305,7 +370,7 @@ export class SheetView {
             take: (index) => this.takeBack(card, index),
             dismiss: () => {
                 this.deps.results.delete(card);
-                this.render();
+                this.renderByUser();
             },
         };
     }

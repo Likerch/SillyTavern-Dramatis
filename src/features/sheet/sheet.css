@@ -485,6 +485,18 @@
     font-weight: 600;
 }
 
+/* The Russian of an English field value (the field keeps the stored text): under the field, or under a list row. */
+.dramatis-translation {
+    flex: 1 1 100%;
+    min-width: 0;
+    margin: 0 0 2px;
+    color: var(--dramatis-muted);
+    font-size: 0.85em;
+    font-style: italic;
+    line-height: 1.3;
+    overflow-wrap: anywhere;
+}
+
 .dramatis-sheet-item-remove {
     align-self: flex-start;
 }

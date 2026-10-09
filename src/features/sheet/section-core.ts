@@ -20,6 +20,7 @@ import {
     toggleCtl,
 } from './parts';
 import type { ProfileBind } from './parts';
+import { raw } from './translation';
 import { words } from './words';
 
 const DEFAULT_WOUND: Wound = { ghost: '', lie: '', triggers: [], coping: 'avoid' };
@@ -39,29 +40,31 @@ export function renderCore(b: ProfileBind): HTMLElement[] {
     out.push(heading(t('sheet.core.identity')));
     out.push(
         profileUnit(b, t('sheet.field.name'), 'name', [
-            textInput({
-                value: profile.name,
-                label: t('sheet.field.name'),
-                key: b.key('name'),
-                onCommit: (value) => {
-                    const name = cleanText(value, LIMITS.name);
-                    if (!name) {
-                        ctx.rerender();
-                        return;
-                    }
-                    return b.edit('name', name);
-                },
-            }),
+            raw(
+                textInput({
+                    value: profile.name,
+                    label: t('sheet.field.name'),
+                    key: b.key('name'),
+                    onCommit: (value) => {
+                        const name = cleanText(value, LIMITS.name);
+                        if (!name) {
+                            ctx.rerender();
+                            return;
+                        }
+                        return b.edit('name', name);
+                    },
+                }),
+            ),
         ]),
     );
     out.push(
         profileUnit(b, t('sheet.field.english'), 'english', [
-            textCtl(b, 'english', t('sheet.field.english'), { optional: true, max: LIMITS.name }),
+            raw(textCtl(b, 'english', t('sheet.field.english'), { optional: true, max: LIMITS.name })),
         ]),
     );
     out.push(
         profileUnit(b, t('sheet.field.aliases'), 'aliases', [
-            listCtl(b, 'aliases', t('sheet.field.aliases'), { max: LIMITS.aliases, maxLength: LIMITS.name }),
+            raw(listCtl(b, 'aliases', t('sheet.field.aliases'), { max: LIMITS.aliases, maxLength: LIMITS.name })),
         ]),
     );
     out.push(
@@ -503,7 +506,14 @@ export function renderCore(b: ProfileBind): HTMLElement[] {
             b,
             t('sheet.field.anchors'),
             'core.anchors',
-            [listCtl(b, 'core.anchors', t('sheet.field.anchors'), { max: LIMITS.anchors, maxLength: LIMITS.name })],
+            [
+                raw(
+                    listCtl(b, 'core.anchors', t('sheet.field.anchors'), {
+                        max: LIMITS.anchors,
+                        maxLength: LIMITS.name,
+                    }),
+                ),
+            ],
             { hint: t('sheet.core.anchorsHint') },
         ),
     );
@@ -544,7 +554,7 @@ function renderBounds(b: ProfileBind): HTMLElement {
                 return list.filter((item) => item.min !== undefined || item.max !== undefined);
             });
         return el('div', { class: 'dramatis-sheet-item' }, [
-            el('div', { class: 'dramatis-sheet-item-title', text: known.get(bound.target) ?? bound.target }),
+            el('div', { class: 'dramatis-sheet-item-title', text: known.get(bound.target) ?? ctx.tr(bound.target) }),
             row(
                 t('sheet.bounds.min'),
                 stanceChoice(bound.min, t('sheet.bounds.min'), b.key(`core.stanceBounds.${index}.min`), (value) =>

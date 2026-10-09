@@ -81,6 +81,12 @@ export interface SheetCtx {
     secrets: SecretsMode;
     session: SheetSession;
     settings: SheetSettings;
+    /**
+     * Free text as the player reads it: the Russian translation when the windows show Russian and it is known, else the
+     * text as stored. What it is given is asked for translation after the render (`who`: whom it is about, by default
+     * the character of the page).
+     */
+    tr(text: string | undefined, who?: string): string;
     navigate(route: Route): void;
     /** Re-renders the window (after a local state change). */
     rerender(): void;

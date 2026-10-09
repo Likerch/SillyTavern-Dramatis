@@ -13,6 +13,7 @@ import type { EngineApi, EngineView } from '../../../src/features/engine/api';
 import { sheetModule } from '../../../src/features/sheet';
 import { SHEET_STRINGS } from '../../../src/features/sheet/strings';
 import type { IntentApi, IntentReadResult, SheetSettings } from '../../../src/features/sheet/types';
+import type { TranslateApi } from '../../../src/features/translate/api';
 import type { App, DramatisSettings, SettingsService, Unsubscribe } from '../../../src/shared/contracts';
 import { UI_STRINGS, createUi } from '../../../src/ui';
 import type { UiImpl } from '../../../src/ui';
@@ -185,6 +186,8 @@ export interface Harness {
 export interface HarnessOptions {
     engine?: FakeEngine | null;
     intent?: FakeIntent | null;
+    /** The «translate» module's API (absent: the module is off). */
+    translate?: TranslateApi;
     secrets?: DramatisSettings['secrets'];
     width?: number;
 }
@@ -242,7 +245,13 @@ export function harness(options: HarnessOptions = {}): Harness {
             enable: async () => undefined,
             disable: async () => undefined,
             api: <T>(key: string) =>
-                (key === 'engine' ? engine : key === 'intent' ? intent : undefined) as T | undefined,
+                (key === 'engine'
+                    ? engine
+                    : key === 'intent'
+                      ? intent
+                      : key === 'translate'
+                        ? options.translate
+                        : undefined) as T | undefined,
             expose: (key: string, api: unknown) => void exposed.set(key, api),
         },
         rng: () => 0.5,

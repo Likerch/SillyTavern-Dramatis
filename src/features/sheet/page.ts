@@ -46,7 +46,7 @@ export function renderCharacterPage(ctx: SheetCtx, id: string, narrow: boolean):
     const b = bindProfile(ctx, profile);
     const present = ctx.view.present.includes(id);
     const extra = isExtra(ctx.view, id);
-    const sub = [profile.role, profile.species].filter(Boolean).join(' · ');
+    const sub = [ctx.tr(profile.role), ctx.tr(profile.species)].filter(Boolean).join(' · ');
 
     const remove = keyed(
         button({

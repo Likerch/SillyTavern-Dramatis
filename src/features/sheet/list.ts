@@ -3,6 +3,7 @@
 // group.
 import { PLAYER_ID } from '../../domain/model';
 import type { CharacterProfile, WorldTone } from '../../domain/model';
+import { whoOf } from '../../domain/translate';
 import { appetiteKindLabel, bandLabel, lodLabel, worldToneLabel } from '../../domain/ladders';
 import { LIMITS, cleanText } from '../../domain/profile-defaults';
 import { select } from '../../ui/controls';
@@ -213,7 +214,12 @@ function listRow(ctx: SheetCtx, profile: CharacterProfile): HTMLElement {
     const band = view.bands[profile.id];
     const playerTie = live?.ties[PLAYER_ID] ?? profile.ties.find((tie) => tie.target === PLAYER_ID);
     const extra = view.state.extras.some((other) => other.id === profile.id);
-    const sub = [profile.role, profile.species, profile.kind === 'group' ? t('sheet.kind.group') : '']
+    const who = whoOf(profile);
+    const sub = [
+        ctx.tr(profile.role, who),
+        ctx.tr(profile.species, who),
+        profile.kind === 'group' ? t('sheet.kind.group') : '',
+    ]
         .filter(Boolean)
         .join(' · ');
 
@@ -223,7 +229,7 @@ function listRow(ctx: SheetCtx, profile: CharacterProfile): HTMLElement {
         const pressure = live?.appetites[appetite.id]?.pressure ?? appetite.baseline;
         if (pressure <= 0 || (strongest && strongest.pressure >= pressure)) continue;
         strongest = {
-            label: appetite.label || appetiteKindLabel(appetite.kind, ctx.lang),
+            label: appetite.label ? ctx.tr(appetite.label, who) : appetiteKindLabel(appetite.kind, ctx.lang),
             pressure,
             hidden: isHiddenAppetite(appetite),
         };

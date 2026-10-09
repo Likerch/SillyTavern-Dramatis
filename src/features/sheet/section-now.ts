@@ -14,6 +14,7 @@ import type {
 } from '../../domain/model';
 import { arcStageLabel, bandLabel, methodLabel, moodLabel, moveLabel } from '../../domain/ladders';
 import { LIMITS, cleanList, cleanText } from '../../domain/profile-defaults';
+import { translateSegments } from '../../domain/translate';
 import { select } from '../../ui/controls';
 import { button, el } from '../../ui/dom';
 import { listEditor, numberField, rangeInput, textInput } from '../../ui/form';
@@ -292,7 +293,7 @@ export function renderNow(b: ProfileBind): HTMLElement[] {
     const front = live.agenda.front;
     if (front) {
         const frontBlock = block(t('sheet.agenda.front'), [
-            el('div', { text: front.impulse }),
+            el('div', { text: ctx.tr(front.impulse) }),
             row(
                 t('sheet.clock.title'),
                 clockEditor(b, 'now.front.clock', front.clock, { min: 4, max: 8 }, (clock: Clock) =>
@@ -305,7 +306,7 @@ export function renderNow(b: ProfileBind): HTMLElement[] {
         const doom = spoiler(ctx, `${profile.id}:now.front.doom`, () =>
             el('div', { class: 'dramatis-sheet-inline' }, [
                 el('span', { class: 'dramatis-muted', text: t('sheet.front.doom') }),
-                el('span', { text: front.doom || '—' }),
+                el('span', { text: ctx.tr(front.doom) || '—' }),
             ]),
         );
         if (doom) frontBlock.lastElementChild?.appendChild(el('div', { class: 'dramatis-sheet-secret' }, [doom]));
@@ -632,6 +633,7 @@ function renderScheme(b: ProfileBind, scheme: Scheme): HTMLElement {
 /** «История»: the story log lines of this character, newest first. */
 export function renderHistory(b: ProfileBind): HTMLElement[] {
     const t = b.ctx.t;
+    const tr = (part: string) => b.ctx.tr(part);
     const lines = b.ctx.view.state.log.filter((event) => event.character === b.profile.id).reverse();
     if (!lines.length) return [emptyState(t('sheet.history.none'))];
     return [
@@ -641,7 +643,7 @@ export function renderHistory(b: ProfileBind): HTMLElement[] {
             lines.map((event) =>
                 el('li', { class: 'dramatis-sheet-log-line', data: { kind: event.kind } }, [
                     el('span', { class: 'dramatis-sheet-log-turn', text: t('sheet.history.turn', { n: event.turn }) }),
-                    el('span', { class: 'dramatis-sheet-log-text', text: event.text }),
+                    el('span', { class: 'dramatis-sheet-log-text', text: translateSegments(event.text, tr) }),
                 ]),
             ),
         ),
