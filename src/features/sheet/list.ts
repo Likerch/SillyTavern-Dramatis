@@ -78,9 +78,13 @@ function intentResult(ctx: SheetCtx, intent: IntentPanel): HTMLElement | null {
         parts.push(el('div', { text: summary }));
     }
     if (result.warnings.length) {
+        // Collapsed: a careful reading leaves many fields out (no quote, no field) — the rule working, not an error.
         parts.push(
-            el('ul', { class: 'dramatis-sheet-warnings', attrs: { 'aria-label': t('sheet.intent.warnings') } }, [
-                ...result.warnings.map((warning) => el('li', { text: warning })),
+            el('details', { class: 'dramatis-sheet-warnings-box' }, [
+                el('summary', { text: t('sheet.intent.warningsCount', { n: result.warnings.length }) }),
+                el('ul', { class: 'dramatis-sheet-warnings', attrs: { 'aria-label': t('sheet.intent.warnings') } }, [
+                    ...result.warnings.map((warning) => el('li', { text: warning })),
+                ]),
             ]),
         );
     }

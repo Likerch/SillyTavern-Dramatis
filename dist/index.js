@@ -1,5 +1,5 @@
 //#region package.json
-var version$2 = "1.0.0";
+var version$2 = "1.0.1";
 //#endregion
 //#region src/adapters/card/index.ts
 function str$4(value) {
@@ -20117,7 +20117,7 @@ var INTENT_STRINGS = {
 		"intent.progress": "Reading the author’s intent: part {n} of {total}…",
 		"intent.done": "Author’s intent read: {summary}.",
 		"intent.done.nobody": "Author’s intent read: the sources name nobody.",
-		"intent.done.warnings": "Notes ({count}): {list}",
+		"intent.done.warnings": "Notes: {count} — see the intent sheet.",
 		"intent.done.open": "Open",
 		"intent.failed": "The author’s intent was not read: {error}",
 		"intent.changed": "The card has changed since its intent was read. Read it again? Your own edits stay.",
@@ -20132,9 +20132,49 @@ var INTENT_STRINGS = {
 		"intent.error.save": "The reading could not be saved.",
 		"intent.error.unexpected": "Something went wrong: {error}",
 		"intent.warning.bad-answer": "part of the model’s answer could not be read",
+		"intent.path.core.concept": "the concept",
+		"intent.path.core.values": "the values",
+		"intent.path.core.temperament": "the temperament",
+		"intent.path.core.drives": "the drives",
+		"intent.path.core.wound": "the wound",
+		"intent.path.core.want": "the want",
+		"intent.path.core.need": "the need",
+		"intent.path.core.arcLock": "the arc lock",
+		"intent.path.core.signatures": "the if→then patterns",
+		"intent.path.core.tactics": "the tactics",
+		"intent.path.core.attachment": "the attachment",
+		"intent.path.core.commitment": "the persistence",
+		"intent.path.core.proactivity": "the initiative",
+		"intent.path.core.baselineMood": "the baseline mood",
+		"intent.path.core.mood": "the baseline mood",
+		"intent.path.core.stanceBounds": "the stance limits",
+		"intent.path.core.redLines": "the red lines",
+		"intent.path.core.keys": "the keys",
+		"intent.path.core.moralWeakness": "the weakness",
+		"intent.path.core.voice": "the voice sample",
+		"intent.path.core.justifications": "the justifications",
+		"intent.path.core.dark": "the dark traits",
+		"intent.path.core.corruption": "the corruption",
+		"intent.path.core.anchors": "the anchors",
+		"intent.path.agenda.dream": "the dream",
+		"intent.path.agenda.goals": "the goals",
+		"intent.path.agenda.intentions": "the intentions",
+		"intent.path.agenda.front": "the agenda in the world",
+		"intent.path.agenda.resources": "the resources",
+		"intent.path.agenda.leverage": "the leverage",
+		"intent.path.agenda.secrets": "the secrets",
+		"intent.path.agenda.ifIgnored": "«if nobody intervenes»",
+		"intent.path.ties": "the stance toward {target}",
+		"intent.path.appetites": "the appetite «{target}»",
+		"intent.path.starts": "starting scene {target}",
+		"intent.path.worldTone": "the world tone",
+		"intent.path.reputation": "the reputation",
+		"intent.path.invariants": "the invariants",
+		"intent.path.rules": "the group rule",
+		"intent.path.player": "you",
 		"intent.warning.unevidenced": "{who}{path} has no quote and was left out",
-		"intent.warning.quote-unverified": "{who}the quote for {path} was not found in the sources",
-		"intent.warning.stance-capped": "{who}the stance {path} was lowered: the sources speak of hostility",
+		"intent.warning.quote-unverified": "{who}{path}: the quote was not found in the sources",
+		"intent.warning.stance-capped": "{who}{path} was lowered: the sources speak of hostility",
 		"intent.warning.stranger-stance": "{who}the stance toward the player was taken from how they treat strangers",
 		"intent.warning.rule-target": "the rule «{name}» aims at a class, not at the player: the scenario does not say so",
 		"intent.warning.minor-appetite": "{who}a minor — sexual appetites removed",
@@ -20159,7 +20199,7 @@ var INTENT_STRINGS = {
 		"intent.progress": "Читаю замысел: часть {n} из {total}…",
 		"intent.done": "Замысел прочитан: {summary}.",
 		"intent.done.nobody": "Замысел прочитан: в источниках никого не нашлось.",
-		"intent.done.warnings": "Замечания ({count}): {list}",
+		"intent.done.warnings": "Замечаний: {count} — подробно в листе замысла.",
 		"intent.done.open": "Открыть",
 		"intent.failed": "Замысел не прочитан: {error}",
 		"intent.changed": "Карточка изменилась с тех пор, как замысел был прочитан. Перечитать? Твои правки останутся.",
@@ -20174,9 +20214,49 @@ var INTENT_STRINGS = {
 		"intent.error.save": "Не получилось сохранить прочитанное.",
 		"intent.error.unexpected": "Что-то пошло не так: {error}",
 		"intent.warning.bad-answer": "часть ответа модели не удалось разобрать",
-		"intent.warning.unevidenced": "{who}{path} — без цитаты, пропущено",
-		"intent.warning.quote-unverified": "{who}цитата к {path} не нашлась в источниках",
-		"intent.warning.stance-capped": "{who}позиция {path} снижена: источники говорят о враждебности",
+		"intent.path.core.concept": "суть",
+		"intent.path.core.values": "ценности",
+		"intent.path.core.temperament": "темперамент",
+		"intent.path.core.drives": "двигатели",
+		"intent.path.core.wound": "рана",
+		"intent.path.core.want": "чего хочет",
+		"intent.path.core.need": "что нужно на самом деле",
+		"intent.path.core.arcLock": "замок дуги",
+		"intent.path.core.signatures": "правила «если → то»",
+		"intent.path.core.tactics": "тактики",
+		"intent.path.core.attachment": "привязанность",
+		"intent.path.core.commitment": "упорство",
+		"intent.path.core.proactivity": "инициативность",
+		"intent.path.core.baselineMood": "базовое настроение",
+		"intent.path.core.mood": "базовое настроение",
+		"intent.path.core.stanceBounds": "границы отношения",
+		"intent.path.core.redLines": "красные линии",
+		"intent.path.core.keys": "ключи",
+		"intent.path.core.moralWeakness": "слабость",
+		"intent.path.core.voice": "образец речи",
+		"intent.path.core.justifications": "оправдания",
+		"intent.path.core.dark": "тёмные черты",
+		"intent.path.core.corruption": "разложение",
+		"intent.path.core.anchors": "якоря человечности",
+		"intent.path.agenda.dream": "мечта",
+		"intent.path.agenda.goals": "цели",
+		"intent.path.agenda.intentions": "намерения",
+		"intent.path.agenda.front": "повестка в мире",
+		"intent.path.agenda.resources": "ресурсы",
+		"intent.path.agenda.leverage": "рычаги",
+		"intent.path.agenda.secrets": "тайны",
+		"intent.path.agenda.ifIgnored": "«если не вмешаться»",
+		"intent.path.ties": "отношение к {target}",
+		"intent.path.appetites": "влечение «{target}»",
+		"intent.path.starts": "стартовая сцена {target}",
+		"intent.path.worldTone": "тон мира",
+		"intent.path.reputation": "репутация",
+		"intent.path.invariants": "инварианты",
+		"intent.path.rules": "правило группы",
+		"intent.path.player": "тебе",
+		"intent.warning.unevidenced": "{who}{path} — без цитаты, не взято",
+		"intent.warning.quote-unverified": "{who}{path}: цитата не нашлась в источниках",
+		"intent.warning.stance-capped": "{who}{path} снижено: источники говорят о враждебности",
 		"intent.warning.stranger-stance": "{who}позиция к игроку взята из отношения к чужакам",
 		"intent.warning.rule-target": "правило «{name}» направлено на всех подходящих, а не на игрока: в сценарии нет прямых слов",
 		"intent.warning.minor-appetite": "{who}несовершеннолетний — сексуальные влечения убраны",
@@ -20211,8 +20291,22 @@ function warningText(i18n, warning) {
 	return i18n.t(`intent.warning.${warning.code}`, {
 		who: name ? `${name}: ` : "",
 		name,
-		path: warning.path ?? ""
+		path: pathLabel(i18n, warning.path ?? "")
 	});
+}
+/** A profile path in words («core.drives» → «двигатели», «ties.@player» → «отношение к тебе»); unknown: as is. */
+function pathLabel(i18n, path) {
+	if (!path) return "";
+	const exact = `intent.path.${path}`;
+	if (i18n.t(exact) !== exact) return i18n.t(exact);
+	const [root = "", ...rest] = path.split(".");
+	const two = rest.length ? `intent.path.${root}.${rest[0]}` : "";
+	if (two && i18n.t(two) !== two) return i18n.t(two);
+	const tail = rest.join(".");
+	const target = tail === "@player" || tail.toUpperCase() === "PLAYER" ? i18n.t("intent.path.player") : tail;
+	const keyed = `intent.path.${root}`;
+	const label = i18n.t(keyed, { target });
+	return label === keyed ? path : label;
 }
 //#endregion
 //#region src/features/intent/reader.ts
@@ -20606,6 +20700,11 @@ var intentModule = {
 				maestroOffs.push(api.journal.registerUndo(PROFILES_TARGET, (change) => reader.undo(change)));
 			} catch (error) {
 				log.warn("could not register the profiles undo with Maestro", error);
+			}
+			try {
+				maestroOffs.push(api.leader.onChange((leader) => leader && check()));
+			} catch (error) {
+				log.debug("Maestro leader subscription failed", error);
 			}
 		}
 		function hasUserMessages() {
@@ -21254,6 +21353,7 @@ var SHEET_STRINGS = {
 		"sheet.intent.done": "Intent read: {n} in the cast.",
 		"sheet.intent.skipped": "Nothing to read again: the sources have not changed.",
 		"sheet.intent.warnings": "Notes of the reading",
+		"sheet.intent.warningsCount": "Notes of the reading: {n}",
 		"sheet.intent.diff": "Differences with the new reading",
 		"sheet.intent.cardLevel": "Card",
 		"sheet.intent.dismiss": "Hide",
@@ -21745,6 +21845,7 @@ var SHEET_STRINGS = {
 		"sheet.intent.done": "Замысел прочитан: в составе {n}.",
 		"sheet.intent.skipped": "Перечитывать нечего: источники не изменились.",
 		"sheet.intent.warnings": "Замечания чтения",
+		"sheet.intent.warningsCount": "Замечания чтения: {n}",
 		"sheet.intent.diff": "Расхождения с новым чтением",
 		"sheet.intent.cardLevel": "Карточка",
 		"sheet.intent.dismiss": "Скрыть",
@@ -23141,10 +23242,10 @@ function intentResult(ctx, intent) {
 		const summary = result.skipped ? result.message ?? t("sheet.intent.skipped") : result.message ?? t("sheet.intent.done", { n: result.characters });
 		parts.push(el("div", { text: summary }));
 	}
-	if (result.warnings.length) parts.push(el("ul", {
+	if (result.warnings.length) parts.push(el("details", { class: "dramatis-sheet-warnings-box" }, [el("summary", { text: t("sheet.intent.warningsCount", { n: result.warnings.length }) }), el("ul", {
 		class: "dramatis-sheet-warnings",
 		attrs: { "aria-label": t("sheet.intent.warnings") }
-	}, [...result.warnings.map((warning) => el("li", { text: warning }))]));
+	}, [...result.warnings.map((warning) => el("li", { text: warning }))])]));
 	if (result.diff.length) {
 		parts.push(el("div", {
 			class: "dramatis-sheet-unit-title",

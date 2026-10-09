@@ -71,6 +71,12 @@ export const intentModule: DramatisModule<IntentSettings> = {
             } catch (error) {
                 log.warn('could not register the profiles undo with Maestro', error);
             }
+            // Maestro picks the chat's leading tab a moment after the chat opens: the auto-read waits for it.
+            try {
+                maestroOffs.push(api.leader.onChange((leader) => leader && check()));
+            } catch (error) {
+                log.debug('Maestro leader subscription failed', error);
+            }
         }
 
         function hasUserMessages(): boolean {

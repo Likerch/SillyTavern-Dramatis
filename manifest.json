@@ -6,7 +6,7 @@
   "js": "dist/index.js",
   "css": "dist/style.css",
   "author": "Likerchik",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "homePage": "https://github.com/Likerch/SillyTavern-Dramatis",
   "auto_update": true,
   "minimum_client_version": "1.19.0",

@@ -150,7 +150,9 @@ describe('intent — reading the card', () => {
         expect(tasks).toContain(INTENT_TASK);
         const result = await intent.read({ force: true });
         expect(result).toMatchObject({ ok: true, characters: 4 });
-        expect(result.message).toMatch(/^Замысел прочитан: 3 персонажа, 1 группа\. Замечания \(\d+\): /);
+        expect(result.message).toMatch(
+            /^Замысел прочитан: 3 персонажа, 1 группа\. Замечаний: \d+ — подробно в листе замысла\.$/,
+        );
 
         const requests = maestro!.requests;
         expect(requests).toHaveLength(2);
@@ -192,7 +194,7 @@ describe('intent — reading the card', () => {
         const { intent } = await setup({ replies: [ok(tavernAnswer(1)), ok(answer())] });
         const result = await intent.read({ force: true });
         expect(result.ok).toBe(true);
-        expect(result.warnings.some((line) => line.startsWith('Ильва: позиция ties.@player снижена'))).toBe(true);
+        expect(result.warnings.some((line) => line.startsWith('Ильва: отношение к тебе снижено'))).toBe(true);
     });
 
     it('keeps the user’s edits and locks and reports them in the diff', async () => {
@@ -398,6 +400,26 @@ describe('intent — reading by itself', () => {
         await switchChat(h.mock, 'chat-2', { maestro: maestro! });
         await flush();
         expect(maestro!.requests).toHaveLength(2);
+    });
+
+    it('waits for Maestro to make this tab the chat’s leader, then reads', async () => {
+        const maestro = fakeMaestro();
+        let leader = false;
+        const listeners: ((leader: boolean) => void)[] = [];
+        maestro.api.leader = {
+            isLeader: () => leader,
+            onChange: (listener) => {
+                listeners.push(listener);
+                return () => listeners.splice(listeners.indexOf(listener), 1);
+            },
+        };
+        const { h } = await setup({ autoRead: true, maestro });
+        await flush();
+        expect(maestro.requests).toHaveLength(0);
+        leader = true;
+        for (const listener of [...listeners]) listener(true);
+        await until(() => !!profilesOf(h.mock)?.intent && maestro.requests.length === 2);
+        expect(profilesOf(h.mock)!.characters).toHaveLength(4);
     });
 
     it('is background work with Maestro (leader tab, daily cap): a «not now» answer stays quiet', async () => {
