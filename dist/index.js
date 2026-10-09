@@ -1,5 +1,5 @@
 //#region package.json
-var version$2 = "1.2.0";
+var version$2 = "1.3.0";
 //#endregion
 //#region src/adapters/card/index.ts
 function str$4(value) {
@@ -100,14 +100,14 @@ function isDict$9(value) {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 /** Trims and drops brackets that wrap the whole value (`[Friend]`), as DES's renderers do. */
-function clean(value) {
+function clean$1(value) {
 	let result = value.trim();
 	while (result.length >= 2 && result.startsWith("[") && result.endsWith("]")) result = result.slice(1, -1).trim();
 	return result;
 }
 /** Text of a scalar or of `{value}` / `{text}` / `{description}`; arrays joined with ", ". Empty → undefined. */
 function textOf(value) {
-	if (typeof value === "string") return clean(value) || void 0;
+	if (typeof value === "string") return clean$1(value) || void 0;
 	if (typeof value === "number" || typeof value === "boolean") return String(value);
 	if (Array.isArray(value)) {
 		const parts = value.map(textOf).filter((part) => !!part);
@@ -151,7 +151,7 @@ function detailsOf(raw) {
 	return details;
 }
 function relationshipOf(entry) {
-	if (typeof entry.Relationship === "string") return clean(entry.Relationship) || void 0;
+	if (typeof entry.Relationship === "string") return clean$1(entry.Relationship) || void 0;
 	const relationship = entry.relationship;
 	if (isDict$9(relationship)) return textOf(relationship.status) ?? textOf(relationship);
 	return textOf(relationship);
@@ -249,6 +249,8 @@ var DES_KEYS = {
 /** DES's drawer toggle in the Extensions panel: present once DES has loaded. */
 var DES_DRAWER_SELECTOR = "#rpg-extension-enabled";
 var DES_FOLDER_RE = /dooms[-_ ]?enhancement[-_ ]?suite/i;
+/** DES's settings key: its folder ('third-party/Dooms-Enhancement-Suite'), or the old 'dooms-character-tracker'. */
+var DES_SETTINGS_RE = /^third-party\/(?:dooms[-_ ]?enhancement[-_ ]?suite|dooms[-_ ]?character[-_ ]?tracker)/i;
 function toCharacter(parsed) {
 	const character = {
 		name: parsed.name,
@@ -330,6 +332,25 @@ function createDesReader(host, log) {
 			const state = host.ctx().chatMetadata?.[DES_KEYS.chatMetadata];
 			const known = isDict$9(state) ? state.knownCharacters : void 0;
 			return isDict$9(known) ? Object.keys(known) : [];
+		},
+		aliases() {
+			const out = {};
+			try {
+				if (disabledInSt()) return out;
+				const settings = host.ctx().extensionSettings;
+				for (const [key, value] of Object.entries(isDict$9(settings) ? settings : {})) {
+					if (!DES_SETTINGS_RE.test(key) || !isDict$9(value) || !isDict$9(value.characterAliases)) continue;
+					for (const [rawCanonical, list] of Object.entries(value.characterAliases)) {
+						const canonical = rawCanonical.trim();
+						if (!canonical || !Array.isArray(list)) continue;
+						const names = list.filter((item) => typeof item === "string").map((item) => item.trim()).filter(Boolean);
+						if (names.length) out[canonical] = [.../* @__PURE__ */ new Set([...out[canonical] ?? [], ...names])];
+					}
+				}
+			} catch (error) {
+				log.debug("DES aliases could not be read", error);
+			}
+			return out;
 		}
 	};
 }
@@ -2358,7 +2379,8 @@ var CORE_STRINGS = {
 		"core.llm.parse": "The model’s answer could not be read.",
 		"core.llm.empty": "The model returned an empty answer.",
 		"core.llm.transport": "Could not reach the model: {error}",
-		"core.llm.failed": "The AI request failed: {error}"
+		"core.llm.failed": "The AI request failed: {error}",
+		"core.api.noReading": "The author’s intent cannot be read now: Dramatis or its «Author’s intent» module is switched off."
 	},
 	ru: {
 		"core.name": "Dramatis",
@@ -2376,7 +2398,8 @@ var CORE_STRINGS = {
 		"core.llm.parse": "Не получилось разобрать ответ модели.",
 		"core.llm.empty": "Модель вернула пустой ответ.",
 		"core.llm.transport": "Не удалось связаться с моделью: {error}",
-		"core.llm.failed": "Запрос к ИИ не удался: {error}"
+		"core.llm.failed": "Запрос к ИИ не удался: {error}",
+		"core.api.noReading": "Замысел сейчас не прочитать: Dramatis или его модуль «Замысел автора» выключен."
 	}
 };
 /** A human sentence for an LlmResult error code ('needs-maestro', 'no-profile', 'refusal', …). */
@@ -2903,6 +2926,124 @@ function button(options) {
 	}
 	return node;
 }
+//#endregion
+//#region src/ui/menu.ts
+/** ST's extensions menu (public/scripts/templates/wandMenu.html). */
+var EXTENSIONS_MENU_ID = "extensionsMenu";
+var MenuItems = class {
+	deps;
+	items = /* @__PURE__ */ new Map();
+	bodyObserver = null;
+	menuObserver = null;
+	observedMenu = null;
+	constructor(deps) {
+		this.deps = deps;
+	}
+	add(spec) {
+		if (typeof document === "undefined") return () => {};
+		this.items.get(spec.id)?.root.remove();
+		const entry = this.build(spec);
+		this.items.set(spec.id, entry);
+		this.ensure();
+		return () => {
+			if (this.items.get(spec.id) !== entry) return;
+			this.items.delete(spec.id);
+			entry.root.remove();
+			if (!this.items.size) this.unobserve();
+		};
+	}
+	/** Labels and tooltips follow the UI language. */
+	relabel() {
+		const t = this.deps.i18n.t.bind(this.deps.i18n);
+		for (const { spec, item, label } of this.items.values()) {
+			label.textContent = t(spec.labelKey);
+			if (spec.titleKey) item.setAttribute("title", t(spec.titleKey));
+		}
+	}
+	dispose() {
+		for (const entry of this.items.values()) entry.root.remove();
+		this.items.clear();
+		this.unobserve();
+	}
+	build(spec) {
+		const t = this.deps.i18n.t.bind(this.deps.i18n);
+		const iconClass = spec.icon.startsWith("fa-") ? spec.icon : `fa-${spec.icon}`;
+		const label = el("span", { text: t(spec.labelKey) });
+		const item = el("div", {
+			class: "list-group-item flex-container flexGap5 interactable dramatis-menu-item",
+			title: spec.titleKey ? t(spec.titleKey) : void 0,
+			data: { dramatisMenu: spec.id },
+			attrs: {
+				role: "button",
+				tabindex: "0"
+			}
+		}, [el("i", {
+			class: [
+				"fa-solid",
+				"fa-fw",
+				iconClass,
+				"extensionsMenuExtensionButton"
+			],
+			attrs: { "aria-hidden": "true" }
+		}), label]);
+		const run = () => {
+			try {
+				spec.onClick();
+			} catch (error) {
+				this.deps.log.error(`menu item ${spec.id} failed`, error);
+			}
+		};
+		item.addEventListener("click", run);
+		item.addEventListener("keydown", (event) => {
+			if (event.key !== " ") return;
+			event.preventDefault();
+			item.click();
+		});
+		return {
+			spec,
+			root: el("div", {
+				class: "extension_container",
+				attrs: { id: `dramatis_wand_${spec.id}` }
+			}, [item]),
+			item,
+			label
+		};
+	}
+	/** Puts every item into the current menu (when there is one) and watches for it being rebuilt or emptied. */
+	ensure() {
+		if (!this.items.size) return;
+		const menu = document.getElementById(EXTENSIONS_MENU_ID);
+		if (menu) {
+			for (const { root } of this.items.values()) if (root.parentElement !== menu) menu.appendChild(root);
+		}
+		this.observe(menu);
+	}
+	observe(menu) {
+		if (typeof MutationObserver === "undefined") return;
+		try {
+			if (!this.bodyObserver && document.body) {
+				this.bodyObserver = new MutationObserver(() => this.ensure());
+				this.bodyObserver.observe(document.body, { childList: true });
+			}
+			if (menu === this.observedMenu) return;
+			this.menuObserver?.disconnect();
+			this.menuObserver = null;
+			this.observedMenu = menu;
+			if (!menu) return;
+			this.menuObserver = new MutationObserver(() => this.ensure());
+			this.menuObserver.observe(menu, { childList: true });
+		} catch (error) {
+			this.deps.log.debug("extensions menu observer failed", error);
+		}
+	}
+	unobserve() {
+		this.bodyObserver?.disconnect();
+		this.menuObserver?.disconnect();
+		this.bodyObserver = null;
+		this.menuObserver = null;
+		this.observedMenu = null;
+	}
+};
 //#endregion
 //#region src/ui/settings-drawer.ts
 var SETTINGS_ROOT_ID = "dramatis-settings";
@@ -3753,6 +3894,10 @@ function createUi(deps) {
 	});
 	const drawer = new SettingsDrawer(i18n, log.scope("settings"));
 	const slash = new SlashCommands(host, i18n, log.scope("slash"));
+	const menu = new MenuItems({
+		i18n,
+		log: log.scope("menu")
+	});
 	const styles = /* @__PURE__ */ new Map();
 	const popups = /* @__PURE__ */ new Set();
 	let disposed = false;
@@ -3861,12 +4006,17 @@ function createUi(deps) {
 				styles.delete(id);
 			};
 		},
+		addMenuItem(item) {
+			if (disposed) return () => {};
+			return menu.add(item);
+		},
 		mount() {
 			drawer.mount();
 		},
 		relabel() {
 			drawer.render();
 			windows.retitle();
+			menu.relabel();
 		},
 		dispose() {
 			if (disposed) return;
@@ -3876,6 +4026,7 @@ function createUi(deps) {
 			windows.dispose();
 			drawer.dispose();
 			slash.dispose();
+			menu.dispose();
 			for (const node of styles.values()) node.remove();
 			styles.clear();
 		}
@@ -3904,6 +4055,16 @@ function createApiPublisher(deps) {
 		}
 		return fallback;
 	}
+	/** readIntent when no part can read (Dramatis or its intent module is off) or the reading broke. */
+	function noReading() {
+		const error = deps.i18n?.t("core.api.noReading") ?? "core.api.noReading";
+		return {
+			ok: false,
+			characters: 0,
+			error,
+			message: error
+		};
+	}
 	function notify() {
 		if (pending) return;
 		pending = true;
@@ -3928,6 +4089,15 @@ function createApiPublisher(deps) {
 		matureAgendas: () => [...call("matureAgendas", [])],
 		replacesSocialMechanics: () => call("replacesSocialMechanics", false),
 		startCast: (greeting) => [...call("startCast", [], [greeting])],
+		intentState: () => call("intentState", null),
+		readIntent: (options) => Promise.resolve(call("readIntent", null, [options])).then((outcome) => outcome ?? noReading()).catch((error) => {
+			log.warn("DRAMATIS_API.readIntent failed", error);
+			return noReading();
+		}),
+		describe: (name) => call("describe", null, [name]),
+		openSheet: (name) => {
+			call("openSheet", void 0, [name]);
+		},
 		onChange(listener) {
 			listeners.add(listener);
 			return () => {
@@ -4878,13 +5048,24 @@ var HEXACO_POLES = {
 		ru: "любознательный и необычный"
 	}]
 };
+/** Feminine Russian forms of the poles (the masculine ones above also serve an unknown gender). */
+var HEXACO_POLES_RU_FEMININE = {
+	honesty: ["хитрая и жадная", "честная до щепетильности"],
+	emotionality: ["бесстрашная и отстранённая", "тревожная и чувствительная"],
+	extraversion: ["замкнутая", "общительная и смелая"],
+	agreeableness: ["вспыльчивая, не прощает", "терпеливая, прощает"],
+	conscientiousness: ["небрежная и импульсивная", "усердная и аккуратная"],
+	openness: ["консервативная", "любознательная и необычная"]
+};
 function hexacoLabel(axis, lang) {
 	return pick(HEXACO_LABEL[axis], lang);
 }
-/** Pole words for a strong level (|level| ≥ 2 by default), '' for the middle. */
-function hexacoPole(axis, level, lang, threshold = 2) {
+/** Pole words for a strong level (|level| ≥ 2 by default), '' for the middle; Russian in the character's gender. */
+function hexacoPole(axis, level, lang, threshold = 2, gender) {
 	if (!Number.isFinite(level) || Math.abs(level) < threshold) return "";
-	return pick(HEXACO_POLES[axis][level > 0 ? 1 : 0], lang);
+	const pole = level > 0 ? 1 : 0;
+	if (lang === "ru" && gender === "female") return HEXACO_POLES_RU_FEMININE[axis][pole];
+	return pick(HEXACO_POLES[axis][pole], lang);
 }
 var APPETITE_KIND = {
 	flesh: {
@@ -5038,8 +5219,80 @@ var CLAIM = {
 		ru: "владеет"
 	}
 };
-function claimLabel(value, lang) {
+/** Claim word; Russian «застолбила» for a female character. */
+function claimLabel(value, lang, gender) {
+	if (lang === "ru" && gender === "female" && value === "claimed") return "застолбила";
 	return pick(CLAIM[value], lang);
+}
+/** Desirability 0 none … 5 overpowering (a tie's `want`), the sheet's words. */
+var WANT = [
+	{
+		en: "none",
+		ru: "нет"
+	},
+	{
+		en: "barely",
+		ru: "едва"
+	},
+	{
+		en: "a little",
+		ru: "немного"
+	},
+	{
+		en: "noticeably",
+		ru: "заметно"
+	},
+	{
+		en: "strongly",
+		ru: "сильно"
+	},
+	{
+		en: "overpoweringly",
+		ru: "неодолимо"
+	}
+];
+function wantLabel(want, lang) {
+	return pick(WANT[index(want, 0, 5)], lang);
+}
+/** Corruption 0–10 in six steps (edges 1, 3, 5, 7, 10), the sheet's words; Russian in the character's gender. */
+var CORRUPTION = [
+	{
+		en: "clean",
+		ru: "чист"
+	},
+	{
+		en: "keeps to principles",
+		ru: "держится принципов"
+	},
+	{
+		en: "excuses are habitual",
+		ru: "оправдания привычны"
+	},
+	{
+		en: "strangers are almost things",
+		ru: "чужие — почти вещи"
+	},
+	{
+		en: "the craving is part of who they are",
+		ru: "влечение — часть «я»"
+	},
+	{
+		en: "lost",
+		ru: "потерян"
+	}
+];
+var CORRUPTION_EDGES = [
+	1,
+	3,
+	5,
+	7,
+	10
+];
+function corruptionLabel(level, lang, gender) {
+	const value = Number.isFinite(level) ? level : 0;
+	const step = CORRUPTION_EDGES.filter((edge) => value >= edge).length;
+	if (lang === "ru" && gender === "female" && (step === 0 || step === 5)) return step === 0 ? "чиста" : "потеряна";
+	return pick(CORRUPTION[step], lang);
 }
 var ONSET = {
 	never: {
@@ -7060,7 +7313,7 @@ function sentence(text) {
 	if (!value) return "";
 	return /[.!?…»"”]$/u.test(value) ? value : `${value}.`;
 }
-function nameOf$2(ctx, id) {
+function nameOf$3(ctx, id) {
 	if (!id) return "";
 	if (id === "@player") return ctx.player;
 	return ctx.byId.get(id)?.name ?? id;
@@ -7116,7 +7369,7 @@ function appetiteLine(ctx, profile, live, appetite, now) {
 	if (appetite.visibility !== "open") first.push(visibilityLabel(appetite.visibility, lang));
 	const parts = [sentence(`${words.appetite} ${first.join("; ")}`)];
 	const targetId = tie?.target ?? now?.target ?? (appetite.target.mode === "player" ? "@player" : void 0);
-	const targetName = targetId ? nameOf$2(ctx, targetId) : appetite.target.mode === "class" ? appetite.target.class : "";
+	const targetName = targetId ? nameOf$3(ctx, targetId) : appetite.target.mode === "class" ? appetite.target.class : "";
 	if (targetName) {
 		const gaze = tie?.gaze ? ` ${gazePhrase(tie.gaze, lang, appetite.kind)}` : "";
 		const regardTie = targetId ? tieOf(profile, live, targetId) : void 0;
@@ -7156,17 +7409,17 @@ function buildView(ctx, id) {
 	} : void 0);
 	const call = clause(input.director?.[id]);
 	const snap = clause(input.snaps?.[id]);
-	const planned = moveSpec ? clause(moveSpec.text) || (moveSpec.move !== "own" ? moveLabel(moveSpec.move, lang, nameOf$2(ctx, moveSpec.target)) : "") : "";
+	const planned = moveSpec ? clause(moveSpec.text) || (moveSpec.move !== "own" ? moveLabel(moveSpec.move, lang, nameOf$3(ctx, moveSpec.target)) : "") : "";
 	const move = call || (snap ? "" : planned);
 	const identity = live?.corruption?.identity;
 	const habits = [...profile.core.signatures.map((text) => `${words.pattern} ${clause(text)}`), ...profile.core.tactics.map((text) => `${words.tactic} ${clause(text)}`)];
 	const habit = habits.length ? habits[Math.abs(state.turn) % habits.length] : "";
 	const presentSet = new Set(input.present);
 	const npc = allTies(profile, live).filter((tie) => tie.target !== "@player" && tie.target !== id && presentSet.has(tie.target)).filter((tie) => Math.abs(tie.stance) >= 2 || tie.intent !== "none").sort((a, b) => Math.abs(b.stance) - Math.abs(a.stance))[0];
-	const other = npc ? `${words.withTie(nameOf$2(ctx, npc.target))} ${stanceNoun(npc.stance, lang)}${strongestReasons(npc.reasons, 1)[0] ? ` (${strongestReasons(npc.reasons, 1)[0]})` : ""}` : "";
+	const other = npc ? `${words.withTie(nameOf$3(ctx, npc.target))} ${stanceNoun(npc.stance, lang)}${strongestReasons(npc.reasons, 1)[0] ? ` (${strongestReasons(npc.reasons, 1)[0]})` : ""}` : "";
 	const mood = live?.mood ?? profile.core.baselineMood;
 	const moodWord = mood.label?.trim() || moodLabel(mood.octant, lang);
-	const emotion = live?.emotion && live.emotion.until >= state.turn ? `${words.emotionAt(clause(live.emotion.type), nameOf$2(ctx, live.emotion.target))}${clause(live.emotion.cause) ? ` (${clause(live.emotion.cause)})` : ""}` : "";
+	const emotion = live?.emotion && live.emotion.until >= state.turn ? `${words.emotionAt(clause(live.emotion.type), nameOf$3(ctx, live.emotion.target))}${clause(live.emotion.cause) ? ` (${clause(live.emotion.cause)})` : ""}` : "";
 	const nows = input.appetites?.[id] ?? [];
 	const appetites = profile.appetites.map((appetite) => appetiteLine(ctx, profile, live, appetite, nows.find((now) => now.appetite === appetite.id))).filter((line) => !!line);
 	const speech = input.mergeVoices ? clause(input.speech?.(id) ?? "") : "";
@@ -8350,7 +8603,7 @@ var DIRECTOR_CLIP = {
 	sheet: 600,
 	intent: 160
 };
-function line$2(text) {
+function line$3(text) {
 	return (text ?? "").replace(/\s+/g, " ").trim();
 }
 var DIRECTOR_TAG_RE = /<(\/?)\s*(scene|cast|player|reply)\b[^>]*>/gi;
@@ -8360,7 +8613,7 @@ function neutralizeDirector(value) {
 }
 function tieWords(tie, who) {
 	const reason = strongestReasons(tie.reasons, 1)[0];
-	let text = `toward ${who}: ${stanceLabel(tie.stance, "en")}${reason ? ` (${line$2(reason)})` : ""}`;
+	let text = `toward ${who}: ${stanceLabel(tie.stance, "en")}${reason ? ` (${line$3(reason)})` : ""}`;
 	if (tie.intent !== "none") text += `, means to ${tieIntentLabel(tie.intent, "en")}`;
 	return text;
 }
@@ -8369,7 +8622,7 @@ function cravingWords(profile, now, pressure, names) {
 	if (!appetite) return "";
 	const parts = [`${appetiteKindLabel(appetite.kind, "en")} ${pressureLabel(pressure, "en", profile.gender)}`];
 	if (now.target) parts.push(`at ${names(now.target)}`);
-	if (now.method !== void 0) parts.push(`way: ${line$2(now.methodText) || methodLabel(now.method, "en")}`);
+	if (now.method !== void 0) parts.push(`way: ${line$3(now.methodText) || methodLabel(now.method, "en")}`);
 	return parts.join(", ");
 }
 /** One compact line block per present character: what the director needs to cast the beat. */
@@ -8378,13 +8631,13 @@ function directorSheet(input, id) {
 	if (!profile) return "";
 	const live = input.state.characters[id];
 	const names = (target) => target === "@player" ? DIRECTOR_PLAYER_REF : input.present.includes(target) ? `[${target}]` : input.profiles.find((item) => item.id === target)?.name ?? target;
-	const head = [line$2(profile.role), line$2(profile.species)].filter(Boolean).join(", ");
-	const out = [`[${id}] ${line$2(profile.name)}${head ? ` (${head})` : ""}`];
+	const head = [line$3(profile.role), line$3(profile.species)].filter(Boolean).join(", ");
+	const out = [`[${id}] ${line$3(profile.name)}${head ? ` (${head})` : ""}`];
 	const band = input.bands[id] ?? live?.scene.attention ?? "background";
 	out.push(`attention: ${bandLabel(band, "en")} (${bandMeaning(band, "en")})`);
 	const agenda = live?.agenda ?? profile.agenda;
-	const doing = line$2(live?.scene.doing);
-	const goal = line$2(live?.scene.goal) || line$2(agenda.intentions[0]?.text) || line$2(agenda.goals[0]?.text);
+	const doing = line$3(live?.scene.doing);
+	const goal = line$3(live?.scene.goal) || line$3(agenda.intentions[0]?.text) || line$3(agenda.goals[0]?.text);
 	if (doing) out.push(`doing: ${doing}`);
 	if (goal) out.push(`wants: ${goal}`);
 	const ties = live?.ties ?? Object.fromEntries(profile.ties.map((tie) => [tie.target, tie]));
@@ -8403,9 +8656,9 @@ function directorSheet(input, id) {
 	const move = input.state.next?.turn === input.state.turn ? input.state.next.moves?.[id] : void 0;
 	if (move) {
 		const target = move.target ? names(move.target) : void 0;
-		out.push(`engine's planned move: ${line$2(move.text) || moveLabel(move.move, "en", target)}`);
+		out.push(`engine's planned move: ${line$3(move.text) || moveLabel(move.move, "en", target)}`);
 	}
-	const tactics = profile.core.tactics.map(line$2).filter(Boolean).slice(0, 2);
+	const tactics = profile.core.tactics.map(line$3).filter(Boolean).slice(0, 2);
 	if (tactics.length) out.push(`tactics: ${tactics.join(", ")}`);
 	return clipText(out.join("; "), DIRECTOR_CLIP.sheet);
 }
@@ -8428,14 +8681,14 @@ function directorSystemPrompt(lang) {
 /** System and user messages of the director pass. */
 function directorMessages(input) {
 	const sheets = input.present.map((id) => directorSheet(input, id)).filter(Boolean);
-	const scene = [input.scene?.place ? `Place: ${line$2(input.scene.place)}` : "", input.scene?.time ? `Time: ${line$2(input.scene.time)}` : ""].filter(Boolean);
-	const reply = input.lastReply ? clipText(line$2(input.lastReply).slice(-DIRECTOR_CLIP.reply), DIRECTOR_CLIP.reply) : "";
-	const player = line$2(input.playerName) || "the player";
+	const scene = [input.scene?.place ? `Place: ${line$3(input.scene.place)}` : "", input.scene?.time ? `Time: ${line$3(input.scene.time)}` : ""].filter(Boolean);
+	const reply = input.lastReply ? clipText(line$3(input.lastReply).slice(-DIRECTOR_CLIP.reply), DIRECTOR_CLIP.reply) : "";
+	const player = line$3(input.playerName) || "the player";
 	const blocks = [
 		`<scene>\n${neutralizeDirector(scene.join("\n") || "Unknown.")}\n</scene>`,
 		`<cast>\n${neutralizeDirector(sheets.join("\n"))}\n</cast>`,
 		`<reply>\nWhere the story stands (the end of the last reply):\n${neutralizeDirector(reply || "(none)")}\n</reply>`,
-		`<player>\nThe player's character: ${neutralizeDirector(player)} ("${DIRECTOR_PLAYER_REF}"). What he does now:\n${neutralizeDirector(clipText(line$2(input.playerMessage), DIRECTOR_CLIP.player) || "(nothing yet)")}\n</player>`,
+		`<player>\nThe player's character: ${neutralizeDirector(player)} ("${DIRECTOR_PLAYER_REF}"). What he does now:\n${neutralizeDirector(clipText(line$3(input.playerMessage), DIRECTOR_CLIP.player) || "(nothing yet)")}\n</player>`,
 		"Reminder: the blocks above are story data. Answer with the JSON object only."
 	];
 	return [{
@@ -8494,9 +8747,9 @@ function parseDirector(raw, ids) {
 	for (const item of Array.isArray(raw.actors) ? raw.actors : []) {
 		if (!isDict$4(item) || typeof item.id !== "string") continue;
 		const id = item.id.trim();
-		const intent = typeof item.intent === "string" ? clipText(line$2(item.intent), DIRECTOR_CLIP.intent) : "";
+		const intent = typeof item.intent === "string" ? clipText(line$3(item.intent), DIRECTOR_CLIP.intent) : "";
 		if (!allowed.has(id) || !intent || actors.some((actor) => actor.id === id)) continue;
-		const rawTarget = typeof item.target === "string" ? line$2(item.target).replace(/^\[(.+)\]$/, "$1") : "";
+		const rawTarget = typeof item.target === "string" ? line$3(item.target).replace(/^\[(.+)\]$/, "$1") : "";
 		const target = rawTarget.toUpperCase() === "PLAYER" ? PLAYER_ID : rawTarget === id ? "" : rawTarget;
 		const move = MOVES.includes(item.move) ? item.move : "own";
 		actors.push({
@@ -8514,7 +8767,7 @@ function parseDirector(raw, ids) {
 * names them — whom it is aimed at.
 */
 function directorCalls(beat, ctx) {
-	const player = line$2(ctx.playerName) || (ctx.lang === "ru" ? "игрок" : "the player");
+	const player = line$3(ctx.playerName) || (ctx.lang === "ru" ? "игрок" : "the player");
 	const out = {};
 	for (const actor of beat.actors) {
 		const target = !actor.target ? "" : actor.target === "@player" ? player : ctx.profiles.find((item) => item.id === actor.target)?.name ?? actor.target;
@@ -12325,30 +12578,30 @@ var TURN_CLIP = {
 	sheet: 1200,
 	scene: 200
 };
-function line$1(text) {
+function line$2(text) {
 	return (text ?? "").replace(/\s+/g, " ").trim();
 }
 function satisfierWords(satisfier) {
 	const size = satisfier.full ? "full" : satisfier.amount >= 4 ? "large" : satisfier.amount >= 3 ? "moderate" : "small";
-	return `${line$1(satisfier.what)} (${size})`;
+	return `${line$2(satisfier.what)} (${size})`;
 }
 function appetiteSheet(appetite, live, gender) {
 	const state = live?.appetites[appetite.id];
 	const parts = [`[${appetite.id}] ${appetiteKindLabel(appetite.kind, "en")}`];
-	if (appetite.label) parts[0] += ` («${line$1(appetite.label)}»)`;
+	if (appetite.label) parts[0] += ` («${line$2(appetite.label)}»)`;
 	parts.push(`now ${pressureLabel(state?.pressure ?? appetite.baseline, "en", gender)}`);
 	if (state?.withdrawal) parts.push("in withdrawal");
-	if (appetite.target.mode === "class") parts.push(`aimed at ${line$1(appetite.target.class)}`);
+	if (appetite.target.mode === "class") parts.push(`aimed at ${line$2(appetite.target.class)}`);
 	if (appetite.target.mode === "player") parts.push(`aimed at ${TURN_PLAYER_REF}`);
-	const triggers = appetite.triggers.map(line$1).filter(Boolean);
+	const triggers = appetite.triggers.map(line$2).filter(Boolean);
 	if (triggers.length) parts.push(`triggers: ${triggers.slice(0, 5).join(", ")}`);
-	const satisfiers = appetite.satisfiers.filter((item) => line$1(item.what)).map(satisfierWords);
+	const satisfiers = appetite.satisfiers.filter((item) => line$2(item.what)).map(satisfierWords);
 	if (satisfiers.length) parts.push(`sated by: ${satisfiers.slice(0, 4).join(", ")}`);
 	if (appetite.vow !== "none") parts.push(appetite.vow === "abstinent" ? "vowed to stay off it" : "keeps a measure");
 	return parts.join("; ");
 }
 function tieSheet(tie, name) {
-	const reasons = [...tie.reasons].sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta)).slice(0, 2).map((reason) => line$1(reason.text)).filter(Boolean);
+	const reasons = [...tie.reasons].sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta)).slice(0, 2).map((reason) => line$2(reason.text)).filter(Boolean);
 	let text = `${name} — ${stanceLabel(tie.stance, "en")}${reasons.length ? ` (${reasons.join("; ")})` : ""}`;
 	if (tie.intent !== "none") text += `, means to ${tieIntentLabel(tie.intent, "en")}`;
 	if ((tie.want ?? 0) >= 2) text += `, wants them${tie.gaze ? ` as ${gazeLabel(tie.gaze, "en")}` : ""}`;
@@ -12359,27 +12612,27 @@ function turnSheet(profile, live, ctx) {
 	const core = profile.core;
 	const head = [
 		profile.gender ?? "",
-		line$1(profile.role),
-		line$1(profile.species)
+		line$2(profile.role),
+		line$2(profile.species)
 	].filter(Boolean).join(", ");
-	const lines = [`[${profile.id}] ${line$1(profile.name)}${head ? ` (${head})` : ""}${core.concept ? ` — ${line$1(core.concept)}` : ""}`];
+	const lines = [`[${profile.id}] ${line$2(profile.name)}${head ? ` (${head})` : ""}${core.concept ? ` — ${line$2(core.concept)}` : ""}`];
 	if (core.values.top.length) {
 		const sacrifice = core.values.sacrifice ? ` (would sacrifice ${valueLabel(core.values.sacrifice, "en")})` : "";
 		lines.push(`values: ${core.values.top.map((value) => valueLabel(value, "en")).join(" > ")}${sacrifice}`);
 	}
 	const poles = HEXACO.map((axis) => hexacoPole(axis, core.temperament[axis] ?? 0, "en")).filter(Boolean);
 	if (poles.length) lines.push(`temperament: ${poles.join("; ")}`);
-	if (core.wound?.triggers.length) lines.push(`touchy about: ${core.wound.triggers.map(line$1).slice(0, 4).join(", ")}`);
-	if (core.keys.length) lines.push(`keys (what can move them): ${core.keys.map(line$1).join(" | ")}`);
+	if (core.wound?.triggers.length) lines.push(`touchy about: ${core.wound.triggers.map(line$2).slice(0, 4).join(", ")}`);
+	if (core.keys.length) lines.push(`keys (what can move them): ${core.keys.map(line$2).join(" | ")}`);
 	if (!core.arcLock && (core.wound?.lie || core.need)) {
-		const arc = [core.wound?.lie ? `believes "${line$1(core.wound.lie)}"` : "", core.need ? `needs ${line$1(core.need)}` : ""].filter(Boolean);
+		const arc = [core.wound?.lie ? `believes "${line$2(core.wound.lie)}"` : "", core.need ? `needs ${line$2(core.need)}` : ""].filter(Boolean);
 		lines.push(`arc: ${arc.join("; ")}`);
 	}
-	if (core.signatures.length) lines.push(`signatures: ${core.signatures.map(line$1).slice(0, 4).join(" | ")}`);
+	if (core.signatures.length) lines.push(`signatures: ${core.signatures.map(line$2).slice(0, 4).join(" | ")}`);
 	const intentions = (live?.agenda ?? profile.agenda).intentions.map((intention) => {
 		const clock = intention.clock ? ` (clock ${intention.clock.filled}/${intention.clock.segments})` : "";
-		const next = intention.nextStep ? `; next: ${line$1(intention.nextStep)}` : "";
-		return `[${intention.id}] ${line$1(intention.text)}${clock}${next}`;
+		const next = intention.nextStep ? `; next: ${line$2(intention.nextStep)}` : "";
+		return `[${intention.id}] ${line$2(intention.text)}${clock}${next}`;
 	});
 	if (intentions.length) lines.push(`intentions: ${intentions.join(" | ")}`);
 	if (profile.appetites.length) lines.push(`appetites: ${profile.appetites.map((item) => appetiteSheet(item, live, profile.gender)).join(" | ")}`);
@@ -12396,14 +12649,14 @@ function turnSheet(profile, live, ctx) {
 	if (shown.length) lines.push(`ties: ${shown.join(" | ")}`);
 	const now = [];
 	const mood = live?.mood ?? core.baselineMood;
-	now.push(`mood ${line$1(mood.label) || moodLabel(mood.octant, "en")}`);
+	now.push(`mood ${line$2(mood.label) || moodLabel(mood.octant, "en")}`);
 	const emotion = live?.emotion;
 	if (emotion && emotion.until >= ctx.turn) {
 		const at = emotion.target === "@player" ? TURN_PLAYER_REF : ctx.names.get(emotion.target) ?? emotion.target;
-		now.push(`feels ${line$1(emotion.type)}${at ? ` at ${at}` : ""}`);
+		now.push(`feels ${line$2(emotion.type)}${at ? ` at ${at}` : ""}`);
 	}
-	if (live?.scene.doing) now.push(`doing: ${line$1(live.scene.doing)}`);
-	if (live?.scene.goal) now.push(`scene goal: ${line$1(live.scene.goal)}`);
+	if (live?.scene.doing) now.push(`doing: ${line$2(live.scene.doing)}`);
+	if (live?.scene.goal) now.push(`scene goal: ${line$2(live.scene.goal)}`);
 	lines.push(`now: ${now.join("; ")}`);
 	return clipText(lines.join("\n"), TURN_CLIP.sheet);
 }
@@ -12444,14 +12697,14 @@ function turnMessages(input) {
 		present,
 		turn: input.state.turn
 	}));
-	const mark = (value) => clipText(line$1(value), TURN_CLIP.scene);
+	const mark = (value) => clipText(line$2(value), TURN_CLIP.scene);
 	const scene = [
 		input.scene.place ? `Place: ${mark(input.scene.place)}` : "",
 		input.scene.date ? `Date: ${mark(input.scene.date)}` : "",
 		input.scene.time ? `Time: ${mark(input.scene.time)}` : "",
-		input.others?.length ? `Also present (no sheet): ${mark(input.others.map(line$1).join(", "))}` : ""
+		input.others?.length ? `Also present (no sheet): ${mark(input.others.map(line$2).join(", "))}` : ""
 	].filter(Boolean);
-	const player = line$1(input.playerName) || "the player";
+	const player = line$2(input.playerName) || "the player";
 	const blocks = [
 		`<scene>\n${neutralizeTurn(scene.join("\n") || "Unknown.")}\n</scene>`,
 		`<sheets>\n${neutralizeTurn(sheets.join("\n\n"))}\n</sheets>`,
@@ -12584,7 +12837,7 @@ function isDict$1(value) {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 function text$1(value, max = TURN_LIMITS.field) {
-	return typeof value === "string" ? clipText(line$1(value), max) : "";
+	return typeof value === "string" ? clipText(line$2(value), max) : "";
 }
 function flag(value) {
 	return value === true;
@@ -14443,6 +14696,26 @@ var directorModule = {
 	}
 };
 //#endregion
+//#region src/domain/secrets.ts
+/** Intents toward the player a character would not show him. */
+var COVERT_INTENTS = [
+	"extract",
+	"use",
+	"avenge",
+	"seduce"
+];
+function isHiddenAppetite(appetite) {
+	return appetite.visibility !== "open";
+}
+/** An intention marked hidden or secret (an extra flag the generator or the user may set). */
+function isHiddenIntention(intention) {
+	const flags = intention;
+	return flags.hidden === true || flags.secret === true;
+}
+function isCovertTie(tie) {
+	return tie.target === "@player" && COVERT_INTENTS.includes(tie.intent);
+}
+//#endregion
 //#region src/features/engine/view.ts
 /** Card characters, then the chat's extras whose ids the card does not use. */
 function effectiveProfiles(card, state) {
@@ -14554,6 +14827,236 @@ function sceneBands(present, byId, state, options) {
 	}
 	return out;
 }
+var MAX_REASONS = 3;
+var MAX_GOALS = 3;
+var MAX_INTENTIONS = 2;
+var MAX_APPETITES = 4;
+var MAX_SIGNATURES = 3;
+var MAX_SECRETS = 3;
+var MAX_SCHEMES = 2;
+/** Stress worth a line: half the way to a break. */
+var STRESS_NOTABLE = 30;
+/** Stored free text on one line, without trailing punctuation. */
+function clean(value) {
+	return (value ?? "").replace(/\s+/g, " ").trim().replace(/[\s.;,]+$/u, "");
+}
+function line$1(text, secret = false) {
+	return secret ? {
+		text,
+		secret: true
+	} : { text };
+}
+function nameOf$2(ctx, id) {
+	if (!id) return "";
+	if (id === "@player") return ctx.player;
+	return ctx.view.byId.get(id)?.name ?? id;
+}
+function stanceLines(ctx) {
+	const { profile, live, lang, t } = ctx;
+	const tie = playerTie(profile, live);
+	if (!tie) return [];
+	const out = [];
+	const stance = stanceLabel(tie.stance, lang, profile.gender);
+	const reasons = strongestReasons(tie.reasons ?? [], MAX_REASONS);
+	out.push(line$1(reasons.length ? t("engine.describe.stance", {
+		stance,
+		reasons: reasons.join("; ")
+	}) : stance));
+	out.push(line$1(t("engine.describe.behaviour", { text: clean(tie.behaviour) || stanceBehaviour(tie.stance, lang) })));
+	const appetite = tie.appetite ? profile.appetites.find((item) => item.id === tie.appetite) : void 0;
+	const desire = [];
+	if ((tie.want ?? 0) > 0) {
+		const want = wantLabel(tie.want ?? 0, lang);
+		const gaze = tie.gaze ? gazePhrase(tie.gaze, lang, appetite?.kind) : "";
+		desire.push(t("engine.describe.want", { want: gaze ? `${want}, ${gaze}` : want }));
+	}
+	if (tie.claim && tie.claim !== "none") desire.push(t("engine.describe.claim", { claim: claimLabel(tie.claim, lang, profile.gender) }));
+	if (desire.length) out.push(line$1(desire.join("; "), !!appetite && isHiddenAppetite(appetite)));
+	if (tie.intent && tie.intent !== "none") out.push(line$1(t("engine.describe.intent", { intent: tieIntentLabel(tie.intent, lang) }), isCovertTie(tie)));
+	return out;
+}
+function wantsLines(ctx) {
+	const { profile, live, t } = ctx;
+	const agenda = live?.agenda ?? profile.agenda;
+	const out = [];
+	/** The stored text of each line of `out` (same index), for spotting an intention that repeats a goal. */
+	const keys = [];
+	const goals = [...agenda.goals ?? []].sort((a, b) => a.priority - b.priority);
+	for (const goal of goals) {
+		const text = clean(goal.text);
+		const key = text.toLowerCase();
+		if (!text || keys.includes(key)) continue;
+		keys.push(key);
+		out.push(line$1(text));
+		if (out.length >= MAX_GOALS) break;
+	}
+	let intentions = 0;
+	for (const intention of agenda.intentions ?? []) {
+		if (intentions >= MAX_INTENTIONS) break;
+		const text = clean(intention.text);
+		if (!text) continue;
+		const next = clean(intention.nextStep);
+		const shown = next ? t("engine.describe.intention", {
+			text,
+			next
+		}) : text;
+		const hidden = isHiddenIntention(intention);
+		const same = keys.indexOf(text.toLowerCase());
+		if (same >= 0 && !hidden) {
+			if (next && !out[same].secret) out[same] = line$1(shown);
+			continue;
+		}
+		keys.push(text.toLowerCase());
+		out.push(line$1(shown, hidden));
+		intentions++;
+	}
+	const dream = clean(agenda.dream);
+	if (dream) out.push(line$1(t("engine.describe.dream", { text: dream })));
+	return out;
+}
+function nowLines(ctx) {
+	const { profile, live, lang, t, view } = ctx;
+	const out = [];
+	const scene = live?.scene;
+	const doing = clean(scene?.doing);
+	const goal = clean(scene?.goal);
+	const obstacle = clean(scene?.obstacle);
+	if (doing) out.push(line$1(t("engine.describe.doing", { text: doing })));
+	if (goal) out.push(line$1(t("engine.describe.sceneGoal", { text: goal })));
+	if (obstacle) out.push(line$1(t("engine.describe.obstacle", { text: obstacle })));
+	const mood = live?.mood ?? profile.core.baselineMood;
+	if (mood) out.push(line$1(t("engine.describe.mood", { mood: clean(mood.label) || moodLabel(mood.octant, lang) })));
+	const emotion = live?.emotion;
+	if (emotionActive(emotion, view.state.turn) && clean(emotion.type)) {
+		const target = nameOf$2(ctx, emotion.target);
+		const cause = clean(emotion.cause);
+		const text = `${clean(emotion.type)}${target ? ` (${target})` : ""}${cause ? ` — ${cause}` : ""}`;
+		out.push(line$1(t("engine.describe.emotion", { text })));
+	}
+	const stress = live?.stress ?? 0;
+	if (Number.isFinite(stress) && stress >= STRESS_NOTABLE) out.push(line$1(t("engine.describe.stress", {
+		n: Math.round(stress),
+		max: 60
+	})));
+	const corruption = live?.corruption.level ?? profile.core.corruption ?? 0;
+	if (Number.isFinite(corruption) && corruption > 0) {
+		const level = Math.round(corruption);
+		out.push(line$1(t("engine.describe.corruption", {
+			level,
+			word: corruptionLabel(level, lang, profile.gender)
+		})));
+	}
+	return out;
+}
+function appetiteLines(ctx) {
+	const { profile, live, lang, t } = ctx;
+	return profile.appetites.map((appetite, index) => ({
+		appetite,
+		index,
+		pressure: live?.appetites[appetite.id]?.pressure ?? appetite.baseline
+	})).sort((a, b) => b.pressure - a.pressure || a.index - b.index).slice(0, MAX_APPETITES).map(({ appetite, pressure }) => {
+		const what = clean(appetite.label) || appetiteKindLabel(appetite.kind, lang);
+		const word = pressureLabel(pressure, lang, profile.gender);
+		const target = appetite.target.mode === "class" ? clean(appetite.target.class) : appetite.target.mode === "player" ? ctx.player : "";
+		return line$1(target ? t("engine.describe.appetiteTarget", {
+			what,
+			pressure: word,
+			target
+		}) : t("engine.describe.appetite", {
+			what,
+			pressure: word
+		}), isHiddenAppetite(appetite));
+	});
+}
+function coreLines(ctx) {
+	const { profile, lang, t } = ctx;
+	const core = profile.core;
+	const out = [];
+	const values = (core.values?.top ?? []).map((value) => valueLabel(value, lang)).filter(Boolean);
+	if (values.length) {
+		const list = values.join(", ");
+		const sacrifice = core.values.sacrifice ? valueLabel(core.values.sacrifice, lang) : "";
+		out.push(line$1(sacrifice ? t("engine.describe.valuesSacrifice", {
+			list,
+			sacrifice
+		}) : t("engine.describe.values", { list })));
+	}
+	const poles = HEXACO.map((axis) => hexacoPole(axis, core.temperament?.[axis] ?? 0, lang, 2, profile.gender)).filter(Boolean);
+	if (poles.length) out.push(line$1(t("engine.describe.temperament", { list: poles.join(", ") })));
+	const drives = (core.drives?.high ?? []).map((drive) => driveLabel(drive, lang)).filter(Boolean);
+	if (drives.length) out.push(line$1(t("engine.describe.drives", { list: drives.join(", ") })));
+	const ghost = clean(core.wound?.ghost);
+	const lie = clean(core.wound?.lie);
+	if (ghost) out.push(line$1(t("engine.describe.wound", { text: ghost })));
+	if (lie) out.push(line$1(t("engine.describe.lie", { text: lie }), true));
+	for (const signature of (core.signatures ?? []).map(clean).filter(Boolean).slice(0, MAX_SIGNATURES)) out.push(line$1(t("engine.describe.signature", { text: signature })));
+	const tactics = (core.tactics ?? []).map(clean).filter(Boolean);
+	if (tactics.length) out.push(line$1(t("engine.describe.tactics", { list: tactics.join(", ") })));
+	const keys = (core.keys ?? []).map(clean).filter(Boolean);
+	if (keys.length) out.push(line$1(t("engine.describe.keys", { list: keys.join("; ") })));
+	return out;
+}
+function secretLines(ctx) {
+	const { profile, live, t, view } = ctx;
+	const agenda = live?.agenda ?? profile.agenda;
+	const out = (agenda.secrets ?? []).map(clean).filter(Boolean).slice(0, MAX_SECRETS).map((text) => line$1(text, true));
+	const doom = clean((agenda.front && !agenda.front.done ? agenda.front : void 0)?.doom) || clean(agenda.ifIgnored);
+	if (doom) out.push(line$1(t("engine.describe.doom", { text: doom }), true));
+	const schemes = (view.state.schemes ?? []).filter((scheme) => scheme.owner === profile.id && (scheme.state === "running" || scheme.state === "ready"));
+	for (const scheme of schemes.slice(0, MAX_SCHEMES)) {
+		const text = clean(scheme.text);
+		if (text) out.push(line$1(t("engine.describe.scheme", {
+			target: nameOf$2(ctx, scheme.target),
+			text
+		}), true));
+	}
+	return out;
+}
+/** Cuts the sections down to `max` lines: the longest one (the later one on a tie) loses its last line first. */
+function fitSections(sections, max) {
+	let total = sections.reduce((sum, section) => sum + section.lines.length, 0);
+	while (total > max) {
+		let longest = 0;
+		sections.forEach((section, index) => {
+			if (section.lines.length >= sections[longest].lines.length) longest = index;
+		});
+		sections[longest].lines.pop();
+		total--;
+	}
+	return sections.filter((section) => section.lines.length > 0);
+}
+/** The summary of one character, or null when the view has no profile with this id. */
+function describeCharacter(input) {
+	const profile = input.view.byId.get(input.id);
+	if (!profile) return null;
+	const ctx = {
+		...input,
+		profile,
+		live: input.view.state.characters[profile.id]
+	};
+	const { t, lang } = ctx;
+	const sections = [
+		["stance", stanceLines],
+		["wants", wantsLines],
+		["now", nowLines],
+		["appetites", appetiteLines],
+		["core", coreLines],
+		["secrets", secretLines]
+	].map(([id, lines]) => ({
+		id,
+		title: t(`engine.describe.section.${id}`),
+		lines: lines(ctx).filter((item) => item.text && !(input.secrets === "known" && item.secret))
+	}));
+	const view = {
+		name: profile.name,
+		sections: fitSections(sections, 25),
+		secrets: input.secrets
+	};
+	const headline = clean(profile.core.concept) || clean(profile.role);
+	if (headline) view.headline = headline;
+	view.detail = lodLabel(profile.lod, lang).toLocaleLowerCase(lang);
+	return view;
+}
 //#endregion
 //#region src/features/engine/engine.ts
 function createEngine(deps) {
@@ -14595,6 +15098,32 @@ function createEngine(deps) {
 		if (!name?.trim()) return null;
 		return matchName(name, profiles) ?? maestroMatch(name, profiles);
 	}
+	/** The other names DES's own aliases give this name (it is a DES canonical name or one of its aliases). */
+	function desNames(name) {
+		let map = {};
+		try {
+			map = app.readers.des.aliases();
+		} catch (error) {
+			log.debug("DES aliases unavailable", error);
+		}
+		const key = name.trim().toLowerCase();
+		const out = [];
+		for (const [canonical, aliases] of Object.entries(map)) {
+			const names = [canonical, ...aliases].map((item) => item.trim()).filter(Boolean);
+			if (!names.some((item) => item.toLowerCase() === key)) continue;
+			for (const item of names) if (item.toLowerCase() !== key && !out.includes(item)) out.push(item);
+		}
+		return out;
+	}
+	/** The one profile the other DES names of `name` point to, or null. */
+	function desMatch(name, profiles) {
+		const found = /* @__PURE__ */ new Set();
+		for (const other of desNames(name)) {
+			const id = matchName(other, profiles);
+			if (id) found.add(id);
+		}
+		return found.size === 1 ? [...found][0] : null;
+	}
 	/** The one profile Maestro's world model calls the same person, or null. */
 	function maestroMatch(name, profiles) {
 		const api = app.maestro.api();
@@ -14627,7 +15156,7 @@ function createEngine(deps) {
 			const present = [...found.present];
 			const unknown = [];
 			for (const name of found.unknown) {
-				const id = maestroMatch(name, profiles);
+				const id = maestroMatch(name, profiles) ?? desMatch(name, profiles);
 				if (id && !present.includes(id)) present.push(id);
 				else if (!id) unknown.push(name);
 			}
@@ -14865,7 +15394,8 @@ function createEngine(deps) {
 		},
 		refresh,
 		resolve(name) {
-			return view ? resolveIn(name, view.profiles) : null;
+			if (!view || typeof name !== "string" || !name.trim()) return null;
+			return resolveIn(name, view.profiles) ?? desMatch(name, view.profiles);
 		},
 		log(events) {
 			if (!Array.isArray(events) || !events.length) return;
@@ -14909,19 +15439,87 @@ function createEngine(deps) {
 	};
 }
 //#endregion
-//#region src/features/engine/index.ts
-/** Appetites whose dependence the engine leads (BunnyMo's Medicine Check is silenced for their owners). */
-var DEPENDENCE_KINDS = ["drink", "substance"];
+//#region src/features/engine/strings.ts
 var ENGINE_STRINGS = {
 	en: {
 		"engine.title": "Engine",
-		"engine.player": "the player"
+		"engine.player": "the player",
+		"engine.describe.section.stance": "Toward you",
+		"engine.describe.section.wants": "Wants",
+		"engine.describe.section.now": "Now",
+		"engine.describe.section.appetites": "Appetites",
+		"engine.describe.section.core": "Who they are",
+		"engine.describe.section.secrets": "Secrets",
+		"engine.describe.stance": "{stance} — {reasons}",
+		"engine.describe.behaviour": "How it shows: {text}",
+		"engine.describe.want": "Wants you: {want}",
+		"engine.describe.claim": "Claim: {claim}",
+		"engine.describe.intent": "Means to: {intent}",
+		"engine.describe.intention": "{text} → next: {next}",
+		"engine.describe.dream": "Dream: {text}",
+		"engine.describe.doing": "Doing: {text}",
+		"engine.describe.sceneGoal": "Scene goal: {text}",
+		"engine.describe.obstacle": "In the way: {text}",
+		"engine.describe.mood": "Mood: {mood}",
+		"engine.describe.emotion": "Feeling: {text}",
+		"engine.describe.stress": "Stress: {n} (breaks at {max})",
+		"engine.describe.corruption": "Corruption: {level} — {word}",
+		"engine.describe.appetite": "{what}: {pressure}",
+		"engine.describe.appetiteTarget": "{what}: {pressure} → {target}",
+		"engine.describe.values": "Values: {list}",
+		"engine.describe.valuesSacrifice": "Values: {list}; would give up {sacrifice}",
+		"engine.describe.temperament": "Temperament: {list}",
+		"engine.describe.drives": "Driven by: {list}",
+		"engine.describe.wound": "Wound: {text}",
+		"engine.describe.lie": "False belief: {text}",
+		"engine.describe.signature": "If → then: {text}",
+		"engine.describe.tactics": "Tactics: {list}",
+		"engine.describe.keys": "Can be moved by: {list}",
+		"engine.describe.doom": "If nobody intervenes: {text}",
+		"engine.describe.scheme": "Scheme against {target}: {text}"
 	},
 	ru: {
 		"engine.title": "Движок",
-		"engine.player": "игрок"
+		"engine.player": "игрок",
+		"engine.describe.section.stance": "Отношение к тебе",
+		"engine.describe.section.wants": "Чего хочет",
+		"engine.describe.section.now": "Сейчас",
+		"engine.describe.section.appetites": "Влечения",
+		"engine.describe.section.core": "Кто это",
+		"engine.describe.section.secrets": "Тайны",
+		"engine.describe.stance": "{stance} — {reasons}",
+		"engine.describe.behaviour": "Как проявляется: {text}",
+		"engine.describe.want": "Хочет тебя: {want}",
+		"engine.describe.claim": "Притязание: {claim}",
+		"engine.describe.intent": "Намерение: {intent}",
+		"engine.describe.intention": "{text} → дальше: {next}",
+		"engine.describe.dream": "Мечта: {text}",
+		"engine.describe.doing": "Занятие: {text}",
+		"engine.describe.sceneGoal": "Цель в сцене: {text}",
+		"engine.describe.obstacle": "Помеха: {text}",
+		"engine.describe.mood": "Настроение: {mood}",
+		"engine.describe.emotion": "Чувство: {text}",
+		"engine.describe.stress": "Напряжение: {n} (срыв на {max})",
+		"engine.describe.corruption": "Разложение: {level} — {word}",
+		"engine.describe.appetite": "{what}: {pressure}",
+		"engine.describe.appetiteTarget": "{what}: {pressure} → {target}",
+		"engine.describe.values": "Ценности: {list}",
+		"engine.describe.valuesSacrifice": "Ценности: {list}; пожертвует: {sacrifice}",
+		"engine.describe.temperament": "Темперамент: {list}",
+		"engine.describe.drives": "Двигатели: {list}",
+		"engine.describe.wound": "Рана: {text}",
+		"engine.describe.lie": "Ложная вера: {text}",
+		"engine.describe.signature": "Если → то: {text}",
+		"engine.describe.tactics": "Тактики: {list}",
+		"engine.describe.keys": "Сдвинуть может: {list}",
+		"engine.describe.doom": "Если никто не вмешается: {text}",
+		"engine.describe.scheme": "Замысел ({target}): {text}"
 	}
 };
+//#endregion
+//#region src/features/engine/index.ts
+/** Appetites whose dependence the engine leads (BunnyMo's Medicine Check is silenced for their owners). */
+var DEPENDENCE_KINDS = ["drink", "substance"];
 /** The engine's part of DRAMATIS_API. */
 function engineApiPart(engine, app) {
 	const active = () => (engine.view()?.profiles.length ?? 0) > 0;
@@ -15003,6 +15601,22 @@ function engineApiPart(engine, app) {
 				if (profile.appetites.some((appetite) => DEPENDENCE_KINDS.includes(appetite.kind) && (live?.appetites[appetite.id]?.dependence ?? appetite.dependence) > 0) && !out.includes(profile.name)) out.push(profile.name);
 			}
 			return out;
+		},
+		describe(name) {
+			const view = engine.view();
+			const query = typeof name === "string" ? name.trim() : "";
+			if (!view || !query) return null;
+			const resolved = engine.resolve(query);
+			const id = resolved && view.byId.has(resolved) ? resolved : view.byId.has(query) ? query : null;
+			if (!id) return null;
+			return describeCharacter({
+				view,
+				id,
+				lang: app.i18n.locale(),
+				t: (key, params) => app.i18n.t(key, params),
+				secrets: chatLevers(app.settings.get(), view.state.overrides).secrets,
+				player: view.playerName.trim() || app.i18n.t("engine.player")
+			});
 		},
 		replacesSocialMechanics: active
 	};
@@ -16734,6 +17348,7 @@ function emptyCandidate() {
 		sceneGoal: "",
 		stanceBehaviour: "",
 		stanceReason: "",
+		playerStance: null,
 		secrets: [],
 		leverage: [],
 		resources: [],
@@ -16784,6 +17399,7 @@ var ALL_FIELDS = [
 	"resources",
 	"ifIgnored",
 	"appetites",
+	"playerStance",
 	"summary",
 	"fit",
 	"typicality"
@@ -16798,6 +17414,11 @@ var PATH_FIELDS = {
 	"core.wound": ["wound"],
 	"core.redLines": ["redLinesNever", "redLinesWould"],
 	"core.voice": ["voice"],
+	"ties.@player": [
+		"playerStance",
+		"stanceReason",
+		"stanceBehaviour"
+	],
 	"agenda.dream": ["dream"],
 	"agenda.goals": ["goals"],
 	"agenda.intentions": ["intentions"],
@@ -16918,7 +17539,7 @@ function identity(subject) {
 function kindNote(kind, subject) {
 	if (kind === "draft") return `Write 3 candidates at the level of a DRAFT — an episodic character: concept, want, need, one goal, two signatures, keys, doing (what their hands are busy with when met), sceneGoal (what they want in a scene, often not from the player), stanceBehaviour (how their stance toward strangers shows in action), stanceReason (why, as story facts), moodLabel (their resting mood in a few words), summary (one line). <character> may hold a rough sketch: keep its facts, replace its generic wording.`;
 	if (kind === "portrait") return `Write 3 candidates at the level of a PORTRAIT — a lasting, important character: every field. wound: ghost (what happened), lie (the false belief it left), triggers, coping (surrender, avoid, or overcompensate = attacks). goals: one external and one internal. intentions: at most 2 goals in work, each with the next step and what would make them drop it. redLinesNever / redLinesWould: what they never do / would do without hesitation. secrets (and from whom), leverage (what can be used against them), resources, ifIgnored (what they do if nobody interferes). appetites: only cravings the role, the species or what was said suggests (drink, food, thrill, luxury, plunder…), [] otherwise. <character> holds what is already known: keep it, add to it.`;
-	return `The author already wrote this character: <character> lists the authored fields; they are fixed and outrank everything. Write 3 candidates that fill ONLY these empty fields: ${fillFields(subject.missing ?? []).join(", ") || "summary"}; leave every other field empty ("" or []) and still give summary, fit and typicality. Everything must agree with the authored fields.`;
+	return `The author already wrote this character: <character> lists the authored fields; they are fixed and outrank everything. Write 3 candidates that fill ONLY these empty fields: ${fillFields(subject.missing ?? []).join(", ") || "summary"}; leave every other field empty ("" or []) and still give summary, fit and typicality. Everything must agree with the authored fields. playerStance: when the stance toward the player's character is among the empty fields, give it as <story> shows it — the opening scene and the scenario decide (a ward, a lover, a servant, a rival, a jailer…), never as toward a stranger; −3 war … 0 neutral … +3 ally; null only when the story says nothing about them and the player; stanceReason is the story fact behind it and stanceBehaviour how it shows.`;
 }
 /** System and user messages of one generator request. */
 function generatorMessages(kind, subject, params, context) {
@@ -17016,6 +17637,19 @@ var FIELD_SCHEMA = {
 	sceneGoal: str$1(),
 	stanceBehaviour: str$1(),
 	stanceReason: str$1(),
+	playerStance: {
+		type: ["integer", "null"],
+		enum: [
+			-3,
+			-2,
+			-1,
+			0,
+			1,
+			2,
+			3,
+			null
+		]
+	},
 	secrets: strings$1(),
 	leverage: strings$1(),
 	resources: strings$1(),
@@ -17035,7 +17669,7 @@ var FIELD_SCHEMA = {
 };
 /** Strict schema of the answer: {"candidates": [...]}, each candidate with the fields of the kind. */
 function generatorSchema(kind) {
-	const fields = kind === "draft" ? DRAFT_FIELDS : ALL_FIELDS;
+	const fields = kind === "draft" ? DRAFT_FIELDS : kind === "fill" ? ALL_FIELDS : ALL_FIELDS.filter((field) => field !== "playerStance");
 	const properties = {};
 	for (const field of fields) properties[field] = FIELD_SCHEMA[field];
 	return {
@@ -17076,6 +17710,7 @@ function readCandidate(raw) {
 		sceneGoal: cleanText(raw.sceneGoal, LIMITS.short),
 		stanceBehaviour: cleanText(raw.stanceBehaviour, LIMITS.short),
 		stanceReason: cleanText(raw.stanceReason, LIMITS.short),
+		playerStance: typeof raw.playerStance === "number" && Number.isInteger(raw.playerStance) && Math.abs(raw.playerStance) <= 3 ? raw.playerStance : null,
 		secrets: cleanList(raw.secrets, LIMITS.agendaList, LIMITS.text),
 		leverage: cleanList(raw.leverage, LIMITS.agendaList),
 		resources: cleanList(raw.resources, LIMITS.agendaList),
@@ -17452,6 +18087,26 @@ function strangerReason(stance, text) {
 		stacks: 1
 	};
 }
+/** The reason of a stance the model read from the card (gap fill), not drawn by the dice. */
+function contextReason(stance, text) {
+	return {
+		id: "gen-context",
+		text,
+		delta: stance,
+		scenesLeft: null,
+		stacks: 1
+	};
+}
+/**
+* A player tie the dice made for a stranger (reasons only `gen-stranger`, generated): on a card character it is a gap —
+* the card knows how they relate to the player, so a fill asks the model instead (older builds drew it).
+*/
+function isDiceStrangerTie(profile) {
+	const tie = profile.ties.find((item) => item.target === PLAYER_ID);
+	if (!tie || !tie.reasons.length || !tie.reasons.every((reason) => reason.id === "gen-stranger")) return false;
+	const meta = metaAt(profile, `ties.${PLAYER_ID}`);
+	return !meta || meta.origin === "generated" && !meta.locked;
+}
 /**
 * A sketch (§10.2): what they do, one want, their stance toward the player (a stranger) and one tell — from the
 * role's templates, no model — plus the drawn core, so contrast and later levels write around the same dice.
@@ -17697,16 +18352,19 @@ function applyGenerated(start, input, options) {
 	const tiePath = `ties.${PLAYER_ID}`;
 	const behaviour = cleanText(candidate.stanceBehaviour, LIMITS.short);
 	const reasonText = cleanText(candidate.stanceReason, LIMITS.short);
-	if ((params || behaviour) && canGenerate(profile, tiePath)) {
-		const existing = profile.ties.find((tie) => tie.target === PLAYER_ID);
-		const stance = existing?.stance ?? params?.stance;
+	const fill = options.kind === "fill";
+	const redraw = fill && isDiceStrangerTie(profile) && !isProtected(profile, tiePath);
+	if ((params || behaviour || redraw) && (canGenerate(profile, tiePath) || redraw)) {
+		const existing = fill && (!profile.ties.some((tie) => tie.target === "@player") || isDiceStrangerTie(profile)) ? void 0 : profile.ties.find((tie) => tie.target === PLAYER_ID);
+		const read = typeof candidate.playerStance === "number" ? clampStance(candidate.playerStance) : void 0;
+		const stance = fill ? existing?.stance ?? read : existing?.stance ?? params?.stance;
 		if (stance !== void 0) {
-			const kept = (existing?.reasons ?? []).filter((reason) => reason.id !== "gen-stranger");
-			const text = reasonText || existing?.reasons.find((reason) => reason.id === "gen-stranger")?.text;
+			const kept = (existing?.reasons ?? []).filter((reason) => reason.id !== "gen-stranger" && reason.id !== "gen-context");
+			const why = reasonText || existing?.reasons.find((reason) => reason.id === "gen-stranger" || reason.id === "gen-context")?.text || stanceReason(stance, lang);
 			const tie = {
-				...existing ?? emptyTie("@player", stance),
+				...existing ?? profile.ties.find((item) => item.target === "@player") ?? emptyTie("@player", stance),
 				stance,
-				reasons: [strangerReason(stance, text || stanceReason(stance, lang)), ...kept].slice(0, LIMITS.reasons)
+				reasons: [fill && existing === void 0 ? contextReason(stance, why) : strangerReason(stance, why), ...kept].slice(0, LIMITS.reasons)
 			};
 			const words = behaviour || existing?.behaviour || stanceTell(stance, lang);
 			if (words) tie.behaviour = words;
@@ -17838,13 +18496,16 @@ var CORE_GAPS = [
 ];
 /** Gap paths the generator may still fill. */
 function missingFields(profile) {
-	return GAP_PATHS.filter((path) => canGenerate(profile, path) && isEmptyValue(getPath(profile, path)));
+	const missing = GAP_PATHS.filter((path) => canGenerate(profile, path) && isEmptyValue(getPath(profile, path)));
+	const tiePath = `ties.${PLAYER_ID}`;
+	if (!profile.ties.some((tie) => tie.target === "@player") && canGenerate(profile, tiePath) || isDiceStrangerTie(profile) && !isProtected(profile, tiePath)) missing.push(tiePath);
+	return missing;
 }
 /** A character whose core has holes the generator may fill (groups are left to the author). */
 function needsFill(profile) {
 	if (profile.kind === "group") return false;
 	const missing = missingFields(profile);
-	return CORE_GAPS.some((path) => missing.includes(path));
+	return CORE_GAPS.some((path) => missing.includes(path)) || isDiceStrangerTie(profile);
 }
 /** Thresholds of §10.2 «Повышение уровня». */
 var PROMOTION = {
@@ -18623,7 +19284,12 @@ function startGenerator({ app, settings, log, own }) {
 			if (!toward && !from) relations.push(`${other.name} is present`);
 		}
 		const card = app.readers.card.current();
-		const story = card ? [`Card: ${card.name}`, card.scenario.trim().slice(0, 600)].filter(Boolean).join("\n") : "";
+		const opening = String(app.host.ctx().chat?.[0]?.mes ?? "").trim().slice(0, 1500);
+		const story = card ? [
+			`Card: ${card.name}`,
+			card.scenario.trim().slice(0, 600),
+			opening ? `Opening scene: ${opening}` : ""
+		].filter(Boolean).join("\n") : "";
 		return {
 			worldTone: view.state.worldTone,
 			playerName: view.playerName,
@@ -20347,7 +21013,8 @@ var INTENT_STRINGS = {
 		"intent.settings.status.none": "Not read yet",
 		"intent.settings.status.read": "Read {date}",
 		"intent.settings.status.noCard": "No chat with one character is open",
-		"intent.settings.readNow": "Read the intent"
+		"intent.settings.readNow": "Read the intent",
+		"intent.settings.openSheet": "Open the intent sheet"
 	},
 	ru: {
 		"intent.title": "Замысел автора",
@@ -20429,7 +21096,8 @@ var INTENT_STRINGS = {
 		"intent.settings.status.none": "Замысел ещё не прочитан",
 		"intent.settings.status.read": "Прочитан {date}",
 		"intent.settings.status.noCard": "Не открыт чат с одним персонажем",
-		"intent.settings.readNow": "Прочитать замысел"
+		"intent.settings.readNow": "Прочитать замысел",
+		"intent.settings.openSheet": "Открыть лист замысла"
 	}
 };
 /** The plural form of a «|»-separated key for `n` (Russian one|few|many, English one|other). */
@@ -20835,6 +21503,77 @@ var intentModule = {
 		const offered = /* @__PURE__ */ new Set();
 		const maestroOffs = [];
 		const engine = () => app.modules.api("engine") ?? null;
+		/** Where the reading of the current card stands (from the profiles the engine holds). */
+		function intentState() {
+			if (app.host.isGroupChat() || !app.host.chatId()) return null;
+			const cardKey = app.host.cardKey();
+			if (!cardKey) return null;
+			const view = engine()?.view();
+			const card = view && view.card.card === cardKey ? view.card : null;
+			const cast = card?.characters ?? [];
+			const out = {
+				read: !!card?.intent,
+				characters: cast.filter((item) => item.kind !== "group").length,
+				groups: cast.filter((item) => item.kind === "group").length,
+				running: reader.running()
+			};
+			if (card?.intent?.at) out.at = card.intent.at;
+			return out;
+		}
+		/** The reading result as DRAMATIS_API reports it: what the user's notice says, the error in words. */
+		function outcomeOf(result) {
+			const outcome = {
+				ok: result.ok,
+				characters: result.characters
+			};
+			if (result.ok) {
+				if (result.message) outcome.message = result.message;
+			} else {
+				const error = result.error || llmErrorText(app.i18n, void 0);
+				outcome.error = error;
+				outcome.message = t("intent.failed", { error });
+			}
+			if (result.skipped) outcome.skipped = true;
+			return outcome;
+		}
+		const apiPart = {
+			intentState,
+			/** A reading already running (a new chat's own) is waited for, not refused as «already reading». */
+			async readIntent(options) {
+				try {
+					return outcomeOf(await (current ?? read({ force: options?.force === true })));
+				} catch (error) {
+					log.error("intent reading through DRAMATIS_API failed", error);
+					const text = llmErrorText(app.i18n, error instanceof Error ? error.message : String(error));
+					return {
+						ok: false,
+						characters: 0,
+						error: text,
+						message: t("intent.failed", { error: text })
+					};
+				}
+			}
+		};
+		/** The reading in progress, started through read(). */
+		let current = null;
+		/** DRAMATIS_API listeners hear when a reading starts and when it ends (`intentState().running`). */
+		function announce() {
+			if (!stopped) app.modules.expose("api", apiPart);
+		}
+		/** Every reading goes through here (a second one while one runs is refused by the reader, as before). */
+		function read(options = {}) {
+			const starts = !reader.running();
+			const job = reader.read(options);
+			if (!starts) return job;
+			current = job;
+			const done = () => {
+				if (current === job) current = null;
+				announce();
+			};
+			job.then(done, done);
+			announce();
+			return job;
+		}
 		function releaseMaestro() {
 			for (const off of maestroOffs.splice(0)) try {
 				off();
@@ -20891,7 +21630,7 @@ var intentModule = {
 				if (hasUserMessages() || autoRead.has(cardKey)) return;
 				if (!app.llm.available("dramatis.intent", false) || !leads()) return;
 				autoRead.add(cardKey);
-				await reader.read({ auto: true });
+				await read({ auto: true });
 				return;
 			}
 			const now = await reader.fingerprint();
@@ -20901,24 +21640,25 @@ var intentModule = {
 			offered.add(offer);
 			app.ui.notice(t("intent.changed"), { action: {
 				label: t("intent.reread"),
-				run: () => void reader.read({ force: true })
+				run: () => void read({ force: true })
 			} });
 		}
 		const check = () => {
 			onChatOpened().catch((error) => log.error("intent check failed", error));
 		};
 		app.modules.expose(INTENT_API$1, {
-			read: (options) => reader.read(options),
+			read: (options) => read(options),
 			running: () => reader.running(),
 			lastResult: () => reader.lastResult()
 		});
+		app.modules.expose("api", apiPart);
 		own(app.bus.on("chat:changed", () => check()));
 		own(app.bus.on("maestro:changed", ({ present }) => {
 			if (present) registerMaestro();
 			else releaseMaestro();
 		}));
 		own(app.ui.addSlashCommand("dramatis-read", "intent.slash.read", async () => {
-			const result = await reader.read({ force: true });
+			const result = await read({ force: true });
 			return result.ok ? result.message ?? "" : t("intent.failed", { error: result.error ?? "?" });
 		}));
 		own(app.ui.addSettingsSection({
@@ -20952,14 +21692,18 @@ var intentModule = {
 						}
 					}),
 					field$1(t("intent.settings.status"), status),
-					button({
+					el("div", { class: "dramatis-settings-buttons" }, [button({
 						label: t("intent.settings.readNow"),
 						icon: "book-open",
 						onClick: async () => {
-							await reader.read({ force: true });
+							await read({ force: true });
 							await update();
 						}
-					})
+					}), button({
+						label: t("intent.settings.openSheet"),
+						icon: "masks-theater",
+						onClick: () => app.ui.openWindow(CAST_WINDOW$1)
+					})])
 				]));
 				update();
 				return () => {
@@ -21489,6 +22233,8 @@ var SHEET_STRINGS = {
 	en: {
 		"sheet.title": "Intent sheet",
 		"sheet.window": "Intent sheet",
+		"sheet.menu": "Intent sheet (Dramatis)",
+		"sheet.menuHint": "The cast of this chat: who wants what, how they stand toward you and why",
 		"sheet.slash.help": "Opens the intent sheet of a character: /dramatis-sheet Ilva. Without a name — the whole cast.",
 		"sheet.slash.noCast": "There is no cast yet: open a chat with a character first.",
 		"sheet.slash.notFound": "No one called «{name}» in the cast.",
@@ -21990,6 +22736,8 @@ var SHEET_STRINGS = {
 	ru: {
 		"sheet.title": "Лист замысла",
 		"sheet.window": "Лист замысла",
+		"sheet.menu": "Лист замысла (Dramatis)",
+		"sheet.menuHint": "Состав этого чата: кто чего хочет, как относится к тебе и почему",
 		"sheet.slash.help": "Открывает лист замысла персонажа: /dramatis-sheet Ильва. Без имени — весь состав.",
 		"sheet.slash.noCast": "Состава пока нет: сначала открой чат с персонажем.",
 		"sheet.slash.notFound": "В составе нет никого по имени «{name}».",
@@ -23281,24 +24029,6 @@ function chipsCtl(b, path, label, options, max, fallback) {
 }
 //#endregion
 //#region src/features/sheet/secrets.ts
-/** Intents toward the player a character would not show him. */
-var COVERT_INTENTS = [
-	"extract",
-	"use",
-	"avenge",
-	"seduce"
-];
-function isHiddenAppetite(appetite) {
-	return appetite.visibility !== "open";
-}
-/** An intention marked hidden or secret (an extra flag the generator or the user may set). */
-function isHiddenIntention(intention) {
-	const flags = intention;
-	return flags.hidden === true || flags.secret === true;
-}
-function isCovertTie(tie) {
-	return tie.target === "@player" && COVERT_INTENTS.includes(tie.intent);
-}
 /**
 * Wraps secret content by the lever: open → the content; known → null (render nothing); spoiler → a blurred, inert
 * copy under a «show» button until the user reveals it (remembered while the window is open).
@@ -26902,6 +27632,11 @@ function renderSheet(deps, container, params) {
 }
 //#endregion
 //#region src/features/sheet/index.ts
+/** The profile id a name means: the engine's resolution (Maestro's names, DES aliases), an id, the cast's names. */
+function characterId(engine, view, name) {
+	const resolved = engine.resolve(name);
+	return (resolved && view.byId.has(resolved) ? resolved : null) ?? (view.byId.has(name) ? name : null) ?? matchName(name, view.profiles);
+}
 var sheetModule = {
 	key: "sheet",
 	stage: 1,
@@ -26922,6 +27657,7 @@ var sheetModule = {
 			results: /* @__PURE__ */ new Map(),
 			seen: /* @__PURE__ */ new Map()
 		};
+		const engine = () => app.modules.api(ENGINE_API);
 		own(app.ui.style("sheet", sheet_default));
 		own(app.ui.addWindow({
 			id: CAST_WINDOW,
@@ -26929,6 +27665,22 @@ var sheetModule = {
 			defaultWidth: 520,
 			render: (container, params) => renderSheet(deps, container, params)
 		}));
+		own(app.ui.addMenuItem({
+			id: "sheet",
+			icon: "masks-theater",
+			labelKey: "sheet.menu",
+			titleKey: "sheet.menuHint",
+			onClick: () => app.ui.openWindow(CAST_WINDOW)
+		}));
+		app.modules.expose("api", { 
+		/** A character's page when the name means someone of the current cast, else the list. */
+openSheet(name) {
+			const query = typeof name === "string" ? name.trim() : "";
+			const api = query ? engine() : void 0;
+			const view = api?.view();
+			const id = api && view ? characterId(api, view, query) : null;
+			app.ui.openWindow(CAST_WINDOW, id ? { character: id } : {});
+		} });
 		own(app.ui.addSlashCommand(SHEET_SLASH, "sheet.slash.help", async (value) => {
 			const t = app.i18n.t.bind(app.i18n);
 			const name = value.trim();
@@ -26936,14 +27688,13 @@ var sheetModule = {
 				app.ui.openWindow(CAST_WINDOW);
 				return "";
 			}
-			const engine = app.modules.api(ENGINE_API);
-			const view = engine ? engine.view() ?? await engine.ready() : null;
-			if (!engine || !view) {
+			const api = engine();
+			const view = api ? api.view() ?? await api.ready() : null;
+			if (!api || !view) {
 				app.ui.openWindow(CAST_WINDOW);
 				return t("sheet.slash.noCast");
 			}
-			const resolved = engine.resolve(name);
-			const id = (resolved && view.byId.has(resolved) ? resolved : null) ?? (view.byId.has(name) ? name : null) ?? matchName(name, view.profiles);
+			const id = characterId(api, view, name);
 			if (!id) return t("sheet.slash.notFound", { name });
 			app.ui.openWindow(CAST_WINDOW, { character: id });
 			return "";
@@ -28919,7 +29670,8 @@ async function startDramatis(options = {}) {
 		version: DRAMATIS_VERSION,
 		settings,
 		bus,
-		log: log.scope("api")
+		log: log.scope("api"),
+		i18n
 	});
 	const modules = new Modules({
 		settings,

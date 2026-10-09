@@ -153,8 +153,8 @@ export function createEngine(deps: EngineDeps): EngineImpl {
             const present = [...found.present];
             const unknown: string[] = [];
             for (const name of found.unknown) {
-                // DES names are nominative and were matched strictly: only Maestro's gluing gets a second say.
-                const id = maestroMatch(name, profiles);
+                // DES names are nominative and were matched strictly: Maestro's gluing and DES's own aliases get a second say.
+                const id = maestroMatch(name, profiles) ?? desMatch(name, profiles);
                 if (id && !present.includes(id)) present.push(id);
                 else if (!id) unknown.push(name);
             }

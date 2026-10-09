@@ -7,7 +7,7 @@ A personality engine for [SillyTavern](https://github.com/SillyTavern/SillyTaver
 |             |                                                               |
 | ----------- | ------------------------------------------------------------- |
 | SillyTavern | 1.19.0 or newer                                               |
-| Maestro     | optional; everything "live" needs it (1.17+, 1.18+ preferred) |
+| Maestro     | optional; everything "live" needs it (1.17+, 1.19+ preferred) |
 | Chats       | one character or a narrator card; group chats not yet         |
 | Interface   | Russian, English                                              |
 | License     | AGPL-3.0                                                      |

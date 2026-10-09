@@ -157,6 +157,22 @@ describe('engine — presence', () => {
         expect(h.engine.view()?.unknown).toEqual(['Гость в плаще']);
     });
 
+    it('takes DES’s own aliases for a tracker name nobody matched', async () => {
+        const h = await startHarness({
+            profiles: tavernCard(),
+            state: tavernState(),
+            before: (mock) => {
+                mock.extensionSettings['third-party/Dooms-Enhancement-Suite'] = {
+                    characterAliases: { 'Ilva Holm': ['Ильва'] },
+                };
+            },
+        });
+        fakeDes(h.runtime, [{ name: 'Ilva Holm', present: true, details: {} }]);
+        await h.engine.refresh();
+        expect(h.engine.view()?.present).toEqual(['ilva']);
+        expect(h.engine.view()?.unknown).toEqual([]);
+    });
+
     it('lets Maestro’s names glue a DES name nobody matched', async () => {
         const maestro = fakeMaestro();
         maestro.api.names.same = (a, b) => a === 'Хозяйка' && b === 'Ильва';

@@ -121,6 +121,13 @@
     flex-direction: column;
 }
 
+/* A row of buttons in a settings section; they wrap on a phone. */
+.dramatis-settings-buttons {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--dramatis-gap-sm);
+}
+
 /* ------------------------------------------------------------------ windows */
 
 .dramatis-window {
