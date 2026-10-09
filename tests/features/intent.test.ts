@@ -143,7 +143,7 @@ function profilesOf(mock: StMock): CardProfiles | null {
 describe('intent — reading the card', () => {
     it('reads the card in parts, merges them and saves the profiles through the engine', async () => {
         const { h, maestro, intent, notices, records, tasks } = await setup();
-        expect(tasks).toEqual([INTENT_TASK]);
+        expect(tasks).toContain(INTENT_TASK);
         const result = await intent.read({ force: true });
         expect(result).toMatchObject({ ok: true, characters: 4 });
         expect(result.message).toMatch(/^Замысел прочитан: 3 персонажа, 1 группа\. Замечания \(\d+\): /);
@@ -347,7 +347,7 @@ describe('intent — Maestro and the own client', () => {
         delete (globalThis as Record<string, unknown>).MAESTRO_API;
         h.runtime.bridge.check();
         await flush();
-        expect(tasks).toEqual([]);
+        expect(tasks).not.toContain(INTENT_TASK);
         expect(undos.size).toBe(0);
         const again = fakeMaestro();
         const registered: string[] = [];
@@ -358,7 +358,7 @@ describe('intent — Maestro and the own client', () => {
         (globalThis as Record<string, unknown>).MAESTRO_API = again.api;
         h.runtime.bridge.check();
         await flush();
-        expect(registered).toEqual([INTENT_TASK]);
+        expect(registered).toContain(INTENT_TASK);
     });
 
     it('works without Maestro on the own connection profile', async () => {

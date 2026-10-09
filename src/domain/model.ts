@@ -536,6 +536,8 @@ export interface AppetiteState {
     lapsed?: boolean;
     /** In-world days since the last satisfaction (withdrawal onset, tolerance fade); absent = 0. */
     daysUnsated?: number;
+    /** Pressure cues added in the current scene (§5.7 «не больше +2 за сцену»); reset at the scene end. */
+    sceneCue?: number;
 }
 
 /** A scheme with a clock (§5.7): kidnapping, a seduction with a hook, an undermining. */
@@ -633,6 +635,8 @@ export interface ChatState {
     /** Where and when the current scene is (DES). */
     place?: string;
     time?: string;
+    /** In-world date of the scene as DES writes it (day changes end a chapter). */
+    date?: string;
     /** Starting greeting the chat began with. */
     greeting: number;
     log: StateEvent[];

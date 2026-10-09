@@ -5,10 +5,12 @@ import { castModule } from '../features/cast';
 import { engineModule } from '../features/engine';
 import { intentModule } from '../features/intent';
 import { sheetModule } from '../features/sheet';
+import { turnModule } from '../features/turn';
 
 export const MODULES: DramatisModule[] = [
     engineModule,
     castModule,
     intentModule,
     sheetModule,
+    turnModule,
 ];
