@@ -1,0 +1,254 @@
+/*
+ * Dramatis UI. Every class is prefixed `dramatis-`; custom properties are `--dramatis-*`.
+ * Colours, blur, shadow and font size come from the ST theme (SmartTheme variables), so Dramatis follows the user's
+ * theme. Narrow screens (< 768px): windows become full-screen sheets.
+ */
+
+:root {
+    --dramatis-text: var(--SmartThemeBodyColor, rgb(220, 220, 210));
+    --dramatis-muted: var(--SmartThemeEmColor, rgb(145, 145, 145));
+    --dramatis-accent: var(--SmartThemeQuoteColor, rgb(225, 138, 36));
+    --dramatis-border: var(--SmartThemeBorderColor, rgba(0, 0, 0, 0.5));
+    --dramatis-surface: var(--SmartThemeBlurTintColor, rgb(23, 23, 23));
+    --dramatis-shadow: var(--SmartThemeShadowColor, rgba(0, 0, 0, 0.5));
+    --dramatis-raised: color-mix(in srgb, var(--dramatis-text) 6%, transparent);
+    --dramatis-error: rgb(225, 80, 80);
+    --dramatis-font-size: var(--mainFontSize, 15px);
+    --dramatis-radius: 10px;
+    --dramatis-radius-sm: 6px;
+    --dramatis-gap: 12px;
+    --dramatis-gap-sm: 6px;
+    --dramatis-tap: 44px;
+}
+
+.dramatis-ui [hidden] {
+    display: none !important;
+}
+
+.dramatis-muted,
+.dramatis-field-hint {
+    color: var(--dramatis-muted);
+    font-size: 0.85em;
+}
+
+.dramatis-error-text {
+    color: var(--dramatis-error);
+    overflow-wrap: anywhere;
+}
+
+.dramatis-placeholder {
+    color: var(--dramatis-muted);
+    line-height: 1.5;
+}
+
+/* ------------------------------------------------------------------ buttons and fields */
+
+.dramatis-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--dramatis-gap-sm);
+    margin: 0;
+    white-space: nowrap;
+}
+
+.dramatis-btn-ghost {
+    background: transparent;
+    border-color: transparent;
+}
+
+.dramatis-btn-primary {
+    border-color: var(--dramatis-accent);
+}
+
+.dramatis-btn-danger {
+    color: var(--dramatis-error);
+}
+
+.dramatis-busy {
+    opacity: 0.6;
+    cursor: progress;
+}
+
+.dramatis-field {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr);
+    align-items: center;
+    gap: 2px var(--dramatis-gap);
+    margin: 4px 0;
+}
+
+.dramatis-field-label {
+    min-width: 0;
+}
+
+.dramatis-field-control > select,
+.dramatis-field-control > input {
+    width: 100%;
+    margin: 0;
+}
+
+.dramatis-field-hint {
+    grid-column: 1 / -1;
+}
+
+.dramatis-toggle {
+    margin: 4px 0;
+}
+
+/* ------------------------------------------------------------------ settings drawer */
+
+.dramatis-settings-content {
+    padding-bottom: var(--dramatis-gap-sm);
+}
+
+.dramatis-settings-section + .dramatis-settings-section {
+    margin-top: var(--dramatis-gap);
+    padding-top: var(--dramatis-gap-sm);
+    border-top: 1px solid var(--dramatis-border);
+}
+
+.dramatis-settings-title {
+    margin: var(--dramatis-gap-sm) 0;
+}
+
+.dramatis-settings-subtitle {
+    margin: var(--dramatis-gap) 0 2px;
+}
+
+.dramatis-settings-group {
+    display: flex;
+    flex-direction: column;
+}
+
+/* ------------------------------------------------------------------ windows */
+
+.dramatis-window {
+    position: fixed;
+    top: var(--topBarBlockSize, 0px);
+    right: 0;
+    z-index: 2900;
+    display: flex;
+    flex-direction: column;
+    width: min(var(--dramatis-window-width, 420px), 100vw);
+    height: calc(100dvh - var(--topBarBlockSize, 0px));
+    max-height: calc(100dvh - var(--topBarBlockSize, 0px));
+    color: var(--dramatis-text);
+    font-size: var(--dramatis-font-size);
+    background-color: var(--dramatis-surface);
+    backdrop-filter: blur(var(--SmartThemeBlurStrength, 0px));
+    -webkit-backdrop-filter: blur(var(--SmartThemeBlurStrength, 0px));
+    border: 1px solid var(--dramatis-border);
+    border-right-width: 0;
+    box-shadow: 0 0 12px var(--dramatis-shadow);
+    outline: none;
+}
+
+/* Dragged away from the edge: a floating window of its own height. */
+.dramatis-window.dramatis-window-moved {
+    right: auto;
+    height: min(70dvh, calc(100dvh - var(--topBarBlockSize, 0px)));
+    border-right-width: 1px;
+    border-radius: var(--dramatis-radius);
+    overflow: hidden;
+}
+
+.dramatis-window-dragging,
+.dramatis-window-dragging * {
+    user-select: none;
+}
+
+.dramatis-window-header {
+    display: flex;
+    flex: 0 0 auto;
+    align-items: center;
+    gap: var(--dramatis-gap-sm);
+    min-height: 40px;
+    padding: 4px 6px 4px 12px;
+    border-bottom: 1px solid var(--dramatis-border);
+    cursor: grab;
+    touch-action: none;
+    user-select: none;
+}
+
+.dramatis-window-dragging > .dramatis-window-header {
+    cursor: grabbing;
+}
+
+.dramatis-window-title {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    font-weight: 600;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.dramatis-window-close {
+    flex: 0 0 auto;
+}
+
+.dramatis-window-body {
+    flex: 1 1 auto;
+    min-height: 0;
+    padding: 12px 14px 20px;
+    overflow: auto;
+    overscroll-behavior: contain;
+}
+
+.dramatis-window-body:focus {
+    outline: none;
+}
+
+/* Phones and narrow windows: one full-screen sheet under the top bar. */
+.dramatis-window.dramatis-window-sheet {
+    top: var(--topBarBlockSize, 0px);
+    right: 0;
+    left: 0;
+    width: 100vw;
+    height: calc(100dvh - var(--topBarBlockSize, 0px));
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+}
+
+.dramatis-window-sheet > .dramatis-window-header {
+    min-height: var(--dramatis-tap);
+    cursor: default;
+}
+
+.dramatis-window-sheet .dramatis-window-close {
+    min-width: var(--dramatis-tap);
+    min-height: var(--dramatis-tap);
+}
+
+.dramatis-window-sheet > .dramatis-window-body {
+    padding: 10px 10px calc(24px + env(safe-area-inset-bottom));
+}
+
+@media (max-width: 767px) {
+    .dramatis-field {
+        grid-template-columns: minmax(0, 1fr);
+    }
+}
+
+/* ------------------------------------------------------------------ toasts and confirmations */
+
+.dramatis-toast {
+    display: flex;
+    flex-direction: column;
+    gap: var(--dramatis-gap-sm);
+}
+
+.dramatis-toast-action {
+    align-self: flex-start;
+    margin: 0;
+}
+
+.dramatis-confirm-title {
+    margin-top: 0;
+}
+
+.dramatis-confirm-body {
+    white-space: pre-wrap;
+}

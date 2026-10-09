@@ -1,0 +1,7 @@
+# Рабочие материалы ревью: копии модели с комментариями.
+docs/review/
+node_modules/
+coverage/
+.dev/
+.claude/
+.idea/
