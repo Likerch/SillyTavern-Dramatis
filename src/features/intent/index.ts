@@ -102,7 +102,7 @@ export const intentModule: DramatisModule<IntentSettings> = {
                 if (hasUserMessages() || autoRead.has(cardKey)) return;
                 if (!app.llm.available(INTENT_TASK, false) || !leads()) return;
                 autoRead.add(cardKey);
-                await reader.read();
+                await reader.read({ auto: true });
                 return;
             }
             const now = await reader.fingerprint();

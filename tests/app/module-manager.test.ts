@@ -123,6 +123,28 @@ describe('Modules', () => {
         expect(modules.list().find((item) => item.module.key === 'needy')?.running).toBe(false);
     });
 
+    it('restarts needsMaestro modules when Maestro restarts with a new API object (registrations are gone)', async () => {
+        const { modules, app, bus, bridge } = setup(true);
+        const needy = module('needy', { needsMaestro: true });
+        const plain = module('plain');
+        modules.register([needy.spec, plain.spec] as DramatisModule[], () => {});
+        await modules.startAll(app);
+        expect(needy.contexts).toHaveLength(1);
+
+        // Same object again (a chat change re-check): nothing restarts.
+        await bus.emit('maestro:changed', { present: true });
+        await flush();
+        expect(needy.contexts).toHaveLength(1);
+
+        bridge.set(fakeMaestro().api);
+        await bus.emit('maestro:changed', { present: true });
+        await flush();
+        expect(needy.released).toHaveBeenCalledOnce();
+        expect(needy.contexts).toHaveLength(2);
+        expect(plain.contexts).toHaveLength(1);
+        expect(modules.list().find((item) => item.module.key === 'needy')?.running).toBe(true);
+    });
+
     it('scopes expose(): API parts and named APIs go away with the module', async () => {
         const { modules, app, publisher, settings } = setup();
         const cast = module('cast', {

@@ -10,6 +10,8 @@ import type { TurnPass } from '../../src/domain/turn-prompt';
 import { ENGINE_API } from '../../src/features/engine/api';
 import type { EngineApi, EngineView } from '../../src/features/engine/api';
 import { ARC_KIND, STATE_TARGET, turnModule } from '../../src/features/turn';
+import { TURN_API } from '../../src/features/turn/api';
+import type { TurnApi } from '../../src/features/turn/api';
 import { TURN_STRINGS } from '../../src/features/turn/strings';
 import type { ApiJournalChange, ApiLlmRequest, ApiLlmResult, ApiProposal } from '../../src/shared/apis';
 import type { App, DesCharacter, DramatisSettings, Unsubscribe } from '../../src/shared/contracts';
@@ -103,6 +105,10 @@ interface Setup {
     leader: { value: boolean };
     des: DesCharacter[];
     reply: (request: ApiLlmRequest) => ApiLlmResult | Promise<ApiLlmResult>;
+    /** What the module exposed to other modules (TURN_API). */
+    exposed: Map<string, unknown>;
+    /** Dramatis' own files (the turn snapshot). */
+    files: Map<string, unknown>;
     dispose(): Promise<void>;
 }
 
@@ -157,6 +163,8 @@ async function setup(
         leader: { value: true },
         des: [],
         reply: () => ({ ok: true, data: JSON.parse(JSON.stringify(options.pass ?? TIP)) }),
+        exposed: new Map(),
+        files: new Map(),
         async dispose() {},
     };
     maestro.reply = (request) => result.reply(request);
@@ -193,7 +201,10 @@ async function setup(
         bus,
         rng: seeded(5),
         maestro: staticBridge(maestro.api),
-        modules: { api: (key: string) => (key === ENGINE_API ? engine.api : undefined) },
+        modules: {
+            api: (key: string) => (key === ENGINE_API ? engine.api : result.exposed.get(key)),
+            expose: (key: string, value: unknown) => result.exposed.set(key, value),
+        },
         state: {
             setDraft: (index: number, swipe: number, draft: unknown) => drafts.set(`${index}:${swipe}`, draft),
             takeDraft: (index: number, swipe: number) => {
@@ -217,6 +228,12 @@ async function setup(
             },
         },
         ui: { notice: vi.fn() },
+        files: {
+            fileName: (kind: string) => `dramatis-${kind}.json`,
+            read: async (name: string) => (result.files.has(name) ? structuredClone(result.files.get(name)) : null),
+            write: async (name: string, data: unknown) => void result.files.set(name, structuredClone(data)),
+            remove: async (name: string) => void result.files.delete(name),
+        },
     } as unknown as App;
     result.app = app;
     const owned: Unsubscribe[] = [];
@@ -283,7 +300,11 @@ describe('turn module', () => {
         expect(s.journal).toHaveLength(1);
         expect(s.journal[0]!.kind).toBe('dramatis.turn');
         expect(s.journal[0]!.changes[0]).toMatchObject({ target: STATE_TARGET, ref: { chatId: 'chat-1', turn: 1 } });
-        expect((s.journal[0]!.changes[0]!.before as ChatState).turn).toBe(0);
+        // The journal record stays small: the whole state before the turn is in Dramatis' own snapshot file.
+        expect(s.journal[0]!.changes[0]!.before).toEqual({ turn: 0 });
+        expect(s.journal[0]!.changes[0]!.after).toEqual({ turn: 1 });
+        const snapshot = [...s.files.values()][0] as { chatId: string; turn: number; before: ChatState };
+        expect(snapshot).toMatchObject({ chatId: 'chat-1', turn: 1, before: { turn: 0 } });
 
         // The same commit again (a second message without a reply between) changes nothing.
         await s.bus.emit('turn:committed', { messageIndex: 2 });
@@ -437,6 +458,15 @@ describe('turn module', () => {
         expect(s.engine.box.state.characters.ilva!.ties[PLAYER_ID]!.stance).toBe(-1);
         expect(await applier.valid!(proposal.payload)).toBe(false);
         expect(s.engine.box.state.log.some((line) => line.kind === 'arc' && line.text.includes('arc step'))).toBe(true);
+
+        // Maestro journals the applied card with the proposal's changes; its undo comes back to this target.
+        const undo = s.undoers.get(STATE_TARGET)!;
+        const change = proposal.changes[0]!;
+        expect(change).toMatchObject({ target: STATE_TARGET, before: -2, after: -1 });
+        expect(await undo(change)).toBe(true);
+        expect(s.engine.box.state.characters.ilva!.ties[PLAYER_ID]!.stance).toBe(-2);
+        // Taken back already (or moved since): nothing to undo.
+        expect(await undo(change)).toBe(false);
     });
 
     it('does not apply an arc step of another chat', async () => {
@@ -456,6 +486,97 @@ describe('turn module', () => {
         expect(await s.appliers.get(ARC_KIND)!.valid!(payload)).toBe(false);
     });
 
+    it('announces the applied turn once the commit is saved: the new counter and its own next', async () => {
+        const s = await setup();
+        const seen: { messageIndex: number; turn: number; next?: number; state: number }[] = [];
+        s.bus.on('turn:applied', ({ messageIndex, turn }) => {
+            const state = s.engine.box.state;
+            seen.push({ messageIndex, turn, state: state.turn, ...(state.next ? { next: state.next.turn } : {}) });
+        });
+        await reply(s);
+        await send(s);
+        expect(seen).toEqual([{ messageIndex: 2, turn: 1, state: 1, next: 1 }]);
+
+        // A second message after the same reply is no new turn: no model call, no commit, no announcement.
+        await s.bus.emit('turn:committed', { messageIndex: 2 });
+        await flush();
+        expect(seen).toHaveLength(1);
+        expect(s.maestro.requests).toHaveLength(1);
+        expect(s.engine.box.updates).toBe(1);
+    });
+
+    it('never commits the same reply twice, even after a reload (the state remembers its last commit)', async () => {
+        const first = await setup();
+        await reply(first);
+        await send(first);
+        const lastCommit = first.engine.box.state.lastCommit;
+        expect(lastCommit).toMatchObject({ messageIndex: 2, swipeId: 0 });
+
+        const reloaded = await setup({
+            patch: (_profiles, state) => {
+                state.turn = 1;
+                state.lastCommit = lastCommit;
+            },
+        });
+        await send(reloaded);
+        await flush();
+        expect(reloaded.maestro.requests).toHaveLength(0);
+        expect(reloaded.engine.box.updates).toBe(0);
+    });
+
+    it('reads a reply announced twice (ST renders it again) only once; a changed text is read again', async () => {
+        const s = await setup();
+        await reply(s);
+        await reply(s);
+        expect(s.maestro.requests).toHaveLength(1);
+        s.mock.chat[2]!.mes = 'Ильва sweeps the coin into her apron and smiles.';
+        await reply(s);
+        expect(s.maestro.requests).toHaveLength(2);
+    });
+
+    it('does not ask the model again at commit about a reply whose pass was refused', async () => {
+        const s = await setup();
+        s.reply = () => ({ ok: false, refusal: true, error: 'refusal' });
+        await reply(s);
+        expect(s.maestro.requests).toHaveLength(1);
+        await send(s);
+        await flush();
+        expect(s.maestro.requests).toHaveLength(1);
+        expect(s.engine.box.state.turn).toBe(1);
+    });
+
+    it('settle(): commits a ready draft before the generation when turn:committed is late, once', async () => {
+        const s = await setup();
+        await reply(s);
+        s.mock.chat.push(message('Thanks.', { is_user: true }));
+        const turn = s.exposed.get(TURN_API) as TurnApi;
+        await turn.settle();
+        expect(s.engine.box.updates).toBe(1);
+        expect(s.engine.box.state.next?.turn).toBe(1);
+        expect(s.engine.box.state.turn).toBe(1);
+
+        await s.bus.emit('turn:committed', { messageIndex: 2 });
+        await flush();
+        expect(s.engine.box.updates).toBe(1);
+        expect(s.maestro.requests).toHaveLength(1);
+    });
+
+    it('settle(): never asks the model on the send path — a reply without a draft waits for its commit', async () => {
+        const s = await setup();
+        s.mock.chat.push(message('Thanks.', { is_user: true }));
+        await (s.exposed.get(TURN_API) as TurnApi).settle();
+        expect(s.maestro.requests).toHaveLength(0);
+        expect(s.engine.box.updates).toBe(0);
+    });
+
+    it('reads the scene as the reply left it before the pass', async () => {
+        const s = await setup();
+        const refresh = vi.spyOn(s.engine.api, 'refresh');
+        await reply(s);
+        expect(refresh).toHaveBeenCalled();
+        expect(s.maestro.requests).toHaveLength(1);
+    });
+
     it('undoes the latest committed turn from its journal snapshot', async () => {
         const s = await setup();
         await reply(s);
@@ -467,6 +588,19 @@ describe('turn module', () => {
         expect(s.engine.box.state.turn).toBe(0);
         expect(s.engine.box.state.characters.ilva!.emotion).toBeUndefined();
         expect(await undo(change)).toBe(false);
+    });
+
+    it('undoes a turn recorded with a whole state (records made before the snapshot file)', async () => {
+        const s = await setup();
+        await reply(s);
+        await send(s);
+        const old = structuredClone(s.engine.box.state);
+        old.turn = 0;
+        delete old.characters.ilva!.emotion;
+        s.files.clear();
+        const change = { target: STATE_TARGET, ref: { chatId: 'chat-1', turn: 1 }, before: old, after: { turn: 1 } };
+        expect(await s.undoers.get(STATE_TARGET)!(change)).toBe(true);
+        expect(s.engine.box.state.turn).toBe(0);
     });
 
     it('offers «Redo» for a reply that drifted, and asks ST for a new swipe', async () => {

@@ -11,6 +11,7 @@ import type { EngineApi, EngineView } from '../../src/features/engine/api';
 import { WORLD_JOURNAL_KIND, WORLD_UNDO_TARGET, playerCanHear, restoreSnapshot, world } from '../../src/features/world';
 import type { WorldSettings } from '../../src/features/world';
 import { WORLD_STRINGS } from '../../src/features/world/strings';
+import { TURN_API } from '../../src/features/turn/api';
 import type { ApiJournalChange, DramatisApiV1 } from '../../src/shared/apis';
 import type { App, DramatisSettings, Rng, SettingsSection, Unsubscribe } from '../../src/shared/contracts';
 import { always, appState, appetite } from '../domain/appetites-fixtures';
@@ -117,11 +118,14 @@ interface Setup {
     sections: SettingsSection[];
     part: () => Partial<DramatisApiV1>;
     chatId: { value: string | null };
+    bus: ReturnType<typeof createBus>;
     commit(messageIndex?: number, turn?: number): Promise<void>;
     dispose(): Promise<void>;
 }
 
-async function setup(options: { rng?: Rng; state?: (s: ChatState) => void; present?: string[] } = {}): Promise<Setup> {
+async function setup(
+    options: { rng?: Rng; state?: (s: ChatState) => void; present?: string[]; turnModule?: boolean } = {},
+): Promise<Setup> {
     const { profiles, state } = cast();
     options.state?.(state);
     const view: EngineView = {
@@ -167,7 +171,12 @@ async function setup(options: { rng?: Rng; state?: (s: ChatState) => void; prese
     const chatId = { value: 'chat-1' as string | null };
     const app = {
         modules: {
-            api: (key: string) => (key === ENGINE_API ? engine.api : undefined),
+            api: (key: string) =>
+                key === ENGINE_API
+                    ? engine.api
+                    : key === TURN_API && options.turnModule
+                      ? { settle: async () => {} }
+                      : undefined,
             expose: (key: string, value: unknown) => {
                 if (key === 'api') part = value as Partial<DramatisApiV1>;
             },
@@ -208,6 +217,7 @@ async function setup(options: { rng?: Rng; state?: (s: ChatState) => void; prese
         sections,
         part: () => part,
         chatId,
+        bus,
         async commit(messageIndex = 7, turn) {
             if (turn !== undefined) engine.state = { ...engine.state, turn };
             await bus.emit('turn:committed', { messageIndex });
@@ -237,6 +247,21 @@ describe('world module', () => {
         await s.commit();
         expect(s.engine.saves).toHaveLength(0);
         expect(s.record).not.toHaveBeenCalled();
+    });
+
+    it('with the turn module running, ticks after its commit (turn:applied), not on the sent message', async () => {
+        const s = await setup({ state: world0, turnModule: true });
+        // The message is sent: the turn module has not counted the turn yet (14), so nothing may tick on it.
+        await s.commit(7, 14);
+        expect(s.engine.saves).toHaveLength(0);
+        // Its commit is saved: turn 15 is due.
+        s.engine.state = { ...s.engine.state, turn: 15 };
+        await s.bus.emit('turn:applied', { messageIndex: 7, turn: 15 });
+        expect(s.engine.saves).toHaveLength(1);
+        expect(s.engine.state.world).toMatchObject({ lastTick: 15, ticks: 1 });
+        // A repeated announcement of the same turn ticks nothing more.
+        await s.bus.emit('turn:applied', { messageIndex: 7, turn: 15 });
+        expect(s.engine.saves).toHaveLength(1);
     });
 
     it('starts the world record on the first turns without ticking', async () => {
@@ -285,6 +310,18 @@ describe('world module', () => {
         expect(Object.keys(before.characters).sort()).toEqual(['grukk', 'guild']);
         expect(before.characters.guild!.agenda.front!.clock.filled).toBe(2);
         expect(change.after).toEqual({ lastTick: 15, ticks: 1 });
+    });
+
+    it('reads the chat’s own lever overrides (mode «Кино»: every 10 turns)', async () => {
+        const s = await setup({
+            state: (state) => {
+                world0(state);
+                state.overrides = { mode: 'cinema' };
+            },
+        });
+        await s.commit(7, 10);
+        expect(s.record).toHaveBeenCalledTimes(1);
+        expect(s.engine.state.world!.lastTick).toBe(10);
     });
 
     it('takes the interval from its settings', async () => {

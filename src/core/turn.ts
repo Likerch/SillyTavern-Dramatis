@@ -9,7 +9,7 @@
 // One-generation injections are driven by SillyTavern in both modes: producers run on GENERATION_AFTER_COMMANDS (before
 // generate interceptors, so Maestro already sees `dramatis_cast` when it decides what to silence) and every slot is
 // cleared on GENERATION_ENDED / STOPPED and on chat change.
-import type { ApiTurnEvent, ApiUnsubscribe } from '../shared/apis';
+import type { ApiTurnEvent, ApiUnsubscribe, MaestroApiV1 } from '../shared/apis';
 import type { Bus, GenerationInfo, Host, Logger, MaestroBridge, Unsubscribe } from '../shared/contracts';
 import type { EphemeralRunner } from './ephemeral';
 
@@ -29,6 +29,8 @@ const GENERATION_STALE_MS = 5 * 60 * 1000;
 export class TurnTracker {
     private readonly unsubscribers: Unsubscribe[] = [];
     private offMaestro: ApiUnsubscribe | null = null;
+    /** The MAESTRO_API object whose turn events are forwarded (a restarted Maestro publishes a new one). */
+    private attached: MaestroApiV1 | null = null;
     private turnMode: TurnMode = 'own';
     private generation: GenerationInfo | null = null;
     private staleTimer: ReturnType<typeof setTimeout> | null = null;
@@ -61,9 +63,12 @@ export class TurnTracker {
                 dryRun: dryRun === true,
                 quiet: type === 'quiet',
             };
+            // A background call of another extension or a dry run (token counting) while a real generation is under
+            // way: the real one's slots stay — it has not assembled its prompt yet.
+            const nested = (info.quiet || info.dryRun) && this.generation !== null;
             // Quiet generations (other extensions' background calls) may never report their end.
             if (!info.quiet && !info.dryRun) this.startGeneration(info);
-            await ephemeral.run(info);
+            if (!nested) await ephemeral.run(info);
             if (this.own()) await bus.emit('generation:before', info);
         });
 
@@ -132,7 +137,7 @@ export class TurnTracker {
     /** Follows the bridge: Maestro's pipeline when its API is present, our own tracking otherwise. */
     sync(): void {
         const api = this.deps.bridge.api();
-        if (api && this.turnMode === 'maestro' && this.offMaestro) return;
+        if (api && this.turnMode === 'maestro' && this.offMaestro && this.attached === api) return;
         this.detachMaestro();
         if (!api) {
             this.turnMode = 'own';
@@ -140,6 +145,7 @@ export class TurnTracker {
         }
         try {
             this.offMaestro = api.onTurn((event) => this.forward(event));
+            this.attached = api;
             this.turnMode = 'maestro';
         } catch (error) {
             this.deps.log.warn('could not subscribe to Maestro turn events; tracking turns ourselves', error);
@@ -152,6 +158,7 @@ export class TurnTracker {
     }
 
     private detachMaestro(): void {
+        this.attached = null;
         if (!this.offMaestro) return;
         try {
             this.offMaestro();

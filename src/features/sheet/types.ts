@@ -56,7 +56,8 @@ export type Route =
     | { page: 'character'; id: string }
     | { page: 'rules' }
     | { page: 'reputation' }
-    | { page: 'invariants' };
+    | { page: 'invariants' }
+    | { page: 'metrics' };
 
 export type SecretsMode = DramatisSettings['secrets'];
 

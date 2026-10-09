@@ -146,6 +146,22 @@ describe('own turn tracking (no Maestro)', () => {
         expect(seen.at(-1)?.payload).toEqual({ type: 'quiet', dryRun: false, quiet: true });
     });
 
+    it('keeps a real generation’s injections through a quiet call or a dry run started meanwhile', async () => {
+        const { ephemeral } = setup();
+        ephemeral.addProducer('cast', (info) => {
+            if (!info.quiet && !info.dryRun) {
+                ephemeral.setInjection('cast', { text: 'MOTIVES', position: 1, depth: 1, role: 0 });
+            }
+        });
+        await emit('GENERATION_AFTER_COMMANDS', 'normal', {}, false);
+        await emit('GENERATION_AFTER_COMMANDS', 'quiet', {}, false);
+        await emit('GENERATION_AFTER_COMMANDS', 'normal', {}, true);
+        expect(ephemeral.isSet('cast')).toBe(true);
+        expect(mock.prompts.get(injectionKey('cast'))?.value).toBe('MOTIVES');
+        await emit('GENERATION_ENDED', 3);
+        expect(ephemeral.isSet('cast')).toBe(false);
+    });
+
     it('clears injections on chat change and on dispose', async () => {
         const { ephemeral, turn } = setup();
         ephemeral.setInjection('cast', { text: 'X', position: 1, depth: 1 });
@@ -209,5 +225,18 @@ describe('with Maestro', () => {
         expect(maestro.turnListeners.size).toBe(0);
         await emit('MESSAGE_SWIPED', 2);
         expect(seen.at(-1)?.event).toBe('message:invalidated');
+    });
+
+    it('follows a restarted Maestro (a new API object) to its turn events', async () => {
+        const { turn, bus, bridge, maestro, seen } = setup(true);
+        expect(maestro.turnListeners.size).toBe(1);
+        const restarted = fakeMaestro();
+        bridge.set(restarted.api);
+        await bus.emit('maestro:changed', { present: true });
+        expect(turn.mode()).toBe('maestro');
+        expect(maestro.turnListeners.size).toBe(0);
+        expect(restarted.turnListeners.size).toBe(1);
+        await restarted.emitTurn({ type: 'turn:committed', messageIndex: 4 });
+        expect(seen.at(-1)).toMatchObject({ event: 'turn:committed', payload: { messageIndex: 4 } });
     });
 });

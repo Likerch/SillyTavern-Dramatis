@@ -117,6 +117,18 @@ describe('applyTurnPass — the generous tip (§5.6)', () => {
         expect(result.state.log.length).toBe(result.events.length);
     });
 
+    it('keeps the present flags: in the scene after this turn, away otherwise', () => {
+        const input = tavernInput({ present: ['ilva', 'bram'] });
+        // The starting scene had everyone; this turn sees two of them.
+        for (const live of Object.values(input.state.characters)) live.present = true;
+        input.state.characters.sota!.present = false;
+        const result = applyTurnPass({ ...input, present: ['ilva', 'bram', 'sota'] }, pass, ctx());
+        expect(result.state.characters.ilva!.present).toBe(true);
+        expect(result.state.characters.sota!.present).toBe(true);
+        expect(result.state.characters.fenn!.present).toBe(false);
+        expect(result.state.characters.carters!.present).toBe(false);
+    });
+
     it('keeps the input state untouched', () => {
         const input = tavernInput();
         const before = structuredClone(input.state);
@@ -341,6 +353,53 @@ describe('applyTurnPass — appetites (§5.7)', () => {
         );
         expect(again.state.schemes).toHaveLength(1);
         expect(again.state.next?.appetites?.grukk?.[0]?.method).toBe(5);
+    });
+
+    it('never pursues a minor with a sexual appetite, nor lets a minor act on one (the content boundary)', () => {
+        const flesh = (profiles: CharacterProfile[]) => {
+            const grukk = profiles.find((profile) => profile.id === 'grukk')!;
+            grukk.appetites = grukk.appetites.map((item) =>
+                item.id === 'plunder' ? { ...item, kind: 'flesh' } : item,
+            );
+            return grukk;
+        };
+        // Мира was flagged a minor after the tie with its want was written (a hand edit, a later reading).
+        const target = ford();
+        flesh(target.profiles);
+        target.profiles.find((profile) => profile.id === 'mira')!.minor = true;
+        const result = applyTurnPass(
+            { state: target.state, profiles: target.profiles, present: target.present, playerName: 'Курьер' },
+            turnPass(),
+            ctx(),
+        );
+        expect(result.state.schemes).toEqual([]);
+        expect(result.state.next?.appetites?.grukk ?? []).toEqual([]);
+
+        // A scheme started before the flag stops at the next turn.
+        const running = ford();
+        const scheme = applyTurnPass(
+            { state: running.state, profiles: running.profiles, present: running.present, playerName: 'Курьер' },
+            turnPass(),
+            ctx(),
+        ).state;
+        flesh(running.profiles);
+        running.profiles.find((profile) => profile.id === 'mira')!.minor = true;
+        const stopped = applyTurnPass(
+            { state: scheme, profiles: running.profiles, present: running.present, playerName: 'Курьер' },
+            turnPass(),
+            ctx(),
+        );
+        expect(stopped.state.schemes.map((item) => item.state)).toEqual(['failed']);
+
+        // The holder is the minor.
+        const holder = ford();
+        flesh(holder.profiles).minor = true;
+        const none = applyTurnPass(
+            { state: holder.state, profiles: holder.profiles, present: holder.present, playerName: 'Курьер' },
+            turnPass(),
+            ctx({ rng: always(0.1) }),
+        );
+        expect(none.state.next?.appetites?.grukk ?? []).toEqual([]);
     });
 
     it('acts now when the target is alone and unguarded', () => {

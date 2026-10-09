@@ -4,6 +4,7 @@
 // background, and the «desire is not affection» rule when an appetite line is there. Third person, words not
 // numbers, secrets and hidden appetites included (spoilers are a UI concern). Built from the stored state only: no AI
 // on the send path (П10). Trimmed to a budget of ≈ chars / 4 tokens in a fixed order. Pure.
+import { arcCardLine, choiceCardLine } from './arcs';
 import {
     appetiteKindLabel,
     appetiteSourceLabel,
@@ -21,8 +22,10 @@ import {
     valueLabel,
     visibilityLabel,
 } from './ladders';
+import { sexualBarred } from './group-rules';
 import type { Gender, Lang } from './ladders';
 import { PLAYER_ID } from './model';
+import { identityPhrase } from './thresholds';
 import type {
     Agenda,
     Appetite,
@@ -84,6 +87,10 @@ export interface CastCardInput {
     mergeVoices: boolean;
     /** Appetite passes' view of this turn per character id. */
     appetites?: Readonly<Record<string, readonly AppetiteNow[]>>;
+    /** Stage 5, «Кино»: the director's call for this beat per character id (card language); replaces the move. */
+    director?: Readonly<Record<string, string>>;
+    /** Stage 5: stress breaks of the last turn, the «snaps: …» text per character id (`state.next.snaps`). */
+    snaps?: Readonly<Record<string, string>>;
 }
 
 export interface CastCard {
@@ -129,6 +136,10 @@ interface Words {
     regard: (stance: number, want: number) => string;
     emotionAt: (type: string, target: string) => string;
     quote: (text: string) => string;
+    directed: string;
+    snaps: string;
+    arc: string;
+    choice: string;
 }
 
 const EN: Words = {
@@ -167,6 +178,10 @@ const EN: Words = {
                   : 'fondness beside the wanting',
     emotionAt: (type, target) => (target ? `${type} at ${target}` : type),
     quote: (text) => (/[«"“]/.test(text.charAt(0)) ? text : `"${text}"`),
+    directed: "This beat, director's call:",
+    snaps: 'snaps:',
+    arc: 'Arc:',
+    choice: 'Defining choice:',
 };
 
 const RU: Words = {
@@ -205,6 +220,10 @@ const RU: Words = {
                   : 'тепло рядом с хотением',
     emotionAt: (type, target) => (target ? `${type} (${target})` : type),
     quote: (text) => (/[«"“]/.test(text.charAt(0)) ? text : `«${text}»`),
+    directed: 'В этот такт, решение режиссёра:',
+    snaps: 'срыв:',
+    arc: 'Дуга:',
+    choice: 'Главный выбор:',
 };
 
 /** Default stance toward the player when no tie exists yet, by world tone. */
@@ -254,6 +273,12 @@ interface View {
     appetites: AppetiteLine[];
     corrections: string[];
     busy: string;
+    /** The move is the director's call. */
+    directed: boolean;
+    snap: string;
+    arc: string;
+    identity: string;
+    choice: string;
 }
 
 interface Context {
@@ -328,6 +353,7 @@ function appetiteLine(
     now: AppetiteNow | undefined,
 ): AppetiteLine | null {
     const { words, input } = ctx;
+    if (sexualBarred(appetite.kind, profile)) return null;
     const lang = input.lang;
     const gender: Gender | undefined = profile.gender;
     const pressure = live?.appetites[appetite.id]?.pressure ?? appetite.baseline;
@@ -336,7 +362,8 @@ function appetiteLine(
         (tie) =>
             tie.want !== undefined &&
             tie.want > 0 &&
-            (tie.appetite === appetite.id || (!tie.appetite && appetite.target.mode !== 'thing')),
+            (tie.appetite === appetite.id || (!tie.appetite && appetite.target.mode !== 'thing')) &&
+            !sexualBarred(appetite.kind, profile, ctx.byId.get(tie.target)),
     );
     const present = new Set([...input.present, PLAYER_ID]);
     let tie: Tie | undefined = now?.target ? ties.find((item) => item.target === now.target) : undefined;
@@ -413,10 +440,15 @@ function buildView(ctx: Context, id: string): View | null {
         (live?.scene.move
             ? { move: live.scene.move, target: live.scene.moveTarget, text: live.scene.moveText }
             : undefined);
-    const move = moveSpec
+    const call = clause(input.director?.[id]);
+    const snap = clause(input.snaps?.[id]);
+    const planned = moveSpec
         ? clause(moveSpec.text) ||
           (moveSpec.move !== 'own' ? moveLabel(moveSpec.move, lang, nameOf(ctx, moveSpec.target)) : '')
         : '';
+    // The director's call wins over the engine's move; a break's «snaps» line stands for its move.
+    const move = call || (snap ? '' : planned);
+    const identity = live?.corruption?.identity;
 
     // One signature or tactic, rotating with the turn so the card stays fresh.
     const habits = [
@@ -464,7 +496,7 @@ function buildView(ctx: Context, id: string): View | null {
         id,
         name: profile.name,
         band,
-        active: !!move || appetites.length > 0,
+        active: !!move || !!snap || appetites.length > 0,
         head: [doing, goal].filter(Boolean).join('; '),
         toward,
         reasons: strongestReasons(toPlayer?.reasons ?? [], 2),
@@ -480,7 +512,16 @@ function buildView(ctx: Context, id: string): View | null {
         appetites,
         corrections: (input.corrections?.[id] ?? []).map(clause).filter(Boolean),
         busy: busyBits.filter(Boolean).join('; '),
+        directed: !!call,
+        snap,
+        arc: clause(arcCardLine(profile, live, lang)),
+        identity: identity ? clause(identityPhrase(identity, lang, profile.gender)) : '',
+        choice: clause(choiceCardLine(live, lang)),
     };
+}
+
+function capital(text: string): string {
+    return text ? text.charAt(0).toUpperCase() + text.slice(1) : text;
 }
 
 /* ------------------------------------------------------------------ rendering with a trim level */
@@ -504,8 +545,11 @@ function renderBlock(ctx: Context, view: View, level: Level): { lines: string[];
     const reasons = view.reasons.slice(0, level.maxReasons);
     const toward = `${words.toward(ctx.player)} ${view.toward}${reasons.length ? ` (${reasons.join('; ')})` : ''} — ${view.behaviour}`;
     const main = [view.head ? sentence(view.head) : '', sentence(toward)];
-    if (view.move) main.push(sentence(`${words.thisTurn} ${view.move}`));
+    if (view.move) main.push(sentence(`${view.directed ? words.directed : words.thisTurn} ${view.move}`));
+    if (view.identity) main.push(sentence(capital(view.identity)));
+    if (view.arc) main.push(sentence(`${words.arc} ${view.arc}`));
     if (level.extras) {
+        if (view.choice) main.push(sentence(`${words.choice} ${view.choice}`));
         if (view.habit) main.push(sentence(view.habit));
         if (view.secret) main.push(sentence(`${words.secret} ${view.secret}`));
         if (view.other) main.push(sentence(view.other));
@@ -516,6 +560,7 @@ function renderBlock(ctx: Context, view: View, level: Level): { lines: string[];
         .filter(Boolean)
         .join('; ');
     if (voice) lines.push(`${view.name} — ${words.voice} ${sentence(voice)}`);
+    if (view.snap) lines.push(`${view.name} — ${words.snaps} ${sentence(view.snap)}`);
     for (const line of view.appetites) lines.push(line.text);
     for (const correction of view.corrections) lines.push(`${view.name} — ${words.correction} ${sentence(correction)}`);
     return { lines, appetite: view.appetites.length > 0 };

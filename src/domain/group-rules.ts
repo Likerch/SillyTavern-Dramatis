@@ -87,6 +87,18 @@ function isSexual(kind: AppetiteKind): boolean {
 }
 
 /**
+ * The content boundary at the point of action (Maestro rule, §5.7): a sexual appetite of a minor, or aimed at a
+ * minor, never acts — whatever the stored data says (a character flagged a minor after the reading, a hand edit).
+ */
+export function sexualBarred(
+    kind: AppetiteKind,
+    holder: { minor?: boolean } | undefined,
+    target?: { minor?: boolean } | undefined,
+): boolean {
+    return isSexual(kind) && (holder?.minor === true || target?.minor === true);
+}
+
+/**
  * Draws one individual's appetite from a rule: band and baseline (the lever shifts non-zero ones), style by the
  * rule's weights, affection onset, and targets — a class spreads over every fitting candidate (NPCs included),
  * a player rule reaches only an individual who knows the player. Minors neither hold nor receive sexual appetites:

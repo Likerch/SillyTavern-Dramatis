@@ -1,8 +1,8 @@
 // Starts and stops Dramatis modules (ported from Maestro's module manager). Everything a module registers through
 // `own()` is released when it stops, so a stopped module leaves no trace.
 // - enabled = the user's switch, else the module's default (settings.isModuleEnabled);
-// - modules with `needsMaestro` start only while MAESTRO_API is present and stop when it disappears
-//   (bus `maestro:changed`);
+// - modules with `needsMaestro` start only while MAESTRO_API is present, stop when it disappears and restart when
+//   Maestro restarts (a new API object forgets their registrations) — bus `maestro:changed`;
 // - each module gets an App whose `modules.expose()` knows the module: exposing `'api'` registers a DRAMATIS_API part
 //   (src/app/api.ts), any other key an inter-module API; both are dropped when the module stops.
 import type {
@@ -30,6 +30,8 @@ interface Entry {
     apiPartOff: Unsubscribe | null;
     /** init() in progress. */
     starting: Promise<void> | null;
+    /** MAESTRO_API object the module started with (needsMaestro modules register on it). */
+    maestro: unknown;
 }
 
 export interface ModulesDeps {
@@ -62,6 +64,7 @@ export class Modules implements ModuleManager {
                 exposed: new Set(),
                 apiPartOff: null,
                 starting: null,
+                maestro: null,
             });
             registerStrings(module);
         }
@@ -148,16 +151,27 @@ export class Modules implements ModuleManager {
         return next;
     }
 
-    /** Maestro came or went: start or stop the modules that need it. */
+    /**
+     * Maestro came, went or restarted: start or stop the modules that need it. A restarted Maestro (a new API object)
+     * forgot every task, applier, undo handler and turn listener registered on the old one, so its modules restart.
+     */
     private followMaestro(): Promise<void> {
         return this.serial(async () => {
-            const present = this.deps.bridge.present();
+            const api = this.deps.bridge.api();
+            const present = api !== null;
+            const stale = present ? this.ordered().filter((entry) => this.restartsFor(entry, api)) : [];
+            for (const entry of [...stale].reverse()) await this.stop(entry);
             for (const entry of this.ordered()) {
                 if (!entry.module.needsMaestro) continue;
                 if (present && this.canStart(entry)) await this.start(entry);
                 else if (!present) await this.stop(entry);
             }
         });
+    }
+
+    /** A running module that needs Maestro and started with another MAESTRO_API object. */
+    private restartsFor(entry: Entry, api: unknown): boolean {
+        return !!entry.module.needsMaestro && entry.running && entry.maestro !== api;
     }
 
     /** The App a module sees: its `modules.expose()` is bound to the module. */
@@ -199,6 +213,7 @@ export class Modules implements ModuleManager {
 
     private async init(app: App, entry: Entry): Promise<void> {
         const log = this.deps.log.scope(entry.module.key);
+        entry.maestro = this.deps.bridge.api();
         try {
             await entry.module.init({
                 app: this.scopedApp(app, entry),

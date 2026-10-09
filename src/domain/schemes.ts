@@ -9,6 +9,8 @@ export const MIN_SEGMENTS = 4;
 export const MAX_SEGMENTS = 8;
 /** Breaches that burn a scheme. */
 export const MAX_BREACHES = 5;
+/** Finished schemes (done, failed, exposed) a chat keeps: the latest ones, for the sheet and the story. */
+export const MAX_FINISHED_SCHEMES = 30;
 /** Accomplices add at most this much progress per interval. */
 export const ACCOMPLICE_CAP = 3;
 /** Attempt odds bounds (CK3 caps success at 85%). */
@@ -195,4 +197,12 @@ export function resolveAttempt(scheme: Scheme, world: AttemptInput, rng: Rng): A
         reason: worst > 0 ? reason : 'outmatched',
         chance,
     };
+}
+
+/** Drops the oldest finished schemes beyond MAX_FINISHED_SCHEMES; running and ready ones always stay. */
+export function pruneSchemes(schemes: Scheme[]): Scheme[] {
+    const finished = schemes.filter((scheme) => scheme.state !== 'running' && scheme.state !== 'ready');
+    if (finished.length <= MAX_FINISHED_SCHEMES) return schemes;
+    const drop = new Set(finished.slice(0, finished.length - MAX_FINISHED_SCHEMES));
+    return schemes.filter((scheme) => !drop.has(scheme));
 }

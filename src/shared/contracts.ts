@@ -214,6 +214,12 @@ export interface DramatisEvents {
     'reply:ready': { messageIndex: number };
     /** The user sent a message: the previous reply is now committed. */
     'turn:committed': { messageIndex: number };
+    /**
+     * The turn module saved the commit of this reply (`state.turn` is now `turn`, `state.next` belongs to it). Modules
+     * that build on the committed turn (generator, world) react to this, not to `turn:committed`, while the turn module
+     * runs: one order, every time. Leader tab only.
+     */
+    'turn:applied': { messageIndex: number; turn: number };
     'message:invalidated': { messageIndex: number; reason: 'swiped' | 'deleted' | 'edited' };
     'generation:before': GenerationInfo;
     'generation:ended': { type: string; stopped: boolean };

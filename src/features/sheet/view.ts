@@ -15,6 +15,7 @@ import { renderCharacterPage, sectionKey } from './page';
 import { emptyState } from './parts';
 import { INTENT_API } from './types';
 import type { IntentApi, IntentReadResult, ListFilter, Route, SheetCtx, SheetSession, SheetSettings } from './types';
+import { renderMetrics } from './metrics';
 import { renderInvariants, renderReputation, renderRules } from './world';
 
 export interface SheetDeps {
@@ -46,7 +47,12 @@ function signature(result: IntentReadResult): string {
 
 function routeFrom(params: Record<string, unknown>): Route {
     if (typeof params.character === 'string' && params.character) return { page: 'character', id: params.character };
-    if (params.page === 'rules' || params.page === 'reputation' || params.page === 'invariants') {
+    if (
+        params.page === 'rules' ||
+        params.page === 'reputation' ||
+        params.page === 'invariants' ||
+        params.page === 'metrics'
+    ) {
         return { page: params.page };
     }
     return { page: 'list' };
@@ -197,6 +203,8 @@ export class SheetView {
                 return renderReputation(ctx);
             case 'invariants':
                 return renderInvariants(ctx);
+            case 'metrics':
+                return renderMetrics(ctx);
             default:
                 return renderList(ctx, this.intentPanel(view.card.card), this.deps.settings.filter, (filter) =>
                     this.setFilter(filter),

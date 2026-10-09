@@ -373,6 +373,67 @@ describe('engine — updates', () => {
         expect(view.state.characters.vera).toMatchObject({ present: true, lastSeenTurn: 2 });
     });
 
+    it('passes a later reading of the card (tone, rules, reputation) on to a chat whose state is saved', async () => {
+        // The chat began (and saved its state) before the card was read.
+        const state = tavernState({ turn: 4, worldTone: 'indifferent', rules: [], reputation: [] });
+        const h = await startHarness({ profiles: tavernCard(), state });
+        await h.engine.updateProfiles((profiles) => {
+            // As the reading writes it: the author's tone, with its quote.
+            profiles.worldTone = 'hostile';
+            profiles.meta = { ...profiles.meta, worldTone: { origin: 'author', evidence: ['чужаков здесь не любят'] } };
+            profiles.rules = [
+                {
+                    id: 'goblins',
+                    holders: 'гоблины',
+                    kind: 'plunder',
+                    source: 'culture',
+                    target: { mode: 'thing' },
+                    intensity: { zero: 0.5, low: 0.5, mid: 0, high: 0 },
+                    styles: {},
+                    choosiness: 0,
+                    exclusivity: 'shared',
+                    affectionOnset: 'never',
+                    groupMode: 'pack',
+                },
+            ];
+            profiles.reputation = [{ among: 'стража', label: 'беглый каторжник', stance: -2, greeting: -1 }];
+        });
+        const view = h.engine.view()!;
+        expect(view.state.turn).toBe(4);
+        expect(view.state.worldTone).toBe('hostile');
+        expect(view.state.rules.map((rule) => rule.id)).toEqual(['goblins']);
+        expect(view.state.reputation).toMatchObject([{ among: 'стража', stance: -2 }]);
+        // Written with the next update of the chat.
+        await h.engine.updateState(() => {});
+        expect(readStateFile(h.mock, 'chat-1')!.data.worldTone).toBe('hostile');
+    });
+
+    it('moves the profiles with a card ST renamed (the avatar file is the card key)', async () => {
+        const h = await startHarness({ profiles: tavernCard(), state: tavernState() });
+        expect(h.engine.view()?.profiles.length).toBe(5);
+        h.mock.characters[h.mock.characterId as number]!.avatar = 'tavern-renamed.png';
+        await h.mock.eventSource.emit('character_renamed', 'tavern.png', 'tavern-renamed.png');
+        await until(
+            () => (h.engine.view()?.profiles.length ?? 0) === 5 && h.engine.view()?.card.card === 'tavern-renamed.png',
+        );
+        expect(readProfilesFile(h.mock, 'tavern-renamed.png')!.characters.map((item) => item.id)).toContain('ilva');
+        expect(h.engine.view()!.card.card).toBe('tavern-renamed.png');
+        expect(h.engine.view()!.present.length).toBeGreaterThan(0);
+    });
+
+    it('takes the world-tone lever where the author left the tone unsaid, the author’s where he did not', async () => {
+        const h = await startHarness({ profiles: tavernCard(), state: tavernState({ worldTone: 'indifferent' }) });
+        expect(h.engine.view()!.state.worldTone).toBe('indifferent');
+        h.app.settings.set('worldTone', 'hostile');
+        await until(() => h.engine.view()!.state.worldTone === 'hostile');
+        expect(h.engine.view()!.state.worldTone).toBe('hostile');
+        await h.engine.updateProfiles((profiles) => {
+            profiles.worldTone = 'welcoming';
+            profiles.meta = { ...profiles.meta, worldTone: { origin: 'author', evidence: ['рады гостям'] } };
+        });
+        expect(h.engine.view()!.state.worldTone).toBe('welcoming');
+    });
+
     it('rebuilds an unsaved chat state from the new profiles', async () => {
         const h = await startHarness({ profiles: emptyCardProfiles('tavern.png') });
         expect(h.engine.view()?.present).toEqual([]);

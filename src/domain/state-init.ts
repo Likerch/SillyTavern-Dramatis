@@ -3,8 +3,10 @@
 // can change the state without touching the card file.
 import { PLAYER_ID } from './model';
 import type {
+    AppetiteRule,
     AppetiteState,
     CardProfiles,
+    CardWorldBase,
     CharacterProfile,
     CharacterState,
     ChatState,
@@ -110,7 +112,74 @@ export function initChatState(profiles: CardProfiles, greeting: number, chatCard
         scene: 0,
         greeting,
         log: [],
+        cardBase: cardWorldOf(profiles),
     };
+}
+
+/** The card-level world a chat takes over: tone, rules and reputation seeds (copies). */
+export function cardWorldOf(profiles: CardProfiles): CardWorldBase {
+    return {
+        worldTone: profiles.worldTone,
+        rules: copy(profiles.rules ?? []),
+        reputation: copy(profiles.reputation ?? []),
+    };
+}
+
+const same = (a: unknown, b: unknown): boolean => JSON.stringify(a) === JSON.stringify(b);
+
+/**
+ * Brings a later reading or edit of the card into a chat that already has its state (a three-way merge against what
+ * the chat last took over, `state.cardBase`): the world tone and every rule or reputation entry the chat still holds
+ * as the card had it follow the card (changed or removed); rules and groups new to the card join; what the story or
+ * the user changed in this chat stays. A chat from before `cardBase` only gains what it lacks. Mutates `state`;
+ * true when anything changed.
+ */
+export function syncCardWorld(state: ChatState, profiles: CardProfiles): boolean {
+    const now = cardWorldOf(profiles);
+    const base = state.cardBase;
+    if (base && same(base, now)) return false;
+    const before: CardWorldBase = base ?? {
+        worldTone: state.worldTone,
+        rules: state.rules.filter((rule) => now.rules.some((other) => other.id === rule.id)),
+        reputation: [],
+    };
+    const changed = (): boolean => !same(base, now);
+
+    if (state.worldTone === before.worldTone) state.worldTone = now.worldTone;
+
+    const was = new Map(before.rules.map((rule) => [rule.id, rule] as const));
+    const fresh = new Map(now.rules.map((rule) => [rule.id, rule] as const));
+    const rules: AppetiteRule[] = [];
+    for (const rule of state.rules) {
+        const old = was.get(rule.id);
+        if (old && same(rule, old)) {
+            const current = fresh.get(rule.id);
+            if (current) rules.push(copy(current));
+            continue;
+        }
+        rules.push(rule);
+    }
+    for (const rule of now.rules) {
+        if (!was.has(rule.id) && !rules.some((other) => other.id === rule.id)) rules.push(copy(rule));
+    }
+    state.rules = rules;
+
+    const seededBefore = startingReputation(before.reputation, state.greeting);
+    for (const seed of startingReputation(now.reputation, state.greeting)) {
+        const at = state.reputation.findIndex((entry) => entry.among === seed.among);
+        if (at < 0) state.reputation.push(seed);
+        else if (
+            same(
+                state.reputation[at],
+                seededBefore.find((entry) => entry.among === seed.among),
+            )
+        ) {
+            state.reputation[at] = seed;
+        }
+    }
+    const result = changed();
+    state.cardBase = now;
+    return result;
 }
 
 /**

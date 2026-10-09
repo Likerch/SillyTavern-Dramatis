@@ -622,6 +622,29 @@ describe('worldTick — schemes off-screen', () => {
         expect(events.map((e) => e.line)).toContain('scheme.failed');
     });
 
+    it('never carries out a sexual scheme against a minor, nor sates a minor’s sexual appetite (content boundary)', () => {
+        const { profiles, state } = port();
+        const grukk = profiles.find((p) => p.id === 'grukk')!;
+        grukk.appetites = grukk.appetites.map((item) => ({ ...item, kind: 'flesh' as const }));
+        profiles.find((p) => p.id === 'mira')!.minor = true;
+        state.schemes = [scheme({ state: 'ready', clock: { segments: 5, filled: 5 }, secrecy: 80 })];
+        // The rolls that carry it out otherwise (see «attempts a ready scheme off-screen»).
+        const { state: next, events, brief } = worldTick(state, profiles, ctx(always(0.1), { presentIds: [] }));
+        expect(next.schemes[0]!.state).toBe('failed');
+        expect(events.map((e) => e.line)).not.toContain('scheme.done');
+        expect(brief.exposed).toEqual([]);
+
+        const holder = port();
+        const minor = holder.profiles.find((p) => p.id === 'grukk')!;
+        minor.minor = true;
+        minor.appetites = minor.appetites.map((item) => ({ ...item, kind: 'flesh' as const }));
+        const tick = worldTick(holder.state, holder.profiles, ctx(always(0.2), { presentIds: [] }));
+        expect(tick.brief.sated).toEqual([]);
+        expect(tick.state.characters.grukk!.appetites.plunder).toEqual(
+            holder.state.characters.grukk!.appetites.plunder,
+        );
+    });
+
     it('leaves schemes of present owners alone', () => {
         const { profiles, state } = port();
         state.schemes = [scheme()];

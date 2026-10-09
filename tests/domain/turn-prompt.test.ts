@@ -125,14 +125,14 @@ describe('turnSchema', () => {
             expect(object.additionalProperties).toBe(false);
             expect(object.required).toEqual(Object.keys(object.properties as object));
         });
-        expect(objects).toBe(9);
+        expect(objects).toBe(10);
         const character = (schema.schema as { properties: { characters: { items: { properties: { id: unknown } } } } })
             .properties.characters.items.properties.id;
         expect(character).toEqual({ type: 'string', enum: ['ilva', 'bram'] });
     });
 
     it('stays compact', () => {
-        expect(JSON.stringify(turnSchema(['ilva', 'bram', 'sota']).schema).length).toBeLessThan(3200);
+        expect(JSON.stringify(turnSchema(['ilva', 'bram', 'sota']).schema).length).toBeLessThan(3600);
     });
 });
 

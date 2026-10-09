@@ -5,12 +5,14 @@ import { afterEach, describe, expect, it } from 'vitest';
 import type { CardProfiles, ChatState } from '../../src/domain/model';
 import { emptyCardProfiles } from '../../src/domain/profile-defaults';
 import { DRAMATIS_API_GLOBAL, MAESTRO_API_GLOBAL } from '../../src/shared/apis';
-import type { DramatisApiV1, MaestroQuietFunction } from '../../src/shared/apis';
+import type { ApiLlmResult, DramatisApiV1, MaestroQuietFunction } from '../../src/shared/apis';
 import { fakeMaestro } from '../helpers/fakes';
 import type { FakeMaestro } from '../helpers/fakes';
 import { flush, message } from '../helpers/st-mock';
 import { tavern } from '../domain/cast-fixtures';
-import { generate, startHarness, stopHarness, switchChat, until } from './harness';
+import { TURN_API } from '../../src/features/turn/api';
+import { turnPass } from '../domain/turn-fixtures';
+import { fakeDes, generate, startHarness, stopHarness, switchChat, until } from './harness';
 
 afterEach(stopHarness);
 
@@ -156,15 +158,16 @@ describe('cast — with Maestro', () => {
         expect(h.mock.prompts.get('dramatis_cast')!.value).toContain('Ильва —');
     });
 
-    it('claims voices and CK consistency while the chat has a cast, voices only when merged', async () => {
+    it('claims voices and CK consistency while the chat has a cast and the speech is merged, nothing otherwise', async () => {
         const maestro = quietMaestro();
         const h = await startHarness({ profiles: tavernCard(), state: tavernState(), maestro });
         expect([...maestro.claims.entries()].sort()).toEqual([
             ['ck.consistency', 'dramatis'],
             ['voices', 'dramatis'],
         ]);
+        // Maestro's contract (integration-dramatis.md §5.4): without the merge CK keeps the speech side.
         h.app.settings.set('mergeVoices', false);
-        expect([...maestro.claims.keys()]).toEqual(['ck.consistency']);
+        expect([...maestro.claims.keys()]).toEqual([]);
         h.app.settings.set('mergeVoices', true);
         expect([...maestro.claims.keys()].sort()).toEqual(['ck.consistency', 'voices']);
     });
@@ -201,6 +204,141 @@ describe('cast — with Maestro', () => {
         h.runtime.bridge.check();
         await flush();
         expect([...again.claims.keys()].sort()).toEqual(['ck.consistency', 'voices']);
+    });
+
+    it('builds the card again inside Maestro’s interceptor, after the commit of the reply the message answered', async () => {
+        const maestro = quietMaestro();
+        const h = await startHarness({ profiles: tavernCard(), state: tavernState(), maestro, persona: 'Courier' });
+        let settled = 0;
+        // The turn module: the user's message commits the previous reply after ST's producers ran.
+        h.runtime.modules.expose(TURN_API, {
+            settle: async () => {
+                settled++;
+                await h.engine.updateState((state) => {
+                    state.turn = 1;
+                    state.next = { turn: 1, moves: { ilva: { move: 'initiate', text: 'bars the door behind him' } } };
+                });
+            },
+        });
+        await generate(h.mock);
+        expect(h.mock.prompts.get('dramatis_cast')!.value).not.toContain('bars the door');
+        await maestro.emitTurn({ type: 'generation:before', generation: 'normal', dryRun: false, quiet: false });
+        expect(settled).toBe(1);
+        expect(h.mock.prompts.get('dramatis_cast')!.value).toContain('This turn: bars the door behind him.');
+
+        // Quiet calls of other extensions are none of the card's business.
+        await maestro.emitTurn({ type: 'generation:before', generation: 'quiet', dryRun: false, quiet: true });
+        expect(settled).toBe(1);
+    });
+
+    describe('ST’s order on send: the producers run before the message is added and the reply committed', () => {
+        const turnRequests = (maestro: FakeMaestro) =>
+            maestro.requests.filter((request) => request.task === 'dramatis.turn').length;
+
+        // ST 1.19 Generate(): GENERATION_AFTER_COMMANDS (producers) → sendMessageAsUser → MESSAGE_SENT (Maestro emits
+        // turn:committed and does not wait for its listeners) → generate interceptors (Maestro's generation:before)
+        // → prompt assembly reads the extension prompt slots.
+        async function sendAfterReply(order: 'committed-first' | 'interceptor-first') {
+            const maestro = quietMaestro();
+            maestro.reply = () => ({ ok: true, data: JSON.parse(JSON.stringify(turnPass())) });
+            const h = await startHarness({
+                profiles: tavernCard(),
+                state: tavernState(),
+                maestro,
+                persona: 'Courier',
+                chat: [message('Ильва вытирает стойку и улыбается тебе.')],
+            });
+            // DES calls her a friend while the engine holds her hostile: the commit adds a drift correction to next.
+            const des = [{ name: 'Ильва', present: true, relationship: 'Подруга', details: {} }];
+            fakeDes(h.runtime, des);
+            h.runtime.readers.des.castAt = () => des;
+            await maestro.emitTurn({ type: 'reply:ready', messageIndex: 0 });
+            await until(() => turnRequests(maestro) === 1);
+            await flush();
+
+            await generate(h.mock);
+            const early = h.mock.prompts.get('dramatis_cast')!.value;
+            h.mock.chat.push(message('Налей, подруга.', { is_user: true }));
+            const before = { type: 'generation:before', generation: 'normal', dryRun: false, quiet: false } as const;
+            if (order === 'committed-first') {
+                void maestro.emitTurn({ type: 'turn:committed', messageIndex: 0 });
+                await maestro.emitTurn(before);
+            } else {
+                await maestro.emitTurn(before);
+                await maestro.emitTurn({ type: 'turn:committed', messageIndex: 0 });
+            }
+            await flush();
+            return { h, maestro, early, card: h.mock.prompts.get('dramatis_cast')!.value };
+        }
+
+        it('builds the card again after the commit: the generation gets the turn it follows', async () => {
+            const { h, early, card } = await sendAfterReply('committed-first');
+            expect(early).not.toContain('correction');
+            expect(card).toContain('Ильва — correction: still hostile');
+            expect(h.engine.view()!.state.next?.turn).toBe(1);
+        });
+
+        it('follows a commit that lands after the interceptor (its pass was still running) while the generation runs', async () => {
+            const maestro = quietMaestro();
+            let answer: (value: ApiLlmResult) => void = () => {};
+            maestro.reply = (request) =>
+                request.task === 'dramatis.turn'
+                    ? new Promise<ApiLlmResult>((resolve) => {
+                          answer = resolve;
+                      })
+                    : { ok: false, error: 'cap' };
+            const h = await startHarness({
+                profiles: tavernCard(),
+                state: tavernState(),
+                maestro,
+                persona: 'Courier',
+                chat: [message('Ильва вытирает стойку и улыбается тебе.')],
+            });
+            const des = [{ name: 'Ильва', present: true, relationship: 'Подруга', details: {} }];
+            fakeDes(h.runtime, des);
+            h.runtime.readers.des.castAt = () => des;
+            await maestro.emitTurn({ type: 'reply:ready', messageIndex: 0 });
+            await until(() => turnRequests(maestro) === 1);
+
+            await generate(h.mock);
+            h.mock.chat.push(message('Налей, подруга.', { is_user: true }));
+            await maestro.emitTurn({ type: 'turn:committed', messageIndex: 0 });
+            await maestro.emitTurn({ type: 'generation:before', generation: 'normal', dryRun: false, quiet: false });
+            expect(h.mock.prompts.get('dramatis_cast')!.value).not.toContain('correction');
+            answer({ ok: true, data: JSON.parse(JSON.stringify(turnPass())) });
+            await until(() => h.mock.prompts.get('dramatis_cast')!.value.includes('correction'));
+            expect(h.mock.prompts.get('dramatis_cast')!.value).toContain('Ильва — correction: still hostile');
+            // Over: the slot is cleared and later commits leave it alone.
+            await h.mock.eventSource.emit('generation_ended');
+            await maestro.emitTurn({ type: 'generation:ended', generation: 'normal', stopped: false });
+            expect(h.mock.prompts.get('dramatis_cast')!.value).toBe('');
+            await h.app.bus.emit('turn:applied', { messageIndex: 0, turn: 1 });
+            expect(h.mock.prompts.get('dramatis_cast')!.value).toBe('');
+        });
+
+        it('commits a ready draft itself when Maestro’s turn:committed comes after its interceptor, once', async () => {
+            const { h, maestro, card } = await sendAfterReply('interceptor-first');
+            expect(card).toContain('Ильва — correction: still hostile');
+            expect(h.engine.view()!.state.turn).toBe(1);
+            expect(turnRequests(maestro)).toBe(1);
+        });
+    });
+
+    it('gives a BunnyMo sheet command no card and leaves Maestro its own blocks for it', async () => {
+        const maestro = quietMaestro();
+        const h = await startHarness({ profiles: tavernCard(), state: tavernState(), maestro });
+        h.mock.chat.push(message('!fullsheet Ильва', { is_user: true }));
+        await generate(h.mock, 'regenerate');
+        expect(h.mock.prompts.get('dramatis_cast')?.value ?? '').toBe('');
+        expect(api().castBlockActive()).toBe(false);
+        await maestro.emitTurn({ type: 'generation:before', generation: 'regenerate', dryRun: false, quiet: false });
+        expect(h.mock.prompts.get('dramatis_cast')?.value ?? '').toBe('');
+        await maestro.emitTurn({ type: 'generation:ended', generation: 'regenerate', stopped: false });
+        expect(api().castBlockActive()).toBe(true);
+
+        h.mock.chat.push(message('Ильва, налей.', { is_user: true }));
+        await generate(h.mock, 'regenerate');
+        expect(h.mock.prompts.get('dramatis_cast')!.value).toContain('Ильва —');
     });
 
     it('claims nothing without a cast', async () => {

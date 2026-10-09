@@ -92,6 +92,8 @@ export const MAX_STACKS = 10;
 export const DEFAULT_REASON_SCENES = 3;
 /** Keeps progress short: old items fall off when a direction keeps being blocked. */
 const MAX_PROGRESS_ITEMS = 8;
+/** Reasons a tie keeps at most: beyond it the oldest permanent ones of one direction merge (their sum is kept). */
+export const MAX_REASONS = 32;
 
 /** Max net steps in one scene. */
 export const SCENE_CAP: Record<Inertia, number> = { high: 1, medium: 1, low: 2 };
@@ -308,7 +310,61 @@ export function applyStanceEvents(
         changes.push({ ...base, ...ref, kind: crossing ? 'arc-crossing' : 'step', from: cur.stance, to: next });
         cur = withoutProgress({ ...cur, stance: next, moved: { scene: ctx.scene, delta: moved + dir } });
     }
-    return { tie: cur, changes };
+    return { tie: capReasons(cur), changes };
+}
+
+/**
+ * Keeps a long story's tie bounded (permanent reasons — scars, debts — never expire): over MAX_REASONS the two oldest
+ * permanent, non-key reasons of one direction merge into one — the stronger one's words, the sum of both — so what
+ * holds the stance away from its base (scene end) and the strongest reasons shown stay as they were.
+ */
+export function capReasons(tie: Tie): Tie {
+    if (tie.reasons.length <= MAX_REASONS) return tie;
+    const reasons = tie.reasons.slice();
+    const renamed = new Map<string, string>();
+    const mergeable = (reason: Reason) => reason.scenesLeft === null && !reason.key;
+    while (reasons.length > MAX_REASONS) {
+        let pair: [number, number] | null = null;
+        for (let i = 0; i < reasons.length && !pair; i++) {
+            const first = reasons[i]!;
+            if (!mergeable(first)) continue;
+            const j = reasons.findIndex(
+                (other, at) => at > i && mergeable(other) && Math.sign(other.delta) === Math.sign(first.delta),
+            );
+            if (j > i) pair = [i, j];
+        }
+        if (!pair) break;
+        const [i, j] = pair;
+        const a = reasons[i]!;
+        const b = reasons[j]!;
+        const strong = Math.abs(b.delta) > Math.abs(a.delta) ? b : a;
+        const weak = strong === a ? b : a;
+        const merged: Reason = {
+            ...strong,
+            delta: round3(a.delta + b.delta),
+            stacks: Math.max(a.stacks, b.stacks),
+            ...(a.scene !== undefined || b.scene !== undefined
+                ? { scene: Math.min(a.scene ?? Infinity, b.scene ?? Infinity) }
+                : {}),
+        };
+        reasons[i] = merged;
+        reasons.splice(j, 1);
+        renamed.set(weak.id, strong.id);
+    }
+    if (!renamed.size) return tie;
+    const rename = (id: string): string => {
+        let current = id;
+        while (renamed.has(current)) current = renamed.get(current)!;
+        return current;
+    };
+    const next: Tie = { ...tie, reasons };
+    if (tie.progress) {
+        next.progress = {
+            ...tie.progress,
+            items: tie.progress.items.map((item) => ({ ...item, reason: rename(item.reason) })),
+        };
+    }
+    return next;
 }
 
 function reasonScenes(scenes: number | undefined): number {

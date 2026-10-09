@@ -12,12 +12,14 @@ import { normalizeText } from '../../domain/util';
 import { appendLog, matureAgendas, offscreenBrief, socialIndex, worldTick } from '../../domain/world';
 import type { WorldEvent, WorldTickBrief } from '../../domain/world';
 import { ticksDue } from '../../domain/world-ticks';
+import { leversFor } from '../../domain/turn-apply';
 import type { SceneMark } from '../../domain/scene';
 import type { ApiJournalChange, DramatisApiV1, MaestroApiV1 } from '../../shared/apis';
 import type { App, DramatisModule, SettingsSection } from '../../shared/contracts';
 import { el, field, numberInput, toggle } from '../../ui';
 import { ENGINE_API } from '../engine/api';
 import type { EngineApi, EngineView } from '../engine/api';
+import { TURN_API } from '../turn/api';
 import { WORLD_STRINGS } from './strings';
 
 export interface WorldSettings {
@@ -185,7 +187,8 @@ export const world: DramatisModule<WorldSettings> = {
             const view = api?.view();
             if (!api || !view) return;
 
-            const general = app.settings.get();
+            // The chat's own levers where it overrides them (docs/model.md §14), as the turn pass reads them.
+            const general = leversFor(app.settings.get(), view.state.overrides);
             const mark = markOf(app.readers.des.scene());
             const dueFor = (state: ChatState) => {
                 const world = state.world;
@@ -285,11 +288,17 @@ export const world: DramatisModule<WorldSettings> = {
             }
         }
 
+        const onTurn = (messageIndex: number): Promise<void> => {
+            queue = queue.then(() => tick(messageIndex)).catch((error) => log.error('world tick failed', error));
+            return queue;
+        };
+        // The tick reads the committed turn counter the turn module sets: it follows that module's commit
+        // (`turn:applied`). Only with the turn module switched off is the user's message itself the cue.
+        own(app.bus.on('turn:applied', ({ messageIndex }) => onTurn(messageIndex)));
         own(
-            app.bus.on('turn:committed', ({ messageIndex }) => {
-                queue = queue.then(() => tick(messageIndex)).catch((error) => log.error('world tick failed', error));
-                return queue;
-            }),
+            app.bus.on('turn:committed', ({ messageIndex }) =>
+                app.modules.api(TURN_API) ? undefined : onTurn(messageIndex),
+            ),
         );
 
         const maestro = app.maestro.api();

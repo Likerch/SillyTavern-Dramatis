@@ -14,6 +14,7 @@ import type { EngineApi, EngineView } from '../../src/features/engine/api';
 import { JOURNAL_KIND, JOURNAL_TARGET, generatorModule, identityOf, roleSources } from '../../src/features/generator';
 import { GENERATOR_API } from '../../src/features/generator/api';
 import type { GeneratorApi } from '../../src/features/generator/api';
+import { TURN_API } from '../../src/features/turn/api';
 import type { ApiJournalChange, ApiLlmRequest, ApiLlmResult } from '../../src/shared/apis';
 import type { App, ArchiveSheet, DesCharacter, DramatisModule, LlmRouter } from '../../src/shared/contracts';
 import { seeded } from '../domain/appetites-fixtures';
@@ -135,6 +136,10 @@ function candidates(): { candidates: Record<string, unknown>[] } {
 
 /* ------------------------------------------------------------------ the rig */
 
+function said(mes: string, isUser = false): STChatMessage {
+    return { name: isUser ? 'Курьер' : 'Рассказчик', is_user: isUser, is_system: false, send_date: '', mes };
+}
+
 interface RigOptions {
     cast?: DesCharacter[];
     card?: (card: CardProfiles) => CardProfiles;
@@ -193,7 +198,8 @@ async function rig(options: RigOptions = {}) {
     state = options.state ? options.state(state) : state;
     const cast = { list: options.cast ?? [] };
     const engine = fakeEngine(card, state, () => cast.list);
-    const chat: STChatMessage[] = options.chat ?? [];
+    // A reply the user already answered: its DES cast is committed (the fake DES gives the same cast for every reply).
+    const chat: STChatMessage[] = options.chat ?? [said('У ворот людно.'), said('Иду к воротам.', true)];
 
     const llm: LlmRouter = {
         request: (request) => maestro.api.llm.request(request as ApiLlmRequest) as never,
@@ -337,9 +343,7 @@ describe('generator module', () => {
     });
 
     it('counts scenes, promotes to a draft in the background, then to a portrait that gets BunnyMo tags', async () => {
-        const chat = [
-            { name: 'Курьер', is_user: true, is_system: false, send_date: '', mes: 'Ну что, Стражник, пропустишь?' },
-        ] as STChatMessage[];
+        const chat = [said('Стражник загораживает ворота.'), said('Ну что, Стражник, пропустишь?', true)];
         const r = await rig({ card: (c) => ({ ...c, characters: [ilva()] }), cast: guardCast(), chat });
         const id = r.engine.state.extras[0]!.id;
         await r.bus.emit('turn:committed', { messageIndex: -1 });
@@ -352,6 +356,10 @@ describe('generator module', () => {
             await r.settle();
         }
         expect(r.engine.state.characters[id]!.stats).toMatchObject({ scenes: 3, interactions: 1 });
+        // Earned, but the generation the message started runs now: the model is asked once its reply is in.
+        expect(r.maestro.requests).toHaveLength(0);
+        await r.bus.emit('reply:ready', { messageIndex: 6 });
+        await r.settle();
         expect(r.maestro.requests).toHaveLength(1);
         const draftRequest = r.maestro.requests[0]!;
         expect(draftRequest).toMatchObject({ task: 'dramatis.generate', background: true });
@@ -429,27 +437,48 @@ describe('generator module', () => {
         expect(r.setCanonGoals).toHaveBeenCalled();
     });
 
+    it('with the turn module running, counts a turn after its commit (turn:applied), not on the sent message', async () => {
+        const r = await rig({ cast: [{ name: 'Брам', present: true, details: {} }] });
+        const id = r.engine.state.extras[0]!.id;
+        const scenes = r.engine.state.characters[id]!.stats!.scenes;
+        r.modules.expose(TURN_API, { settle: async () => {} });
+        await r.engine.nextScene();
+        await r.bus.emit('turn:committed', { messageIndex: 0 });
+        await r.settle();
+        expect(r.engine.state.characters[id]!.stats!.scenes).toBe(scenes);
+        await r.bus.emit('turn:applied', { messageIndex: 0, turn: 1 });
+        await r.settle();
+        expect(r.engine.state.characters[id]!.stats!.scenes).toBe(scenes + 1);
+    });
+
     it('leaves background work to the leader tab and retries quietly later', async () => {
         const r = await rig({ cast: [{ name: 'Брам', present: true, details: {} }], leader: false });
         const id = r.engine.state.extras[0]!.id;
         expect(r.engine.state.extras).toHaveLength(1);
         await r.api.pin(id, false);
+        const scenes = r.engine.state.characters[id]!.stats?.scenes;
         for (let i = 0; i < 2; i++) {
             await r.engine.nextScene();
             await r.bus.emit('turn:committed', { messageIndex: 0 });
             await r.settle();
         }
         expect(r.maestro.requests).toHaveLength(0);
+        // The leading tab counts this chat's turns: a second tab counting them too would count each twice.
+        expect(r.engine.state.characters[id]!.stats?.scenes).toBe(scenes);
         r.setLeader(true);
         r.maestro.reply = () => ({ ok: false, error: 'cap' });
-        await r.engine.nextScene();
-        await r.bus.emit('turn:committed', { messageIndex: 0 });
-        await r.settle();
+        for (let i = 0; i < 2; i++) {
+            await r.engine.nextScene();
+            await r.bus.emit('turn:committed', { messageIndex: 0 });
+            await r.bus.emit('reply:ready', { messageIndex: 1 });
+            await r.settle();
+        }
         expect(r.maestro.requests).toHaveLength(1);
         expect(r.engine.state.extras[0]!.lod).toBe('sketch');
         r.maestro.reply = () => ({ ok: true, data: candidates() });
         await r.engine.nextScene();
         await r.bus.emit('turn:committed', { messageIndex: 0 });
+        await r.bus.emit('reply:ready', { messageIndex: 1 });
         await r.settle();
         expect(r.maestro.requests).toHaveLength(2);
         expect(r.engine.state.extras[0]!.lod).toBe('draft');
@@ -497,6 +526,45 @@ describe('generator module', () => {
         expect(outcome.written).not.toContain('core.want');
         expect(r.engine.card.characters.find((item) => item.id === 'ilva')!.core.want).toBe('keep the inn');
         expect(r.styleUp).not.toHaveBeenCalled();
+    });
+
+    it('waits with gap fills while a generation runs', async () => {
+        const empty = () => makeProfile('fenn', 'Фенн', { lod: 'draft', role: 'peasant' });
+        const cast: DesCharacter[] = [{ name: 'Фенн', present: true, details: {} }];
+        const r = await rig({ card: (c) => ({ ...c, characters: [empty()] }), cast });
+        expect(r.maestro.requests).toHaveLength(0);
+        await r.bus.emit('generation:before', { type: 'normal', dryRun: false, quiet: false });
+        // The intent reading lands while the generation runs.
+        await r.engine.engine.updateProfiles((card) => ({ ...card, intent: { at: 1, sourcesHash: 'h' } }));
+        await r.settle();
+        expect(r.maestro.requests).toHaveLength(0);
+        // A quiet call of another extension ending is not the generation ending.
+        await r.bus.emit('generation:before', { type: 'quiet', dryRun: false, quiet: true });
+        await r.engine.engine.refresh();
+        await r.settle();
+        expect(r.maestro.requests).toHaveLength(0);
+        await r.bus.emit('generation:ended', { type: 'normal', stopped: false });
+        await r.settle();
+        expect(r.maestro.requests).toHaveLength(1);
+        expect(r.maestro.requests[0]!.messages[1]!.content).toMatch(/fill ONLY these empty fields/);
+    });
+
+    it('sketches only the faces of a committed reply: a reply still open to swipes leaves nothing', async () => {
+        const r = await rig({
+            card: (c) => ({ ...c, characters: [ilva()] }),
+            cast: guardCast(),
+            chat: [said('Стражник загораживает ворота.')],
+        });
+        expect(r.engine.state.extras).toHaveLength(0);
+        await r.engine.engine.refresh();
+        await r.settle();
+        expect(r.engine.state.extras).toHaveLength(0);
+        expect(r.records).toHaveLength(0);
+        // The player answers: the reply is committed and its faces are sketched.
+        r.chat.push(said('Пропусти.', true));
+        await r.bus.emit('turn:committed', { messageIndex: 0 });
+        await r.settle();
+        expect(r.engine.state.extras.map((profile) => profile.name)).toEqual(['Стражник']);
     });
 
     it('draws group rules for a new face and again when the rules change', async () => {

@@ -15,7 +15,7 @@ import {
     valueLabel,
 } from './ladders';
 import { HEXACO, PLAYER_ID } from './model';
-import type { Appetite, CharacterProfile, CharacterState, ChatState, Satisfier, Tie } from './model';
+import type { Appetite, CharacterProfile, CharacterState, ChatState, PressureChoice, Satisfier, Tie } from './model';
 import { clipText, neutralizeData } from './intent-prompt';
 import type { LlmMessage } from '../shared/contracts';
 
@@ -112,7 +112,12 @@ export interface TurnCharacterOut {
     keyMatched: string;
     drift: TurnDriftOut;
     newIntention: { text: string; nextStep: string } | null;
+    /** A costly choice between two things they value (§9; stage 5), when the reply shows one. */
+    choice?: PressureChoice | null;
 }
+
+/** Where a choice under pressure leads (PressureChoice.toward). */
+export const CHOICE_TOWARD = ['need', 'lie', 'unclear'] as const;
 
 export interface TurnDeedOut {
     text: string;
@@ -220,6 +225,13 @@ export function turnSheet(
     if (core.wound?.triggers.length)
         lines.push(`touchy about: ${core.wound.triggers.map(line).slice(0, 4).join(', ')}`);
     if (core.keys.length) lines.push(`keys (what can move them): ${core.keys.map(line).join(' | ')}`);
+    if (!core.arcLock && (core.wound?.lie || core.need)) {
+        const arc = [
+            core.wound?.lie ? `believes "${line(core.wound.lie)}"` : '',
+            core.need ? `needs ${line(core.need)}` : '',
+        ].filter(Boolean);
+        lines.push(`arc: ${arc.join('; ')}`);
+    }
     if (core.signatures.length) lines.push(`signatures: ${core.signatures.map(line).slice(0, 4).join(' | ')}`);
     const agenda = live?.agenda ?? profile.agenda;
     const intentions = agenda.intentions.map((intention) => {
@@ -280,6 +292,7 @@ export const TURN_SYSTEM_PROMPT = [
     '  keyMatched: copy one of their listed keys when an event of this exchange matches it, else "".',
     '  drift: did the reply play them against their sheet with no cause in the story? warmthWithoutCause: warmer or kinder to someone than their tie says, though nothing happened that earns it; appetiteBecameLove: a predator or an acquirer turned tender or selfless without cause; dependenceVanished: shrugged off a craving or withdrawal without help or reason; actedAgainstValues: acted against their values or signatures without cause. A change the player earned through events is not drift.',
     '  newIntention: a new aim they took up in this exchange ({"text", "nextStep"}), or null.',
+    '  choice: only when, under real pressure, they made a costly choice between two things they value — {"text": what they chose to do, "kept": what they kept, "gave": what they gave up, "toward": "need" when it goes against the false belief on their sheet toward what they need, "lie" when it holds to that belief or to what they want at the cost of what they need, else "unclear"}; null for everyday preferences and when nothing was at stake.',
     '- playerDeeds: what the player\'s character did that others saw and would talk about: text, weakness the deed showed ("drinks", "falls for flattery", "") , witnesses, place as written ("" when unknown).',
     '- sceneEnded: the scene clearly ended in this reply (they parted, left the place, went to sleep). timeSkipHours: in-story hours the reply skipped (0 when none).',
     '- newNames: people who act or speak in the reply but have no sheet and are not the player.',
@@ -380,6 +393,7 @@ export function turnSchema(ids: readonly string[] = []): { name: string; strict:
             actedAgainstValues: bool,
         }),
         newIntention: nullable(object({ text: str, nextStep: str })),
+        choice: nullable(object({ text: str, kept: str, gave: str, toward: choice(CHOICE_TOWARD) })),
     });
     const schema = object({
         events: list(
@@ -441,8 +455,22 @@ function dicts(value: unknown, max: number): Dict[] {
     return Array.isArray(value) ? value.filter(isDict).slice(0, max) : [];
 }
 
+/** A choice under pressure, or null when the answer has none (or no text for it). */
+function parseChoice(value: unknown): PressureChoice | null {
+    if (!isDict(value)) return null;
+    const choiceText = text(value.text);
+    if (!choiceText) return null;
+    return {
+        text: choiceText,
+        kept: text(value.kept, TURN_LIMITS.name),
+        gave: text(value.gave, TURN_LIMITS.name),
+        toward: oneOf(CHOICE_TOWARD, value.toward, 'unclear'),
+    };
+}
+
 function parseCharacter(raw: Dict): TurnCharacterOut {
     const emotionRaw = isDict(raw.emotion) ? raw.emotion : null;
+    const choiceOut = parseChoice(raw.choice);
     const emotionType = emotionRaw ? text(emotionRaw.type, 40) : '';
     const intentionRaw = isDict(raw.newIntention) ? raw.newIntention : null;
     const intentionText = intentionRaw ? text(intentionRaw.text) : '';
@@ -491,6 +519,7 @@ function parseCharacter(raw: Dict): TurnCharacterOut {
         },
         newIntention:
             intentionRaw && intentionText ? { text: intentionText, nextStep: text(intentionRaw.nextStep) } : null,
+        ...(choiceOut ? { choice: choiceOut } : {}),
     };
 }
 

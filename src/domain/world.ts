@@ -14,7 +14,7 @@
 import type { Mode, Rng } from '../shared/contracts';
 import { tickAppetite } from './appetites';
 import type { AppetiteStrength } from './appetites';
-import { SEXUAL_KINDS, desirability, pickWeighted } from './group-rules';
+import { SEXUAL_KINDS, desirability, pickWeighted, sexualBarred } from './group-rules';
 import { advanceClock, clockFull, promote, reconsider } from './intentions';
 import { PLAYER_ID } from './model';
 import type {
@@ -39,7 +39,7 @@ import type { Inertia } from './relations';
 import { applyReputation, rumoursReaching, spreadRumours, strangerStance } from './reputation';
 import type { RumourGraph, RumourSpread } from './reputation';
 import { baseStanceOf } from './scene';
-import { resolveAttempt, tickScheme } from './schemes';
+import { pruneSchemes, resolveAttempt, tickScheme } from './schemes';
 import { clamp, clamp01, normalizeText, round3, uniqueId } from './util';
 
 /* ------------------------------------------------------------------ constants */
@@ -522,6 +522,7 @@ export function worldTick(
     gossip(scope, index);
 
     if (next.rumours.length > MAX_RUMOURS) next.rumours = next.rumours.slice(-MAX_RUMOURS);
+    next.schemes = pruneSchemes(next.schemes);
     scope.brief.touched = [...scope.touched];
     return { state: next, events: scope.events, brief: scope.brief };
 }
@@ -730,6 +731,14 @@ function offscreenSchemes(scope: TickScope, index: SocialIndex): Map<string, Set
     const { next, ctx, present } = scope;
     const sated = new Map<string, Set<string>>();
     next.schemes = next.schemes.map((scheme) => {
+        if (scheme.state === 'running' || scheme.state === 'ready') {
+            const owner = scope.byId.get(scheme.owner);
+            const appetite = owner?.appetites.find((item) => item.id === scheme.appetite);
+            // The content boundary: such a scheme never comes off, on-screen or off.
+            if (appetite && sexualBarred(appetite.kind, owner, scope.byId.get(scheme.target))) {
+                return { ...scheme, state: 'failed' };
+            }
+        }
         if (present.has(scheme.owner)) return scheme;
         const near = scheme.target === PLAYER_ID || present.has(scheme.target);
         const name = nameOf(scope.byId, scheme.owner, scope.playerName);
@@ -842,7 +851,7 @@ function offscreenAppetites(
     const name = profile.name || profile.id;
     for (const appetite of profile.appetites) {
         const current = character.appetites[appetite.id];
-        if (!current) continue;
+        if (!current || sexualBarred(appetite.kind, profile)) continue;
         const forced = satedByScheme?.has(appetite.id) === true;
         const chance = forced ? 1 : offscreenSatiation(appetite, current, profile);
         const satisfied = chance > 0 && (forced || ctx.rng() < chance) ? bestSatisfier(appetite) : undefined;

@@ -65,6 +65,25 @@ describe('Maestro bridge', () => {
         expect(changes).toEqual([true, false]);
     });
 
+    it('announces a restarted Maestro (a new API object) even when nobody saw it gone', async () => {
+        const { bridge, changes } = setup();
+        bridge.install();
+        globals[MAESTRO_API_GLOBAL] = fakeMaestro().api;
+        expect(bridge.present()).toBe(true);
+        await flush();
+        expect(changes).toEqual([true]);
+
+        // Maestro's stop and start happened between two looks: only the object differs.
+        globals[MAESTRO_API_GLOBAL] = fakeMaestro().api;
+        window.dispatchEvent(new CustomEvent(MAESTRO_API_READY_EVENT));
+        await flush();
+        expect(changes).toEqual([true, true]);
+        expect(bridge.present()).toBe(true);
+        await flush();
+        expect(changes).toEqual([true, true]);
+        bridge.dispose();
+    });
+
     it('warns once about an unsupported version', () => {
         const { bridge, log } = setup();
         globals[MAESTRO_API_GLOBAL] = { version: 2 };

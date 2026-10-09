@@ -400,6 +400,20 @@ describe('intent — reading by itself', () => {
         expect(maestro!.requests).toHaveLength(2);
     });
 
+    it('is background work with Maestro (leader tab, daily cap): a «not now» answer stays quiet', async () => {
+        const { h, maestro, notices } = await setup({ autoRead: true, replies: [{ ok: false, error: 'cap' }] });
+        await until(() => maestro!.requests.length === 1);
+        await flush();
+        expect(maestro!.requests[0]).toMatchObject({ task: INTENT_TASK, background: true });
+        expect(notices.filter((notice) => notice.level === 'error')).toEqual([]);
+        expect(profilesOf(h.mock)).toBeNull();
+        // The button is the user's own request: interactive, past the cap.
+        answering(maestro!, tavernParts().map(ok));
+        const result = await h.app.modules.api<IntentApi>(INTENT_API)!.read({ force: true });
+        expect(result.ok).toBe(true);
+        expect(maestro!.requests.slice(1).every((request) => request.background === false)).toBe(true);
+    });
+
     it('never runs twice for a card in one session, even after a failure', async () => {
         const { h, maestro } = await setup({ autoRead: true, replies: [{ ok: false, error: 'breaker' }] });
         await until(() => maestro!.requests.length === 1);

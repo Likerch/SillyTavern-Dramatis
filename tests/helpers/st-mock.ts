@@ -63,6 +63,7 @@ export const EVENT_TYPES: Record<string, string> = {
     MESSAGE_DELETED: 'message_deleted',
     MESSAGE_SWIPED: 'message_swiped',
     CHARACTER_MESSAGE_RENDERED: 'character_message_rendered',
+    CHARACTER_RENAMED: 'character_renamed',
     USER_MESSAGE_RENDERED: 'user_message_rendered',
     GENERATION_STARTED: 'generation_started',
     GENERATION_AFTER_COMMANDS: 'GENERATION_AFTER_COMMANDS',

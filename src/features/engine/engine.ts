@@ -2,8 +2,9 @@
 // (who is present, attention bands) and is the one door through which features change them.
 //
 // - Loads on start and on bus `chat:changed`, `profiles:changed` (this card) and `state:changed` (this chat); a group
-//   chat or no chat gives a null view. Profiles without a live state get one in memory (ensureCharacterState) — it is
-//   written with the next update, so merely opening a chat writes nothing.
+//   chat or no chat gives a null view. Profiles without a live state get one in memory (ensureCharacterState), and a
+//   card re-read or edited since the chat began passes its tone, rules and reputation on (syncCardWorld) — written with
+//   the next update, so merely opening a chat writes nothing.
 // - Presence (refresh on `reply:ready`, `turn:committed`, invalidated messages, Maestro coming or going, and on every
 //   load): the DES tracker of the last reply when there is one (names nobody has a profile for stay in `unknown` for the
 //   generator; Maestro's name gluing gets a second try), else the names in the last 3 messages with the card's own
@@ -11,7 +12,8 @@
 // - Bands: the turn pass's `state.next.bands` when computed after the current turn, else static ones (view.ts).
 // - Updates are serialised. Each mutator gets a deep clone; a state save that lost the version race to another tab
 //   reloads and retries once. Queued log lines go into the next state save (the last 300 are kept).
-import { ensureCharacterState } from '../../domain/state-init';
+import { ensureCharacterState, syncCardWorld } from '../../domain/state-init';
+import { leversFor } from '../../domain/turn-apply';
 import { matchName, presentFromDes, presentFromText } from '../../domain/presence';
 import type { NamedProfile } from '../../domain/presence';
 import type { CardProfiles, CharacterProfile, ChatState, StateEvent } from '../../domain/model';
@@ -164,13 +166,23 @@ export function createEngine(deps: EngineDeps): EngineImpl {
         return typeof name === 'string' ? name : '';
     }
 
+    /** The card's world with the tone lever (docs/model.md §14) where the author's intent left the tone unsaid. */
+    function worldOf(card: CardProfiles): CardProfiles {
+        if (card.meta?.worldTone) return card;
+        const lever = app.settings.get().worldTone;
+        return lever && lever !== card.worldTone ? { ...card, worldTone: lever } : card;
+    }
+
     function compose(card: CardProfiles, state: ChatState): EngineView {
+        // A reading or edit of the card after this chat began: its tone, rules and reputation reach the chat (in memory,
+        // written with the next update, like the live states of new profiles below).
+        syncCardWorld(state, worldOf(card));
         const profiles = effectiveProfiles(card, state);
         for (const profile of profiles) ensureCharacterState(state, profile);
         const byId = new Map(profiles.map((profile) => [profile.id, profile] as const));
         const scene = presence(profiles, state);
         const bands = sceneBands(scene.present, byId, state, {
-            gravity: app.settings.get().playerGravity,
+            gravity: leversFor(app.settings.get(), state.overrides).playerGravity,
             addressed: addressed(profiles),
         });
         return {
@@ -313,6 +325,24 @@ export function createEngine(deps: EngineDeps): EngineImpl {
         return false;
     }
 
+    /**
+     * ST renamed a card (CHARACTER_RENAMED: the avatar file, Dramatis' card key, is renamed with it): its profiles move
+     * to the new key, unless that key already has some of its own. The old file stays (other tabs may still read it).
+     */
+    async function onCardRenamed(from: unknown, to: unknown): Promise<void> {
+        if (typeof from !== 'string' || typeof to !== 'string' || !from || !to || from === to) return;
+        try {
+            const old = await app.profiles.load(from);
+            if (!old.characters.length && !old.intent && !old.rules.length) return;
+            const target = await app.profiles.load(to);
+            if (target.characters.length || target.intent) return;
+            await app.profiles.save({ ...structuredClone(old), card: to });
+            log.info(`profiles of ${from} moved to ${to}`);
+        } catch (error) {
+            log.warn(`profiles of the renamed card ${from} could not be moved`, error);
+        }
+    }
+
     function onStateChanged(chatId: string | null): void {
         if (!running || !chatId || chatId !== currentChat()) return;
         void (async () => {
@@ -372,6 +402,15 @@ export function createEngine(deps: EngineDeps): EngineImpl {
                 bus.on('message:invalidated', () => void refresh()),
                 bus.on('maestro:changed', () => void refresh()),
             );
+            unsubscribers.push(
+                app.settings.onChange((key) => {
+                    if (key === 'worldTone' || key === 'playerGravity' || key === '*') void refresh();
+                }),
+            );
+            const renamed = app.host.events.name('CHARACTER_RENAMED');
+            if (renamed) {
+                unsubscribers.push(app.host.events.on(renamed, (from, to) => onCardRenamed(from, to)));
+            }
             void reload();
         },
 

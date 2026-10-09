@@ -348,6 +348,34 @@ describe('buildCastCard — appetites (§6.2, the raid)', () => {
         );
     });
 
+    it('never shows a sexual appetite of a minor, nor one aimed at a minor (the content boundary)', () => {
+        const flesh: Appetite = {
+            ...raid().profiles[0]!.appetites[0]!,
+            id: 'flesh',
+            kind: 'flesh',
+            sources: ['species'],
+            target: { mode: 'class', class: 'travellers' },
+        };
+        const base = {
+            state: chat({}),
+            present: ['kira', 'tim'],
+            bands: { kira: 'focus' as const, tim: 'focus' as const },
+            playerName: 'Courier',
+            budgetTokens: 0,
+            mergeVoices: false,
+            lang: 'en' as const,
+        };
+        const tim = profile('tim', 'Тим', { minor: true });
+        const kira = profile('kira', 'Кира', {
+            appetites: [flesh],
+            ties: [tie('tim', 0, { want: 4, appetite: 'flesh' })],
+        });
+        const aimed = buildCastCard({ ...base, profiles: [kira, tim] }).text;
+        expect(aimed).not.toContain('Wants Тим');
+        const minor = { ...kira, minor: true, ties: [] };
+        expect(buildCastCard({ ...base, profiles: [minor, tim] }).text).not.toContain('appetite: flesh');
+    });
+
     it('aims class and player appetites and uses stock justifications', () => {
         const flesh: Appetite = {
             ...raid().profiles[0]!.appetites[0]!,

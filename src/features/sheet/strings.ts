@@ -54,6 +54,16 @@ export const SHEET_STRINGS: I18nParts = {
         'sheet.nav.rules': 'Group rules ({n})',
         'sheet.nav.reputation': 'Reputation ({n})',
         'sheet.nav.invariants': 'Invariants ({n})',
+        'sheet.nav.metrics': 'Measurements',
+        'sheet.metrics.title': 'Measurements',
+        'sheet.metrics.intro':
+            'How the engine does in this chat, counted on committed turns together with the turn pass. To compare two runs (another mode, other levers), reset the measurements, play 20 turns and look again.',
+        'sheet.metrics.none':
+            'Nothing counted yet: the measurements start with the next committed turn (the turn pass needs Maestro).',
+        'sheet.metrics.off': 'The «Measurements» module is off: the numbers do not grow.',
+        'sheet.metrics.reset': 'Reset the measurements',
+        'sheet.metrics.resetTitle': 'Reset the measurements of this chat?',
+        'sheet.metrics.resetBody': 'Counting starts again with the next turn.',
         'sheet.filter.label': 'Show',
         'sheet.filter.all': 'Everyone',
         'sheet.filter.present': 'In the scene',
@@ -555,6 +565,16 @@ export const SHEET_STRINGS: I18nParts = {
         'sheet.nav.rules': 'Правила групп ({n})',
         'sheet.nav.reputation': 'Репутация ({n})',
         'sheet.nav.invariants': 'Инварианты ({n})',
+        'sheet.nav.metrics': 'Замеры',
+        'sheet.metrics.title': 'Замеры',
+        'sheet.metrics.intro':
+            'Как движок справляется в этом чате. Считается по отправленным ходам вместе с проходом хода. Чтобы сравнить два прогона (другой режим, другие рычаги), сбрось замеры, сыграй 20 ходов и посмотри снова.',
+        'sheet.metrics.none':
+            'Пока ничего не посчитано: замеры начнутся со следующего отправленного хода (проходу хода нужен Maestro).',
+        'sheet.metrics.off': 'Модуль «Замеры» выключен: числа не растут.',
+        'sheet.metrics.reset': 'Сбросить замеры',
+        'sheet.metrics.resetTitle': 'Сбросить замеры этого чата?',
+        'sheet.metrics.resetBody': 'Счёт начнётся заново со следующего хода.',
         'sheet.filter.label': 'Показать',
         'sheet.filter.all': 'Все',
         'sheet.filter.present': 'В сцене',

@@ -8,12 +8,13 @@ import { pressureLabel, stanceLabel } from './ladders';
 import type { Gender, Lang } from './ladders';
 import { PLAYER_ID } from './model';
 import type { CharacterProfile, StateEvent } from './model';
+import { BRAND_WORDS, GIFT_WORDS, giftChance, identityOf, identityPhrase } from './thresholds';
 import type { Rng } from '../shared/contracts';
 
 /** Story log lines kept in the chat state. */
 export const MAX_LOG = 300;
 
-/** Chance that a character accepts the gift of a corruption threshold (the brand always comes, §5.7). */
+/** Chance that a character without a profile accepts the gift of a threshold (thresholds.ts giftChance weighs it). */
 export const GIFT_ACCEPT = 0.5;
 
 export type LogKind =
@@ -96,6 +97,7 @@ const W = {
     },
     owned: { en: '{name}: now holds {target}', ru: '{name}: теперь владеет — {target}' },
     gaze: { en: '{name} sees {target} differently now', ru: '{name} иначе смотрит на {target}' },
+    gazeFall: { en: '{name} looks at outsiders as things now', ru: '{name}: на чужих теперь смотрит как на вещи' },
     temptation: {
         en: '{name}: tempted to cross a line for {what}',
         ru: '{name}: искушение переступить черту ради «{what}»',
@@ -104,6 +106,17 @@ const W = {
     remorseOk: { en: '{name}: remorse washes the stains away', ru: '{name}: раскаяние смыло пятна' },
     remorseFail: { en: '{name}: no remorse — corruption {level}', ru: '{name}: раскаяния нет — разложение {level}' },
     threshold: { en: '{name}: corruption reaches {level}', ru: '{name}: разложение дошло до {level}' },
+    giftTaken: {
+        en: '{name} takes the gift of the fall: {what}',
+        ru: '{name} принимает дар падения: {what}',
+        ruF: '{name} принимает дар падения: {what}',
+    },
+    giftRefused: {
+        en: '{name} refuses the gift ({what}) and holds on to themselves',
+        ru: '{name} отказывается от дара ({what}) и держится за себя',
+    },
+    brand: { en: '{name} is branded: {what}', ru: '{name}: клеймо — {what}' },
+    identity: { en: '{name} now {what}', ru: '{name} теперь {what}' },
     lost: { en: '{name} is lost', ru: '{name}: потерян', ruF: '{name}: потеряна' },
     recovered: {
         en: '{name}: climbs back a step — corruption {level}',
@@ -187,10 +200,17 @@ export function appendLog<T extends { log: StateEvent[] }>(state: T, events: rea
     if (events.length) state.log = [...state.log, ...events].slice(-MAX_LOG);
 }
 
+/** Who crosses the threshold (stage 5): the profile weighs the gift, an anchor near holds them back. */
+export interface ThresholdWho {
+    profile?: CharacterProfile;
+    anchorPresent?: boolean;
+}
+
 /**
  * The corruption level moved up from `from` to the state's level: every threshold passed brings its brand, the gift is
- * taken or refused by a roll (refusal earns a remorse die); 10 is «lost». Returns the new state and whether 5 was
- * crossed (the gaze shift unlock).
+ * taken or refused by a roll weighted by the character (thresholds.ts giftChance; refusal earns a remorse die), both in
+ * story words; at 7 the craving becomes part of who they are (`identity`); 10 is «lost». Returns the new state and
+ * whether 5 was crossed (the gaze shift unlock).
  */
 export function passThresholds(
     corruption: CorruptionState,
@@ -198,17 +218,35 @@ export function passThresholds(
     rng: Rng,
     log: TurnLog,
     id: string,
+    who: ThresholdWho = {},
 ): { state: CorruptionState; crossed5: boolean } {
     let state = corruption;
     let crossed5 = false;
+    const name = log.name(id);
     for (const threshold of crossedThresholds(from, corruption.level)) {
         if (threshold === 10) {
-            log.add('corruption', 'lost', { name: log.name(id) }, id);
+            log.add('corruption', 'lost', { name }, id);
             continue;
         }
         if (threshold === 5) crossed5 = true;
-        state = crossThreshold(state, threshold, rng() < GIFT_ACCEPT);
-        log.add('corruption', 'threshold', { name: log.name(id), level: threshold }, id);
+        const chance = who.profile
+            ? giftChance(who.profile, threshold, { anchorPresent: who.anchorPresent === true })
+            : GIFT_ACCEPT;
+        const accept = rng() < chance;
+        state = crossThreshold(state, threshold, accept);
+        log.add('corruption', 'threshold', { name, level: threshold }, id);
+        log.add(
+            'corruption',
+            accept ? 'giftTaken' : 'giftRefused',
+            { name, what: GIFT_WORDS[threshold][log.lang] },
+            id,
+        );
+        log.add('corruption', 'brand', { name, what: BRAND_WORDS[threshold][log.lang] }, id);
+        if (threshold === 7) {
+            const identity = identityOf(who.profile);
+            state = { ...state, identity };
+            log.add('corruption', 'identity', { name, what: identityPhrase(identity, log.lang, log.gender(id)) }, id);
+        }
     }
     return { state, crossed5 };
 }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { PLAYER_ID } from '../../src/domain/model';
-import type { Appetite, CardProfiles, CharacterProfile, Tie } from '../../src/domain/model';
+import type { Appetite, AppetiteRule, CardProfiles, CharacterProfile, Tie } from '../../src/domain/model';
 import {
     CHAT_STATE_SCHEMA,
     FULL_SELF_CONTROL,
@@ -9,6 +9,7 @@ import {
     initChatState,
     startFor,
     startingReputation,
+    syncCardWorld,
 } from '../../src/domain/state-init';
 
 function tie(target: string, overrides: Partial<Tie> = {}): Tie {
@@ -265,5 +266,78 @@ describe('ensureCharacterState', () => {
         expect(created.present).toBe(true);
         expect(created.lastSeenTurn).toBe(7);
         expect(created.scene.doing).toBe('входит');
+    });
+});
+
+describe('syncCardWorld', () => {
+    const rule = (id: string, holders: string): AppetiteRule => ({
+        id,
+        holders,
+        kind: 'plunder',
+        source: 'culture',
+        target: { mode: 'thing' },
+        intensity: { zero: 0.5, low: 0.5, mid: 0, high: 0 },
+        styles: {},
+        choosiness: 0,
+        exclusivity: 'shared',
+        affectionOnset: 'never',
+        groupMode: 'pack',
+    });
+
+    it('brings a reading made after the chat began: tone, new rules and reputation, once', () => {
+        // The chat started before the card was read (empty profiles), and its state was saved.
+        const state = initChatState(cardProfiles([], { worldTone: 'indifferent', rules: [], reputation: [] }), 0, 'x');
+        const read = cardProfiles([], {
+            worldTone: 'hostile',
+            rules: [rule('goblins', 'гоблины')],
+            reputation: [{ among: 'стража', label: 'беглый каторжник', stance: -2, greeting: -1 }],
+        });
+        expect(syncCardWorld(state, read)).toBe(true);
+        expect(state.worldTone).toBe('hostile');
+        expect(state.rules.map((item) => item.id)).toEqual(['goblins']);
+        expect(state.reputation).toMatchObject([{ among: 'стража', label: 'беглый каторжник', stance: -2 }]);
+        expect(syncCardWorld(state, read)).toBe(false);
+    });
+
+    it('keeps what the story or the user changed in the chat; follows the card where the chat kept it', () => {
+        const card = cardProfiles([], {
+            worldTone: 'neutral',
+            rules: [rule('a', 'гоблины'), rule('b', 'ламии'), rule('c', 'орки')],
+            reputation: [
+                { among: 'стража', label: 'чужак', stance: -1, greeting: -1 },
+                { among: 'воры', label: 'свой', stance: 1, greeting: -1 },
+            ],
+        });
+        const state = initChatState(card, 0, 'x');
+        state.worldTone = 'welcoming';
+        state.rules = state.rules.filter((item) => item.id !== 'b');
+        state.rules[0] = { ...state.rules[0]!, choosiness: 4 };
+        state.reputation[0] = { ...state.reputation[0]!, stance: -3, reasons: ['поджёг склад'] };
+        const edited = cardProfiles([], {
+            worldTone: 'hostile',
+            rules: [
+                { ...rule('a', 'гоблины'), choosiness: 1 },
+                rule('b', 'ламии'),
+                { ...rule('c', 'орки'), choosiness: 2 },
+            ],
+            reputation: [
+                { among: 'стража', label: 'враг', stance: -2, greeting: -1 },
+                { among: 'воры', label: 'должник', stance: -1, greeting: -1 },
+            ],
+        });
+        expect(syncCardWorld(state, edited)).toBe(true);
+        expect(state.worldTone).toBe('welcoming');
+        expect(state.rules.map((item) => [item.id, item.choosiness])).toEqual([
+            ['a', 4],
+            ['c', 2],
+        ]);
+        expect(state.reputation.map((item) => [item.among, item.label, item.stance])).toEqual([
+            ['стража', 'чужак', -3],
+            ['воры', 'должник', -1],
+        ]);
+        // A rule the card drops goes from a chat that held it as the card had it.
+        const dropped = cardProfiles([], { ...edited, rules: [edited.rules[0]!] });
+        syncCardWorld(state, dropped);
+        expect(state.rules.map((item) => item.id)).toEqual(['a']);
     });
 });

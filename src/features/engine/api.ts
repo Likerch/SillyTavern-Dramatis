@@ -14,7 +14,7 @@ export interface EngineView {
     byId: ReadonlyMap<string, CharacterProfile>;
     /** Present after the last committed turn (ids, scene order). */
     present: readonly string[];
-    /** Names present in the scene without a profile (the generator's input). */
+    /** Names present in the scene without a profile (the latest reply; the generator sketches them once committed). */
     unknown: readonly string[];
     /** Attention band per present id (static before stage 2, from `state.next.bands` after). */
     bands: Readonly<Record<string, AttentionBand>>;

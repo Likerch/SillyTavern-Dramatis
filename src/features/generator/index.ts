@@ -1,14 +1,17 @@
 // Module `generator` (stage 3, docs/model.md §10): personalities for the faces the story brings in and for the gaps the
 // author left. Works on the story state only through the engine (`app.modules.api<EngineApi>(ENGINE_API)`).
-// - New faces: a name present in the scene without a profile (engine view `unknown`) gets a sketch at once — no model:
-//   role from DES details, «Мысли» and the name, parameters drawn against those present, role templates — saved as a
-//   chat extra with its live state, group rules applied, a journal record and a notice «Новое лицо: …».
+// - New faces: a name in the DES cast of a committed reply (the one the user's last message answered) without a profile
+//   gets a sketch — no model: role from DES details, «Мысли» and the name, parameters drawn against those present, role
+//   templates — saved as a chat extra with its live state, group rules applied, a journal record and a notice «Новое
+//   лицо: …». A reply still open to swipes leaves nothing behind (П11): its faces wait for its commit.
 // - Promotion: committed turns count scenes and the player's direct address per character (CharacterState.stats);
-//   a character who earned a draft or a portrait gets one from the background model (leader tab only; refusals such
-//   as 'not-leader' or 'cap' are skipped and retried on a later turn). Portraits read the character's CK archive as
-//   hints, or, without one, give Maestro ready BunnyMo tags («Оформить», settings.autoArchives); goals go to the canon.
+//   a character who earned a draft or a portrait gets one from the background model once the next reply is in (leader
+//   tab only, never during a generation; refusals such as 'not-leader' or 'cap' are skipped and retried on a later
+//   turn). Portraits read the character's CK archive as hints, or, without one, give Maestro ready BunnyMo tags
+//   («Оформить», settings.autoArchives); goals go to the canon.
 // - Gaps: authored characters present in the scene with an empty core get a fill after the intent reading (balanced
-//   and cinema modes; economy skips it) — only empty fields, never the author's, the user's or locked ones.
+//   and cinema modes; economy skips it; not while a generation runs) — only empty fields, never the author's, the
+//   user's or locked ones.
 // - Rules: group / species / world appetite rules are drawn for new faces and again whenever the rules change.
 // - API `generator` (api.ts) for the sheet UI: fillGaps, promote, pin — interactive requests.
 // Needs Maestro (background model, journal, notices); sketches themselves are code only.
@@ -53,15 +56,17 @@ import type {
 } from '../../domain/generator';
 import { PLAYER_ID } from '../../domain/model';
 import type { CharacterProfile, ChatState, Lod, Scale5 } from '../../domain/model';
-import { matchName, normalizeName, presentFromText } from '../../domain/presence';
+import { matchName, normalizeName, presentFromDes, presentFromText } from '../../domain/presence';
 import { strangerStance } from '../../domain/reputation';
 import { UNKNOWN_ROLE, detectRole, roleIds } from '../../domain/role-priors';
 import type { RoleSource } from '../../domain/role-priors';
 import { ensureCharacterState } from '../../domain/state-init';
+import { leversFor } from '../../domain/turn-apply';
 import type { ApiJournalChange } from '../../shared/apis';
 import type { DesCharacter, DramatisModule, ModuleContext, Unsubscribe } from '../../shared/contracts';
 import { ENGINE_API } from '../engine/api';
 import type { EngineApi, EngineView } from '../engine/api';
+import { TURN_API } from '../turn/api';
 import { GENERATOR_API } from './api';
 import type { GeneratorApi, GeneratorOutcome } from './api';
 import { GENERATOR_STRINGS } from './strings';
@@ -87,7 +92,7 @@ const SAID_MESSAGES = 30;
 const ROLE_KEY_RE = /role|occupation|job|profession|class|title|роль|занят|профес|должн|ремесл|звани/i;
 const SPECIES_KEY_RE = /species|race|folk|раса|вид|народ/i;
 const GENDER_KEY_RE = /gender|sex|^пол$|^пол_|_пол$/i;
-const TRANSIENT = new Set(['not-leader', 'cap']);
+const TRANSIENT = new Set(['not-leader', 'cap', 'maestro-stopped']);
 
 type Target = 'fill' | 'draft' | 'portrait';
 
@@ -157,6 +162,10 @@ function startGenerator({ app, settings, log, own }: ModuleContext<GeneratorSett
     let queue: Promise<void> = Promise.resolve();
     let pending = false;
     let alive = true;
+    /** A real generation is under way (Maestro's generation:before … generation:ended): no model calls now. */
+    let generating = false;
+    /** Turns were counted since the last promotion check: it runs once the next reply is in. */
+    let promotionsDue = false;
     let attached: EngineApi | null = null;
     let offEngine: Unsubscribe | null = null;
 
@@ -245,7 +254,7 @@ function startGenerator({ app, settings, log, own }: ModuleContext<GeneratorSett
                 { id: PLAYER_ID },
             ],
             knowsPlayer: (id) => state.characters[id]?.knowsPlayer ?? true,
-            strength: app.settings.get().appetiteStrength,
+            strength: leversFor(app.settings.get(), state.overrides).appetiteStrength,
         };
     }
 
@@ -355,13 +364,39 @@ function startGenerator({ app, settings, log, own }: ModuleContext<GeneratorSett
 
     /* ---------------------------------------------------------------- new faces */
 
-    async function sketchUnknown(view: EngineView): Promise<void> {
+    /** The reply the user's last message answered (committed, П11), or -1. */
+    function committedIndex(): number {
+        const chat = app.host.ctx().chat;
+        if (!Array.isArray(chat)) return -1;
+        for (let i = chat.length - 1; i >= 0; i--) {
+            const message = chat[i];
+            if (!message?.is_user || message.is_system) continue;
+            for (let j = i - 1; j >= 0; j--) {
+                const before = chat[j];
+                if (before && !before.is_user && !before.is_system) return j;
+            }
+            return -1;
+        }
+        return -1;
+    }
+
+    /** The DES cast of a committed reply and the names in it that no profile (nor Maestro's gluing) answers to. */
+    function facesAt(view: EngineView, index: number): { names: string[]; cast: DesCharacter[] } {
+        if (index < 0 || !app.readers.des.available()) return { names: [], cast: [] };
+        const cast = app.readers.des.castAt(index);
+        const eng = engine();
+        const names = presentFromDes(cast, view.profiles).unknown.filter((name) => !eng?.resolve(name));
+        return { names, cast };
+    }
+
+    async function sketchUnknown(view: EngineView, messageIndex: number): Promise<void> {
         const eng = engine();
         if (!eng) return;
         const key = chatOf(view.state);
         const dismissed = new Set((view.state.generator?.dismissed ?? []).map(normalizeName));
         const known = [...view.profiles, ...view.state.extras];
-        const names = view.unknown.filter((name) => {
+        const faces = facesAt(view, messageIndex);
+        const names = faces.names.filter((name) => {
             const norm = normalizeName(name);
             return (
                 norm &&
@@ -371,7 +406,7 @@ function startGenerator({ app, settings, log, own }: ModuleContext<GeneratorSett
             );
         });
         if (!names.length) return;
-        const des = app.readers.des.available() ? app.readers.des.lastCast() : [];
+        const des = faces.cast;
         const taken = new Set(known.map((profile) => profile.id));
         const cast: CastMember[] = view.present
             .map((id) => view.byId.get(id))
@@ -686,7 +721,8 @@ function startGenerator({ app, settings, log, own }: ModuleContext<GeneratorSett
     /* ---------------------------------------------------------------- gaps and turns */
 
     async function fillAuthored(view: EngineView | null): Promise<void> {
-        if (!view || app.settings.get().mode === 'economy' || !view.card.intent) return;
+        if (!view || generating || !view.card.intent) return;
+        if (leversFor(app.settings.get(), view.state.overrides).mode === 'economy') return;
         const extras = new Set(view.state.extras.map((item) => item.id));
         for (const id of view.present) {
             if (extras.has(id) || inflight.has(id)) continue;
@@ -697,7 +733,7 @@ function startGenerator({ app, settings, log, own }: ModuleContext<GeneratorSett
     }
 
     async function onView(view: EngineView): Promise<void> {
-        if (settings.sketches) await sketchUnknown(view);
+        if (settings.sketches) await sketchUnknown(view, committedIndex());
         const current = engine()?.view();
         if (!current) return;
         if (settings.rules) await applyRulesOnChange(current);
@@ -713,13 +749,23 @@ function startGenerator({ app, settings, log, own }: ModuleContext<GeneratorSett
             .map((message) => String(message.mes ?? ''));
     }
 
+    /** Writes driven by turns happen in Maestro's leading tab only: two tabs must not count one turn twice. */
+    function leads(): boolean {
+        try {
+            return maestro()?.leader.isLeader() === true;
+        } catch (error) {
+            log.debug('leader check failed', error);
+            return false;
+        }
+    }
+
     async function onCommitted(messageIndex: number): Promise<void> {
         commits += 1;
         const eng = engine();
-        if (!eng) return;
+        if (!eng || !leads()) return;
         const view = (await eng.ready()) ?? eng.view();
         if (!view) return;
-        if (settings.sketches) await sketchUnknown(view);
+        if (settings.sketches) await sketchUnknown(view, messageIndex);
         const current = eng.view();
         if (!current) return;
         const present = current.present.map((id) => current.byId.get(id)).filter(isProfile);
@@ -733,9 +779,16 @@ function startGenerator({ app, settings, log, own }: ModuleContext<GeneratorSett
                 if (here || live.stats) live.stats = countTurn(live.stats, state.scene, here, addressed.has(id));
             }
         });
-        if (!settings.promotion) return;
-        const after = eng.view();
-        if (!after) return;
+        // The model is asked once the next reply is in: the generation this message started runs now.
+        if (settings.promotion) promotionsDue = true;
+    }
+
+    /** Promotions earned by the counted turns (the pause after a reply: no generation runs). */
+    async function promote(): Promise<void> {
+        promotionsDue = false;
+        const eng = engine();
+        const after = eng?.view();
+        if (!eng || !after || !leads()) return;
         const names = maestro()?.names;
         for (const id of after.present) {
             const profile = after.byId.get(id);
@@ -804,10 +857,16 @@ function startGenerator({ app, settings, log, own }: ModuleContext<GeneratorSett
         offEngine = null;
         attached = null;
     });
+    const onTurn = (messageIndex: number): void => {
+        attach();
+        void enqueue(() => onCommitted(messageIndex));
+    };
+    // Counting reads the scene counter the turn module sets: it follows that module's commit (`turn:applied`, leader
+    // tab only). Only with the turn module switched off is the user's message itself the cue.
+    own(app.bus.on('turn:applied', ({ messageIndex }) => onTurn(messageIndex)));
     own(
         app.bus.on('turn:committed', ({ messageIndex }) => {
-            attach();
-            void enqueue(() => onCommitted(messageIndex));
+            if (!app.modules.api(TURN_API)) onTurn(messageIndex);
         }),
     );
     own(
@@ -817,6 +876,23 @@ function startGenerator({ app, settings, log, own }: ModuleContext<GeneratorSett
         }),
     );
     own(app.bus.on('state:changed', () => attach()));
+    own(
+        app.bus.on('generation:before', ({ quiet, dryRun }) => {
+            if (!quiet && !dryRun) generating = true;
+        }),
+    );
+    /** The generation is over (its reply is in, or it ended without one): background work may start. */
+    const pause = (): void => {
+        generating = false;
+        attach();
+        // Queued behind the counting of a turn still in progress: it decides whether anything is due.
+        void enqueue(async () => {
+            if (promotionsDue && settings.promotion && !generating) await promote();
+        });
+        schedule();
+    };
+    own(app.bus.on('generation:ended', pause));
+    own(app.bus.on('reply:ready', pause));
     own(app.bus.on('profiles:changed', () => attach()));
     attach();
     schedule();

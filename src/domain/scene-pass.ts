@@ -14,6 +14,8 @@ import type { AppetiteState, CharacterProfile, ChatState, StateEvent } from './m
 import { endScene } from './scene';
 import type { SceneBreak } from './scene';
 import { FULL_SELF_CONTROL } from './state-init';
+import { relieveStress } from './stress';
+import { isOutGroup, shiftGazesOnCorruption } from './thresholds';
 import { TurnLog, appendLog, passThresholds } from './turn-log';
 import type { Rng } from '../shared/contracts';
 
@@ -143,11 +145,12 @@ export function runScenePass(input: ScenePassInput, ctx: ScenePassContext): Scen
         }
 
         if (!chapterEnd) continue;
-        // Rest restores self-control (§5.7 «Сдержки»).
+        // Rest restores self-control (§5.7 «Сдержки») and eases stress, more with an anchor near.
         character.selfControl = FULL_SELF_CONTROL;
+        const anchorPresent = profile.core.anchors.some((anchor) => present.has(anchor));
+        character.stress = relieveStress(character.stress, anchorPresent);
         const tracked = corruptionApplies(ctx.levers.corruption, coarseProfile(profile.appetites));
         if (!tracked && character.corruption.stains <= 0) continue;
-        const anchorPresent = profile.core.anchors.some((anchor) => present.has(anchor));
         const before = character.corruption.level;
         if (character.corruption.stains > 0) {
             const { state: corruption, result } = applyRemorse(
@@ -163,7 +166,11 @@ export function runScenePass(input: ScenePassInput, ctx: ScenePassContext): Scen
             if (result.success) log.add('corruption', 'remorseOk', { name: log.name(id) }, id);
             else log.add('corruption', 'remorseFail', { name: log.name(id), level: corruption.level }, id);
             if (corruption.level > before) {
-                character.corruption = passThresholds(corruption, before, ctx.rng, log, id).state;
+                const passed = passThresholds(corruption, before, ctx.rng, log, id, { profile, anchorPresent });
+                character.corruption = passed.state;
+                // The gaze on outsiders slides toward the thing (the turn pass does the same for its own crossings).
+                if (passed.crossed5 && shiftGazesOnCorruption(character, (t) => isOutGroup(profile, t, byId)).length)
+                    log.add('gaze', 'gazeFall', { name: log.name(id) }, id);
             }
         } else {
             // Abstinence: no vowed craving was fed within the last day (a chapter with nothing to resist counts too).

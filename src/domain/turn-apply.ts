@@ -25,7 +25,7 @@ import { correctionFor, driftFindings, addStress, stressBreak } from './drift';
 import type { BreakKind, DriftFinding } from './drift';
 import { hotGaze, shiftGaze } from './gaze';
 import type { GazeEvents } from './gaze';
-import { HUNT_WANT, huntersBudget, huntLimit } from './group-rules';
+import { HUNT_WANT, huntersBudget, huntLimit, sexualBarred } from './group-rules';
 import { rollInitiative } from './initiative';
 import { MAX_INTENTIONS, advanceIntention, clockFull, reconsider } from './intentions';
 import type { IntentionSignal } from './intentions';
@@ -70,7 +70,9 @@ import type { Pursuit } from './rivalry';
 import { baseStanceOf, sceneBreak, SCENE_SKIP_HOURS } from './scene';
 import type { SceneMark } from './scene';
 import { runScenePass } from './scene-pass';
-import { tickScheme, startScheme } from './schemes';
+import { summarizePass } from './pass-summary';
+import { pruneSchemes, tickScheme, startScheme } from './schemes';
+import { finishBreaks } from './stress';
 import { buildCorrectionLines } from './render';
 import { ensureCharacterState } from './state-init';
 import { TurnLog, appendLog, passThresholds } from './turn-log';
@@ -658,7 +660,10 @@ function stain(w: Work, id: string, act: StainAct, what: string): void {
     if (remorse.result.success) w.log.add('corruption', 'remorseOk', { name: w.log.name(id) }, id);
     else w.log.add('corruption', 'remorseFail', { name: w.log.name(id), level: remorse.state.level }, id);
     if (remorse.state.level > before) {
-        const passed = passThresholds(live.corruption, before, w.rng, w.log, id);
+        const passed = passThresholds(live.corruption, before, w.rng, w.log, id, {
+            profile,
+            anchorPresent: anchorPresent(w, id),
+        });
         live.corruption = passed.state;
         if (passed.crossed5) w.crossed5.add(id);
     }
@@ -673,7 +678,7 @@ function applyAppetites(w: Work): void {
         const support = anchorPresent(w, id);
         for (const appetite of profile.appetites) {
             const current = live.appetites[appetite.id];
-            if (!current) continue;
+            if (!current || sexualBarred(appetite.kind, profile)) continue;
             const flags = entry?.appetites.find((item) => item.id === appetite.id);
             if (flags?.intoxicated) w.intoxicated.add(id);
             const sceneCue = current.sceneCue ?? 0;
@@ -993,6 +998,10 @@ function tickSchemes(w: Work, rivals: Map<string, number>): void {
         if (scheme.target !== PLAYER_ID && !w.presentSet.has(scheme.target)) return scheme;
         const profile = profileOf(w, scheme.owner);
         const appetite = profile?.appetites.find((item) => item.id === scheme.appetite) ?? profile?.appetites[0];
+        // Started before someone was known to be a minor: it stops here (the content boundary).
+        if (appetite && sexualBarred(appetite.kind, profile, profileOf(w, scheme.target))) {
+            return { ...scheme, state: 'failed' };
+        }
         const guards = appetite ? surroundings(w, scheme.owner, scheme.target, appetite, rivals).guardians : 0;
         const tick = tickScheme(
             scheme,
@@ -1049,11 +1058,15 @@ interface Pursued {
 function pursuedTarget(w: Work, id: string, appetite: Appetite): { target?: string; want: number } | null {
     const live = characterOf(w, id)!;
     const profile = profileOf(w, id)!;
+    if (sexualBarred(appetite.kind, profile)) return null;
     if (appetite.target.mode === 'thing') return { want: live.appetites[appetite.id]?.pressure ?? 0 };
     const ties = Object.entries(live.ties)
         .filter(
             ([target, tie]) =>
-                target !== id && (tie.want ?? 0) >= HUNT_WANT && appetiteFor(profile, tie)?.id === appetite.id,
+                target !== id &&
+                (tie.want ?? 0) >= HUNT_WANT &&
+                appetiteFor(profile, tie)?.id === appetite.id &&
+                !sexualBarred(appetite.kind, profile, profileOf(w, target)),
         )
         .filter(([target]) => target === PLAYER_ID || w.presentSet.has(target))
         .sort((a, b) => (b[1].want ?? 0) - (a[1].want ?? 0));
@@ -1608,12 +1621,37 @@ export function applyTurnPass(input: TurnInput, pass: TurnPass | null, ctx: Turn
     const { bands, moves } = planNext(w);
 
     for (const id of present) characterOf(w, id)!.lastSeenTurn = turn;
+    // CharacterState.present is «in the scene after the last committed turn»: whoever this turn did not see is away.
+    for (const [id, live] of Object.entries(state.characters)) live.present = w.presentSet.has(id);
     state.turn = turn;
     const next: NextTurn = { turn, bands };
     if (moves && Object.keys(moves).length) next.moves = moves;
     if (Object.keys(w.nows).length) next.appetites = w.nows;
     if (Object.keys(corrections).length) next.corrections = corrections;
     state.next = next;
+    state.schemes = pruneSchemes(state.schemes);
+    // Stage 5: breaks from any stress (not only drift) with their «snaps» line, and the summary later passes read.
+    finishBreaks({
+        state,
+        present,
+        byId,
+        notes: w.notes,
+        drifted: new Set(w.log.events.filter((e) => e.kind === 'drift' && e.character).map((e) => e.character!)),
+        cardLang: w.cardLang,
+        playerName: input.playerName,
+        logBreak: (id, _kind, what) =>
+            w.log.add('break', 'break', { name: w.log.name(id), what: what[w.log.lang] }, id),
+    });
+    state.lastPass = summarizePass({
+        before: input.state,
+        after: state,
+        pass: turnPass,
+        present,
+        turn,
+        ...(ctx.messageIndex !== undefined ? { messageIndex: ctx.messageIndex } : {}),
+        notes: w.notes,
+        events: w.log.events,
+    });
     if (turnPass.newNames.length) w.notes.push({ kind: 'new-names', names: [...turnPass.newNames] });
     appendLog(state, w.log.events);
     return { state, proposals: w.proposals, notes: w.notes, events: w.log.events };

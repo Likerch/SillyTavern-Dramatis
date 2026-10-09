@@ -1,8 +1,8 @@
 // Bridge to Maestro's public API (src/shared/apis.ts): `globalThis.MAESTRO_API` v1, published by Maestro when it is
 // installed and enabled. Maestro loads before Dramatis (loading_order 200 < 210) but activates asynchronously, so the
 // global is looked up again on its `maestro-api-ready` window event, on APP_READY and on chat changes; every api()
-// call reads it live as well, so a Maestro disabled in the meantime is noticed on first use. Each change of presence
-// is announced on the bus as `maestro:changed`.
+// call reads it live as well, so a Maestro disabled in the meantime is noticed on first use. Each change of presence —
+// and a new API object after a Maestro restart — is announced on the bus as `maestro:changed`.
 import { MAESTRO_API_GLOBAL, MAESTRO_API_READY_EVENT } from '../../shared/apis';
 import type { MaestroApiV1 } from '../../shared/apis';
 import type { Bus, Host, Logger, MaestroBridge, Unsubscribe } from '../../shared/contracts';
@@ -29,7 +29,8 @@ export function isMaestroApi(value: unknown): value is MaestroApiV1 {
 }
 
 export function createMaestroBridge(host: Host, bus: Bus, log: Logger): MaestroBridgeImpl {
-    let present = false;
+    /** The API object seen last (null: absent). A restarted Maestro publishes a new object. */
+    let current: MaestroApiV1 | null = null;
     let warned = false;
     const unsubscribers: Unsubscribe[] = [];
 
@@ -45,11 +46,17 @@ export function createMaestroBridge(host: Host, bus: Bus, log: Logger): MaestroB
         return null;
     }
 
+    // A restart of Maestro removes the global and publishes a new object (MAESTRO_API forgets every registration made
+    // on the old one). When nothing looked in between, presence never changes — so a new object is announced too, and
+    // whoever registered tasks, appliers, undo handlers, quiet claims or turn listeners does it again.
     function note(api: MaestroApiV1 | null): void {
+        if (api === current) return;
+        const replaced = api !== null && current !== null;
+        current = api;
         const now = api !== null;
-        if (now === present) return;
-        present = now;
-        log.info(now ? `Maestro ${api?.maestroVersion ?? '?'} connected` : 'Maestro is gone');
+        log.info(
+            now ? `Maestro ${api?.maestroVersion ?? '?'} ${replaced ? 'restarted' : 'connected'}` : 'Maestro is gone',
+        );
         // Announced asynchronously: api() may be called from inside other handlers.
         queueMicrotask(() => void bus.emit('maestro:changed', { present: now }));
     }

@@ -7,7 +7,7 @@
 // business with the player. Drift in mode «Переделать» offers a new swipe of the reply before it is committed.
 import { desSwipeRecord, parseDesScene } from '../../adapters/des/parse';
 import { PLAYER_ID } from '../../domain/model';
-import type { ChatState } from '../../domain/model';
+import type { ChatState, Tie } from '../../domain/model';
 import { matchName, presentFromDes } from '../../domain/presence';
 import type { SceneMark } from '../../domain/scene';
 import { cleanForAnalysis } from '../../domain/text-clean';
@@ -26,14 +26,34 @@ import { TURN_TASK, parseTurnResult, turnMessages, turnSchema } from '../../doma
 import type { TurnPass } from '../../domain/turn-prompt';
 import type { ApiJournalChange, MaestroApiV1 } from '../../shared/apis';
 import type { App, DramatisModule, Logger, ModuleContext } from '../../shared/contracts';
+import { stableHash } from '../../core/hash';
 import { ENGINE_API } from '../engine/api';
 import type { EngineApi, EngineView } from '../engine/api';
+import { TURN_API } from './api';
+import type { TurnApi } from './api';
 import { TURN_STRINGS } from './strings';
 
 export const ARC_KIND = 'dramatis.arc';
 export const TURN_JOURNAL_KIND = 'dramatis.turn';
-/** Journal target of whole-state snapshots (undo of a committed turn). */
+/** Journal target of the chat state: a committed turn (undone from its snapshot) and an arc step. */
 export const STATE_TARGET = 'dramatis-state';
+
+/**
+ * The state before the latest committed turn, kept in Dramatis' own file per chat (one snapshot, overwritten by the
+ * next commit). Maestro's journal keeps up to 2000 records per chat in one document: a whole state in each turn's
+ * record made that document grow by the size of the state every turn.
+ */
+export interface TurnSnapshot {
+    chatId: string;
+    /** The turn the snapshot undoes (the state's turn after that commit). */
+    turn: number;
+    before: ChatState;
+}
+
+/** File of a chat's turn snapshot (`dramatis-chat-<hash>-undo.json`). */
+export function snapshotFile(app: App, chatId: string): string {
+    return app.files.fileName(`chat-${stableHash(chatId)}-undo`);
+}
 
 export interface TurnSettings {
     /** Answer budget of the turn pass. */
@@ -53,12 +73,26 @@ export interface TurnDraft {
     ids: string[];
 }
 
-/** Errors of a background request that mean «not now»: another tab leads, or the daily cap is reached. */
-const SILENT_ERRORS = new Set(['not-leader', 'cap', 'aborted']);
+/** Errors of a background request that mean «not now»: another tab leads, the daily cap, Maestro restarting. */
+const SILENT_ERRORS = new Set(['not-leader', 'cap', 'aborted', 'maestro-stopped']);
 
 interface Pending {
     controller: AbortController;
     promise: Promise<void>;
+}
+
+/** A saved commit, for the journal and the notices that follow it. */
+interface Committed {
+    api: MaestroApiV1;
+    result: CommitResult;
+    before: ChatState;
+    view: EngineView;
+}
+
+/** The same reply (index, swipe, text) as the state's last committed one. */
+export function sameCommit(state: ChatState, messageIndex: number, swipeId: number, hash: string): boolean {
+    const last = state.lastCommit;
+    return !!last && last.messageIndex === messageIndex && last.swipeId === swipeId && last.hash === hash;
 }
 
 function swipeOf(message: STChatMessage | undefined): number {
@@ -81,8 +115,16 @@ export function createTurnController(app: App, settings: TurnSettings, log: Logg
     const waiting = new Set<string>();
     /** Commits already applied (chat, message, swipe, text hash). */
     const applied = new Set<string>();
+    /** Passes that came back without a usable answer (same keys): the commit applies no pass instead of asking again. */
+    const failed = new Set<string>();
+    /** Commits being saved now. */
+    const committing = new Set<Promise<Committed | null>>();
+    /** Replies with a drafted pass (same keys → text hash): ST may announce one reply twice; it is read once. */
+    const drafted = new Map<string, string>();
 
     const key = (chatId: string, index: number, swipe: number) => `${chatId}\u0000${index}\u0000${swipe}`;
+    const commitKey = (chatId: string, index: number, swipe: number, hash: string) =>
+        `${key(chatId, index, swipe)}\u0000${hash}`;
     const maestro = (): MaestroApiV1 | null => app.maestro.api();
     const engine = (): EngineApi | undefined => app.modules.api<EngineApi>(ENGINE_API);
     const chat = (): STChatMessage[] => {
@@ -190,6 +232,7 @@ export function createTurnController(app: App, settings: TurnSettings, log: Logg
         const id = key(chatId, index, swipe);
         if (pending.has(id)) return;
         const hash = fingerprint(message);
+        if (!waiting.has(id) && drafted.get(id) === hash) return;
         let ids = presentAt(index, view);
         if (levers(view).mode === 'economy')
             ids = ids.filter((item) => (view.bands[item] ?? 'background') !== 'background');
@@ -203,6 +246,7 @@ export function createTurnController(app: App, settings: TurnSettings, log: Logg
         const controller = new AbortController();
         const run = async () => {
             let pass: TurnPass | null = null;
+            let silent = false;
             try {
                 const result = await api.llm.request({
                     task: TURN_TASK,
@@ -224,8 +268,10 @@ export function createTurnController(app: App, settings: TurnSettings, log: Logg
                     signal: controller.signal,
                 });
                 if (result.ok) pass = parseTurnResult(result.data, { ids });
-                else if (SILENT_ERRORS.has(result.error ?? '')) log.debug(`turn pass skipped: ${result.error}`);
-                else log.warn(`turn pass failed: ${result.error ?? 'unknown error'}`);
+                else if (SILENT_ERRORS.has(result.error ?? '')) {
+                    silent = true;
+                    log.debug(`turn pass skipped: ${result.error}`);
+                } else log.warn(`turn pass failed: ${result.error ?? 'unknown error'}`);
             } catch (error) {
                 if (!controller.signal.aborted) log.warn('turn pass failed', error);
             }
@@ -236,6 +282,8 @@ export function createTurnController(app: App, settings: TurnSettings, log: Logg
                 waiting.delete(id);
                 return;
             }
+            // A refusal or an unreadable answer is not asked again when the reply is committed.
+            if (!pass && !silent) failed.add(commitKey(chatId, index, swipe, hash));
             if (waiting.delete(id)) {
                 await apply(chatId, index, swipe, hash, pass);
                 return;
@@ -243,6 +291,7 @@ export function createTurnController(app: App, settings: TurnSettings, log: Logg
             if (!pass) return;
             const draft: TurnDraft = { chatId, messageIndex: index, swipeId: swipe, hash, pass, ids };
             app.state.setDraft(index, swipe, draft);
+            drafted.set(id, hash);
             offerRedo(draft);
         };
         pending.set(id, { controller, promise: run() });
@@ -295,15 +344,34 @@ export function createTurnController(app: App, settings: TurnSettings, log: Logg
 
     /* ------------------------------------------------------------------ commit */
 
-    async function apply(chatId: string, index: number, swipe: number, hash: string, pass: TurnPass | null) {
+    /** Whether this reply was committed already (in this session, or as the state's last commit). */
+    function isCommitted(chatId: string, index: number, swipe: number, hash: string): boolean {
+        if (applied.has(commitKey(chatId, index, swipe, hash))) return true;
+        const state = engine()?.view()?.state;
+        return !!state && sameCommit(state, index, swipe, hash);
+    }
+
+    /** Saves the commit of a reply; null when it was not applied (not committed any more, already applied, lost). */
+    async function commit(
+        chatId: string,
+        index: number,
+        swipe: number,
+        hash: string,
+        pass: TurnPass | null,
+    ): Promise<Committed | null> {
         const api = maestro();
         const store = engine();
-        if (!api || !store || !stillCommitted(chatId, index, swipe, hash)) return;
-        const commitId = `${key(chatId, index, swipe)}\u0000${hash}`;
-        if (applied.has(commitId)) return;
+        if (!api || !store || !stillCommitted(chatId, index, swipe, hash)) return null;
+        const commitId = commitKey(chatId, index, swipe, hash);
+        if (applied.has(commitId)) return null;
         applied.add(commitId);
-        const out: { result?: CommitResult; before?: ChatState; view?: EngineView } = {};
+        const out: { result?: CommitResult; before?: ChatState; view?: EngineView; again?: boolean } = {};
         const saved = await store.updateState((state, current) => {
+            // Another tab (or this one before a reload) committed this very reply already: the state stays.
+            if (sameCommit(state, index, swipe, hash)) {
+                out.again = true;
+                return state;
+            }
             out.before = structuredClone(state);
             out.view = current;
             out.result = commitTurn(inputFor(current, state, index), pass, {
@@ -313,13 +381,41 @@ export function createTurnController(app: App, settings: TurnSettings, log: Logg
                 uiLang: app.i18n.locale(),
                 cardLang: app.settings.get().cardLanguage,
             });
+            out.result.state.lastCommit = { messageIndex: index, swipeId: swipe, hash };
             return out.result.state;
         });
+        if (out.again) return null;
         if (!saved || !out.result || !out.before || !out.view) {
             applied.delete(commitId);
-            return;
+            return null;
         }
-        await afterCommit(api, chatId, index, out.result, out.before, out.view);
+        failed.delete(commitId);
+        return { api, result: out.result, before: out.before, view: out.view };
+    }
+
+    /**
+     * Commits a reply, then (outside `settle()`) journals it and tells the modules that build on the committed turn
+     * (`turn:applied`): the generator and the world always see the new turn counter and `state.next`.
+     */
+    async function apply(chatId: string, index: number, swipe: number, hash: string, pass: TurnPass | null) {
+        const job = commit(chatId, index, swipe, hash, pass);
+        committing.add(job);
+        const done = await job.finally(() => committing.delete(job));
+        if (!done) return;
+        await afterCommit(done.api, chatId, index, done.result, done.before, done.view);
+        await app.bus.emit('turn:applied', { messageIndex: index, turn: done.result.state.turn });
+    }
+
+    /** The reply the last user message answered (committed when it was sent), or -1. */
+    function committedIndex(): number {
+        const messages = chat();
+        for (let i = messages.length - 1; i >= 0; i--) {
+            const message = messages[i];
+            if (!message?.is_user || message.is_system) continue;
+            for (let j = i - 1; j >= 0; j--) if (isAssistant(messages[j])) return j;
+            return -1;
+        }
+        return -1;
     }
 
     async function afterCommit(
@@ -331,7 +427,18 @@ export function createTurnController(app: App, settings: TurnSettings, log: Logg
         view: EngineView,
     ): Promise<void> {
         const turn = result.state.turn;
-        const change: ApiJournalChange = { target: STATE_TARGET, ref: { chatId, turn }, before, after: { turn } };
+        const snapshot: TurnSnapshot = { chatId, turn, before };
+        try {
+            await app.files.write(snapshotFile(app, chatId), snapshot);
+        } catch (error) {
+            log.warn('the turn snapshot could not be written: this turn cannot be undone', error);
+        }
+        const change: ApiJournalChange = {
+            target: STATE_TARGET,
+            ref: { chatId, turn },
+            before: { turn: before.turn },
+            after: { turn },
+        };
         try {
             await api.journal.record({
                 kind: TURN_JOURNAL_KIND,
@@ -424,16 +531,56 @@ export function createTurnController(app: App, settings: TurnSettings, log: Logg
         return !!proposal && !!view && app.host.chatId() === proposal.chatId && arcProposalValid(view.state, proposal);
     }
 
+    /** The state before a committed turn: the snapshot file, or the record itself (older records kept a whole state). */
+    async function turnBefore(chatId: string, turn: number, recorded: unknown): Promise<ChatState | null> {
+        const whole = recorded as ChatState | null;
+        if (whole && typeof whole === 'object' && typeof whole.turn === 'number' && whole.characters) return whole;
+        let snapshot: TurnSnapshot | null = null;
+        try {
+            snapshot = await app.files.read<TurnSnapshot>(snapshotFile(app, chatId), { fresh: true });
+        } catch (error) {
+            log.warn('the turn snapshot could not be read', error);
+        }
+        if (!snapshot || snapshot.chatId !== chatId || snapshot.turn !== turn) return null;
+        const before = snapshot.before;
+        return before && typeof before === 'object' && typeof before.turn === 'number' ? before : null;
+    }
+
+    /** An approved arc step taken back: the tie returns to where it was, if nothing moved it since. */
+    async function undoArc(store: EngineApi, view: EngineView, change: ApiJournalChange): Promise<boolean> {
+        const ref = change.ref as { character?: unknown; target?: unknown };
+        const from = change.before;
+        const to = change.after;
+        if (typeof ref.character !== 'string' || typeof ref.target !== 'string') return false;
+        if (typeof from !== 'number' || typeof to !== 'number') return false;
+        const character = ref.character;
+        const target = ref.target;
+        if (view.state.characters[character]?.ties[target]?.stance !== to) return false;
+        let undone = false;
+        const saved = await store.updateState((state) => {
+            const live = state.characters[character];
+            const tie = live?.ties[target];
+            if (!live || !tie || tie.stance !== to) return;
+            const step = Math.sign(to - from);
+            const moved =
+                tie.moved?.scene === state.scene ? { ...tie.moved, delta: tie.moved.delta - step } : tie.moved;
+            live.ties[target] = { ...tie, stance: from as Tie['stance'], ...(moved ? { moved } : {}) };
+            undone = true;
+        });
+        return saved && undone;
+    }
+
     async function undo(change: ApiJournalChange): Promise<boolean> {
-        const ref = change.ref as { chatId?: unknown; turn?: unknown };
+        const ref = change.ref as { chatId?: unknown; turn?: unknown; character?: unknown };
         const store = engine();
         const view = store?.view();
-        const before = change.before as ChatState | null;
-        if (!store || !view || ref.chatId !== app.host.chatId()) return false;
+        const chatId = app.host.chatId();
+        if (!store || !view || !chatId || ref.chatId !== chatId) return false;
+        if (typeof ref.character === 'string') return undoArc(store, view, change);
         // Only the latest committed turn can be taken back: later turns were built on it.
-        if (view.state.turn !== ref.turn || !before || typeof before !== 'object' || typeof before.turn !== 'number') {
-            return false;
-        }
+        if (typeof ref.turn !== 'number' || view.state.turn !== ref.turn) return false;
+        const before = await turnBefore(chatId, ref.turn, change.before);
+        if (!before || engine()?.view()?.state.turn !== ref.turn) return false;
         return store.updateState(() => structuredClone(before));
     }
 
@@ -446,9 +593,33 @@ export function createTurnController(app: App, settings: TurnSettings, log: Logg
             const chatId = app.host.chatId();
             const store = engine();
             if (!chatId || !store) return;
+            // The scene as this reply left it (presence, bands), not as the generation found it.
+            await store.refresh();
             const view = store.view() ?? (await store.ready());
-            if (!view || skipped(view)) return;
+            if (!view || skipped(view) || app.host.chatId() !== chatId) return;
             launch(chatId, messageIndex, view);
+        },
+
+        /** TurnApi.settle (api.ts). */
+        async settle(): Promise<void> {
+            const api = maestro();
+            const chatId = app.host.chatId();
+            const index = committedIndex();
+            if (api && chatId && index >= 0 && leader(api)) {
+                const message = chat()[index]!;
+                const swipe = swipeOf(message);
+                const hash = fingerprint(message);
+                if (!isCommitted(chatId, index, swipe, hash) && !pending.has(key(chatId, index, swipe))) {
+                    const draft = app.state.takeDraft(index, swipe) as TurnDraft | undefined;
+                    if (draft && draft.chatId === chatId && draft.hash === hash) {
+                        drafted.delete(key(chatId, index, swipe));
+                        void apply(chatId, index, swipe, hash, draft.pass);
+                    } else if (draft) {
+                        app.state.setDraft(index, swipe, draft);
+                    }
+                }
+            }
+            await Promise.all([...committing]);
         },
 
         async onCommit(messageIndex: number): Promise<void> {
@@ -461,7 +632,10 @@ export function createTurnController(app: App, settings: TurnSettings, log: Logg
             const swipe = swipeOf(message);
             const hash = fingerprint(message);
             const id = key(chatId, messageIndex, swipe);
+            // The same reply again (a second message sent after it, a reload): committed once, never asked again.
+            if (isCommitted(chatId, messageIndex, swipe, hash)) return;
             const draft = app.state.takeDraft(messageIndex, swipe) as TurnDraft | undefined;
+            drafted.delete(id);
             if (draft && draft.chatId === chatId && draft.hash === hash) {
                 await apply(chatId, messageIndex, swipe, hash, draft.pass);
                 return;
@@ -471,8 +645,8 @@ export function createTurnController(app: App, settings: TurnSettings, log: Logg
                 return;
             }
             const view = store.view() ?? (await store.ready());
-            if (!view) return;
-            if (skipped(view)) {
+            if (!view || isCommitted(chatId, messageIndex, swipe, hash)) return;
+            if (skipped(view) || failed.has(commitKey(chatId, messageIndex, swipe, hash))) {
                 await apply(chatId, messageIndex, swipe, hash, null);
                 return;
             }
@@ -491,6 +665,9 @@ export function createTurnController(app: App, settings: TurnSettings, log: Logg
                     waiting.delete(id);
                 }
             }
+            for (const id of [...drafted.keys()]) {
+                if (Number(id.split('\u0000')[1]) >= messageIndex) drafted.delete(id);
+            }
             app.state.dropDrafts(messageIndex);
         },
 
@@ -499,11 +676,14 @@ export function createTurnController(app: App, settings: TurnSettings, log: Logg
             pending.clear();
             waiting.clear();
             applied.clear();
+            failed.clear();
+            drafted.clear();
         },
 
-        /** Settles once every pass in flight has finished (tests, shutdown). */
+        /** Settles once every pass in flight and every commit being saved has finished (tests, shutdown). */
         async idle(): Promise<void> {
             await Promise.all([...pending.values()].map((item) => item.promise));
+            await Promise.all([...committing]);
         },
 
         applyArc,
@@ -544,5 +724,7 @@ export const turnModule: DramatisModule<TurnSettings> = {
         own(app.bus.on('message:invalidated', ({ messageIndex }) => controller.onInvalidated(messageIndex)));
         own(app.bus.on('chat:changed', () => controller.reset()));
         own(() => controller.reset());
+        const turnApi: TurnApi = { settle: () => controller.settle() };
+        app.modules.expose(TURN_API, turnApi);
     },
 };

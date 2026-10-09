@@ -599,9 +599,21 @@ export interface CharacterState {
     /** Agenda as the story changed it (copied from the profile on first use). */
     agenda: Agenda;
     stress: number;
-    /** `bonusDice`: extra remorse dice earned by refusing threshold gifts (§5.7), spent on the next roll. */
-    corruption: { level: number; stains: number; gifts: string[]; brands: string[]; bonusDice?: number };
+    /**
+     * `bonusDice`: extra remorse dice earned by refusing threshold gifts (§5.7), spent on the next roll.
+     * `identity` (stage 5): at 7 the craving became part of who they are — the appetite kind it grew from, or 'self'.
+     */
+    corruption: {
+        level: number;
+        stains: number;
+        gifts: string[];
+        brands: string[];
+        bonusDice?: number;
+        identity?: AppetiteKind | 'self';
+    };
     arcStage: ArcStage;
+    /** Arc progress (§9, stage 5): strain on the false belief and the revealed choices; absent until first moved. */
+    arc?: ArcProgress;
     /** Present in the scene after the last committed turn. */
     present: boolean;
     lastSeenTurn: number;
@@ -613,6 +625,101 @@ export interface CharacterState {
     stats?: CharacterStats;
     /** The last off-screen actions of world ticks (§11), oldest first; absent = none yet. */
     offscreen?: OffscreenAttempt[];
+}
+
+/**
+ * A choice under pressure (§9 «Выбор под давлением», McKee): a costly choice between two things the character values,
+ * as the turn pass found it in the reply.
+ */
+export interface PressureChoice {
+    /** What they chose to do (short English sentence, names as written). */
+    text: string;
+    /** What they kept and what they gave up for it. */
+    kept: string;
+    gave: string;
+    /** Toward what they need (against their wound's false belief), toward the lie (the want at the need's cost), unclear. */
+    toward: 'need' | 'lie' | 'unclear';
+}
+
+/** A revealed choice kept for good: a permanent memory that weighs more than any trait (§9). */
+export interface ArcChoice extends PressureChoice {
+    /** Committed turn it was made in. */
+    turn: number;
+    messageIndex?: number;
+}
+
+/** How far a character's arc has moved in a chat (§9): intact → cracking → glimpsed → embraced | rejected. */
+export interface ArcProgress {
+    /** Strain on the false belief from key events and choices under pressure (decays while nothing presses). */
+    strain: number;
+    /** Net lean of the revealed choices: + toward the need (the truth), − toward the lie. */
+    lean: number;
+    /** Key events and choices counted since the last stage step. */
+    evidence: number;
+    /** Committed turn of the last pass that moved the arc (strain decays from it). */
+    turn: number;
+    /** A stage step proposed to the Inbox and not applied yet (not proposed again until it lapses). */
+    proposed?: { to: ArcStage; turn: number };
+    /** Revealed choices, oldest first. */
+    choices: ArcChoice[];
+}
+
+/** What the turn pass saw for one character, for the passes that run after it (arcs). */
+export interface PassCharacterNote {
+    /** The key the pass matched (story words). */
+    key?: string;
+    choice?: PressureChoice;
+    /** Strain the code saw: a temptation to cross a line, a stress break, a broken vow. */
+    strain?: ('temptation' | 'break' | 'lapse')[];
+}
+
+/**
+ * A short summary of the last committed turn pass (stage 5): what the modules that run after the turn (arcs, metrics)
+ * read instead of re-running the pass. Written by applyTurnPass; replaced every committed turn.
+ */
+export interface PassSummary {
+    /** Committed turn it belongs to. */
+    turn: number;
+    /** The committed reply. */
+    messageIndex?: number;
+    /** Present characters with a profile at this turn. */
+    present: string[];
+    /** Per character id, only those the pass had something for. */
+    characters: Record<string, PassCharacterNote>;
+    /** Stance steps of this turn's events (character → target); scene relaxing is not counted. */
+    steps: { character: string; target: string; from: Stance; to: Stance }[];
+    /** Characters the reply played against the engine (drift findings). */
+    drift: string[];
+}
+
+/** One committed turn as the metrics counted it. */
+export interface MetricsTurn {
+    turn: number;
+    /** NPC dialogue lines and those addressed to the player. */
+    lines: number;
+    toPlayer: number;
+    /** Unprompted NPC moves (own business, starting something, getting in the way — not aimed at the player). */
+    initiatives: number;
+    /** Characters flagged by the drift control. */
+    drift: number;
+    /** Stance steps up and down. */
+    up: number;
+    down: number;
+}
+
+/** Per-chat measurements of docs/model.md §16 «Как поймём, что работает» (stage 5). */
+export interface MetricsState {
+    /** Committed turn counted last. */
+    lastTurn: number;
+    /** Turns counted. */
+    turns: number;
+    totals: Omit<MetricsTurn, 'turn'> & { initiativeTurns: number };
+    /** The last METRICS_WINDOW turns, oldest first. */
+    recent: MetricsTurn[];
+    /** Recent dialogue lines per speaker as word lists (most recent speaker last), for distinguishability. */
+    voices: { id: string; lines: string[][] }[];
+    /** Running lexical overlap of a line with the same speaker's previous line, and with other speakers' last lines. */
+    overlap: { within: number; withinN: number; across: number; acrossN: number };
 }
 
 /** Promotion counters of one character in one chat (docs/model.md §10.2 «Повышение уровня»). */
@@ -723,12 +830,30 @@ export interface ChatState {
     log: StateEvent[];
     /** What the passes prepared for the next generation; the motive card reads it (stage 2+). */
     next?: NextTurn;
+    /** The reply the last committed turn was read from (turn module): the same reply is never committed twice. */
+    lastCommit?: { messageIndex: number; swipeId: number; hash: string };
+    /**
+     * The card's world (tone, rules, reputation seeds) as this chat last took it over: a later reading or edit of the
+     * card reaches the chat where the chat still holds the card's values (state-init.ts syncCardWorld).
+     */
+    cardBase?: CardWorldBase;
     /** Per-chat lever overrides (docs/model.md §14: «любой рычаг можно переопределить для чата»). */
     overrides?: Record<string, unknown>;
     /** Generator bookkeeping (stage 3); absent until the generator writes it. */
     generator?: GeneratorState;
     /** Living world (stage 4): the last world tick; absent until the world module first sees a committed turn. */
     world?: WorldClockState;
+    /** The last committed turn pass in short (stage 5): read by the arcs and metrics modules. */
+    lastPass?: PassSummary;
+    /** Measurements (stage 5, docs/model.md §16); absent until the metrics module counts a turn. */
+    metrics?: MetricsState;
+}
+
+/** The card-level world a chat starts from (CardProfiles' tone, rules and reputation seeds). */
+export interface CardWorldBase {
+    worldTone: WorldTone;
+    rules: AppetiteRule[];
+    reputation: ReputationSeed[];
 }
 
 /** What the generator keeps per chat. */
@@ -758,4 +883,6 @@ export interface NextTurn {
     corrections?: Record<string, string[]>;
     /** Director pre-pass (cinema): who acts this beat, rendered lines. */
     director?: string[];
+    /** Stress breaks (stage 5): the «snaps: …» line per character id, in the card's language. */
+    snaps?: Record<string, string>;
 }

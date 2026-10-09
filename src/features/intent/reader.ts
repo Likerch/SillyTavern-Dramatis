@@ -50,7 +50,20 @@ const NOTICE_NOTES = 3;
 
 type PreparableCardReader = CardReader & { prepare?: () => Promise<void> };
 
+/** Errors of a background request that mean «not now» (another tab leads, the daily cap, Maestro restarting). */
+const QUIET_ERRORS = new Set(['not-leader', 'cap', 'maestro-stopped']);
+
+export interface ReadOptions {
+    force?: boolean;
+    /**
+     * Started by Dramatis itself (a new chat), not by the user: with Maestro it is background work — the leading tab
+     * and the daily cap apply — and «not now» answers stay quiet.
+     */
+    auto?: boolean;
+}
+
 export interface IntentReader extends IntentApi {
+    read(options?: ReadOptions): Promise<IntentReadResult>;
     /** The current card and the fingerprint of its sources now (null outside a solo chat). */
     fingerprint(): Promise<{ card: string; hash: string } | null>;
     /** Restores a journal snapshot (Maestro undo of `dramatis-profiles`). */
@@ -182,7 +195,12 @@ export function createIntentReader(deps: { app: App; log: Logger }): IntentReade
         return parts.join(', ');
     }
 
-    async function run(force: boolean, signal: AbortSignal): Promise<IntentReadResult> {
+    async function run(
+        force: boolean,
+        auto: boolean,
+        signal: AbortSignal,
+    ): Promise<IntentReadResult & { quiet?: boolean }> {
+        const background = auto && app.llm.viaMaestro();
         const gathered = await cardAndBook();
         if (!gathered) return failure(t('intent.error.noCard'));
         const { card, book, greeting } = gathered;
@@ -225,14 +243,19 @@ export function createIntentReader(deps: { app: App; log: Logger }): IntentReade
                 maxTokens: INTENT_MAX_TOKENS,
                 temperature: INTENT_TEMPERATURE,
                 schema: { name: schema.name, schema: schema.schema },
-                background: false,
+                background,
                 signal,
             });
             if (signal.aborted) return failure(llmErrorText(app.i18n, 'aborted'));
             const data = response.ok ? answerOf(response.data, response.text) : undefined;
             if (!data) {
                 const error = llmErrorText(app.i18n, response.ok ? 'parse' : response.error);
-                if (index === 0) return failure(error);
+                if (index === 0) {
+                    return {
+                        ...failure(error),
+                        ...(auto && QUIET_ERRORS.has(response.error ?? '') ? { quiet: true } : {}),
+                    };
+                }
                 notes.push(t('intent.warning.partFailed', { n: index + 1, total, error }));
                 partial = true;
                 continue;
@@ -321,7 +344,7 @@ export function createIntentReader(deps: { app: App; log: Logger }): IntentReade
     }
 
     return {
-        async read(options: { force?: boolean } = {}): Promise<IntentReadResult> {
+        async read(options: ReadOptions = {}): Promise<IntentReadResult> {
             if (busy) {
                 const result = failure(t('intent.error.busy'));
                 app.ui.notice(result.error!, { level: 'warn' });
@@ -330,9 +353,9 @@ export function createIntentReader(deps: { app: App; log: Logger }): IntentReade
             busy = true;
             const abort = new AbortController();
             controller = abort;
-            let result: IntentReadResult;
+            let result: IntentReadResult & { quiet?: boolean };
             try {
-                result = await run(options.force === true, abort.signal);
+                result = await run(options.force === true, options.auto === true, abort.signal);
             } catch (error) {
                 log.error('intent reading failed', error);
                 result = failure(
@@ -342,9 +365,11 @@ export function createIntentReader(deps: { app: App; log: Logger }): IntentReade
                 busy = false;
                 if (controller === abort) controller = null;
             }
-            last = result;
-            if (!result.ok) app.ui.notice(t('intent.failed', { error: result.error ?? '?' }), { level: 'error' });
-            return result;
+            const { quiet, ...outcome } = result;
+            last = outcome;
+            if (!outcome.ok && !quiet)
+                app.ui.notice(t('intent.failed', { error: outcome.error ?? '?' }), { level: 'error' });
+            return outcome;
         },
 
         running: () => busy,

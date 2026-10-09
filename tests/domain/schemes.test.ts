@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
     MAX_ATTEMPT,
+    MAX_FINISHED_SCHEMES,
     MIN_ATTEMPT,
     breachChance,
     defaultSecrecy,
+    pruneSchemes,
     resolveAttempt,
     schemeSegments,
     startScheme,
@@ -171,5 +173,23 @@ describe('resolveAttempt', () => {
     it('counts the scheme’s own accomplices by default', () => {
         const helped = { ...ready, accomplices: ['a', 'b', 'c'] };
         expect(resolveAttempt(helped, calm, always(0)).chance).toBeCloseTo(0.85, 5);
+    });
+});
+
+describe('pruneSchemes', () => {
+    it('keeps every live scheme and only the latest finished ones', () => {
+        const finished = Array.from({ length: MAX_FINISHED_SCHEMES + 5 }, (_, i) => ({
+            ...start({ id: `f${i}` }),
+            state: (['done', 'failed', 'exposed'] as const)[i % 3]!,
+        }));
+        const live = [start({ id: 'live' }), { ...start({ id: 'ready' }), state: 'ready' as const }];
+        const pruned = pruneSchemes([live[0]!, ...finished, live[1]!]);
+        expect(pruned).toHaveLength(MAX_FINISHED_SCHEMES + 2);
+        expect(pruned.map((scheme) => scheme.id)).toEqual(
+            expect.arrayContaining(['live', 'ready', `f${MAX_FINISHED_SCHEMES + 4}`]),
+        );
+        expect(pruned.some((scheme) => scheme.id === 'f0')).toBe(false);
+        const few = [live[0]!, finished[0]!];
+        expect(pruneSchemes(few)).toBe(few);
     });
 });

@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
     DOWN_NEED,
+    MAX_REASONS,
     MAX_STACKS,
     addReason,
     applyStanceEvents,
+    capReasons,
     boundsFor,
     netStanceChange,
     onSceneEnd,
@@ -499,5 +501,45 @@ describe('onSceneEnd', () => {
     it('expires reasons with bad durations', () => {
         const t = tie({ reasons: [{ id: 'x', text: 'x', delta: 1, scenesLeft: 0, stacks: 0 }] });
         expect(onSceneEnd(t, { scene: 1, baseStance: 0 }).tie.reasons).toEqual([]);
+    });
+});
+
+describe('capReasons', () => {
+    it('keeps a long story’s tie bounded: the oldest permanent reasons of one direction merge, sums intact', () => {
+        const reasons = Array.from({ length: MAX_REASONS + 4 }, (_, i) => ({
+            id: `r${i}`,
+            text: `deed ${i}`,
+            delta: i % 2 ? -0.5 : 0.25,
+            scenesLeft: null,
+            stacks: 0,
+            scene: i,
+            ...(i === 0 ? { key: true } : {}),
+        }));
+        const before = tie({
+            stance: -1,
+            reasons,
+            progress: { dir: -1, items: [{ reason: 'r3', scene: 3, delta: -0.5 }] },
+        });
+        const sum = (sign: number) =>
+            before.reasons.filter((r) => Math.sign(r.delta) === sign).reduce((total, r) => total + r.delta, 0);
+        const after = capReasons(before);
+        expect(after.reasons).toHaveLength(MAX_REASONS);
+        const total = (sign: number) =>
+            after.reasons.filter((r) => Math.sign(r.delta) === sign).reduce((t, r) => t + r.delta, 0);
+        expect(total(1)).toBeCloseTo(sum(1));
+        expect(total(-1)).toBeCloseTo(sum(-1));
+        // A key reason is never merged away; progress points at the reason that absorbed its own.
+        expect(after.reasons.some((r) => r.id === 'r0' && r.key)).toBe(true);
+        const ids = new Set(after.reasons.map((r) => r.id));
+        expect(after.progress!.items.every((item) => ids.has(item.reason))).toBe(true);
+        expect(capReasons(after)).toBe(after);
+    });
+
+    it('applies on every event', () => {
+        let current = tie();
+        for (let i = 0; i < MAX_REASONS + 10; i++) {
+            current = applyStanceEvents(current, [down(`betrayal ${i}`, { permanent: true })], ctx({ scene: i })).tie;
+        }
+        expect(current.reasons.length).toBeLessThanOrEqual(MAX_REASONS);
     });
 });
