@@ -157,6 +157,25 @@ export interface DramatisStanceInfo {
     reasons: string[];
 }
 
+/** One character of a starting scene as Dramatis read it (DRAMATIS_API.startCast). */
+export interface DramatisStartMember {
+    /** As the story writes it. */
+    name: string;
+    /** Present when this starting scene begins. */
+    present: boolean;
+    /** What they are doing / want in that scene (English, as Dramatis stores it). */
+    doing?: string;
+    goal?: string;
+    /** Stance toward the player −3…+3 and its ladder word in the UI language. */
+    stance?: number;
+    stanceLabel?: string;
+    /** The strongest reason for that stance (story words). */
+    reason?: string;
+    /** Baseline mood in the author's words or the octant name. */
+    mood?: string;
+    gender?: 'female' | 'male';
+}
+
 export interface DramatisApiV1 {
     version: 1;
     dramatisVersion: string;
@@ -176,6 +195,11 @@ export interface DramatisApiV1 {
     matureAgendas(): { text: string; weight: number }[];
     /** True while Dramatis replaces the «relationships» / «social» mechanics templates. */
     replacesSocialMechanics(): boolean;
+    /**
+     * Optional (Dramatis 1.2+): the cast of a starting scene — greeting N, 0 = first_mes — with presence, what they do
+     * and their stance toward the player; [] when Dramatis has not read the card. Maestro seeds DES from it.
+     */
+    startCast?(greeting: number): DramatisStartMember[];
     /** Fired when stances, goals or the cast changed. */
     onChange(listener: () => void): ApiUnsubscribe;
 }

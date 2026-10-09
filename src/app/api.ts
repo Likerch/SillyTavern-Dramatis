@@ -87,6 +87,9 @@ export function createApiPublisher(deps: ApiPublisherDeps): ApiPublisher {
             ...call<'matureAgendas', ReturnType<DramatisApiV1['matureAgendas']>>('matureAgendas', []),
         ],
         replacesSocialMechanics: () => call('replacesSocialMechanics', false),
+        startCast: (greeting: number) => [
+            ...call<'startCast', ReturnType<NonNullable<DramatisApiV1['startCast']>>>('startCast', [], [greeting]),
+        ],
         onChange(listener: () => void): ApiUnsubscribe {
             listeners.add(listener);
             return () => {

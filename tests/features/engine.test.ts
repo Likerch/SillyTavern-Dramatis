@@ -481,6 +481,24 @@ describe('engine — DRAMATIS_API part', () => {
         return card;
     }
 
+    it('describes a starting scene: who is there, what they do, their stance toward the player', async () => {
+        await startHarness({ profiles: richCard(), persona: 'Курьер' });
+        const cast = api().startCast!(0);
+        expect(cast.map((member) => member.name)).toEqual(['Ильва', 'Брам', 'Сота', 'Фенн']);
+        expect(cast[0]).toMatchObject({
+            name: 'Ильва',
+            present: true,
+            doing: "counting the week's takings",
+            goal: 'must raise the garrison tax by Friday',
+            stance: -2,
+            stanceLabel: 'Враждебна',
+            reason: 'an imperial',
+            gender: 'female',
+        });
+        expect(cast.find((member) => member.name === 'Фенн')).toMatchObject({ present: true, doing: 'asleep' });
+        expect(api().startCast!(5).every((member) => !member.present)).toBe(true);
+    });
+
     it('answers active, stances with reasons, goals, owned dependences and the mechanics switch', async () => {
         const h = await startHarness({ profiles: richCard(), persona: 'Курьер' });
         expect(api().active()).toBe(true);

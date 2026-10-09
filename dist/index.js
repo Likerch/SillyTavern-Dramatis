@@ -1,5 +1,5 @@
 //#region package.json
-var version$2 = "1.1.0";
+var version$2 = "1.2.0";
 //#endregion
 //#region src/adapters/card/index.ts
 function str$4(value) {
@@ -3927,6 +3927,7 @@ function createApiPublisher(deps) {
 		offscreenBrief: (name) => call("offscreenBrief", null, [name]),
 		matureAgendas: () => [...call("matureAgendas", [])],
 		replacesSocialMechanics: () => call("replacesSocialMechanics", false),
+		startCast: (greeting) => [...call("startCast", [], [greeting])],
 		onChange(listener) {
 			listeners.add(listener);
 			return () => {
@@ -14964,6 +14965,34 @@ function engineApiPart(engine, app) {
 				seen.add(key);
 				return true;
 			});
+		},
+		startCast(greeting) {
+			const view = engine.view();
+			if (!view) return [];
+			const lang = app.i18n.locale();
+			const out = [];
+			for (const profile of view.card.characters) {
+				if (profile.kind === "group") continue;
+				const start = startFor(profile, greeting);
+				const tie = profile.ties.find((item) => item.target === PLAYER_ID);
+				const member = {
+					name: profile.name,
+					present: start?.present === true
+				};
+				if (start?.doing) member.doing = start.doing;
+				if (start?.goal) member.goal = start.goal;
+				if (tie) {
+					member.stance = tie.stance;
+					member.stanceLabel = stanceLabel(tie.stance, lang, profile.gender);
+					const reason = strongestReasons(tie.reasons ?? [], 1)[0];
+					if (reason) member.reason = reason;
+				}
+				const mood = profile.core.baselineMood;
+				if (mood) member.mood = mood.label || moodLabel(mood.octant, lang);
+				if (profile.gender) member.gender = profile.gender;
+				out.push(member);
+			}
+			return out;
 		},
 		dependenceOwned() {
 			const view = engine.view();

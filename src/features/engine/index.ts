@@ -2,11 +2,12 @@
 // EngineApi (engine.ts), plus its part of DRAMATIS_API — whether the chat has a cast, every stance with its reasons
 // (NPC → player and NPC ↔ NPC, for Maestro's relations graph), goals, the dependences the engine owns (BunnyMo's
 // Medicine Check stays quiet for them) and the «relationships»/«social» mechanics templates it replaces.
-import { stanceLabel } from '../../domain/ladders';
+import { moodLabel, stanceLabel } from '../../domain/ladders';
 import { PLAYER_ID } from '../../domain/model';
 import type { AppetiteKind } from '../../domain/model';
 import { strongestReasons } from '../../domain/render';
-import type { DramatisApiV1, DramatisStanceInfo } from '../../shared/apis';
+import { startFor } from '../../domain/state-init';
+import type { DramatisApiV1, DramatisStanceInfo, DramatisStartMember } from '../../shared/apis';
 import type { App, DramatisModule, I18nParts } from '../../shared/contracts';
 import { ENGINE_API } from './api';
 import type { EngineApi } from './api';
@@ -81,6 +82,33 @@ export function engineApiPart(engine: EngineApi, app: App): ApiPart {
                     seen.add(key);
                     return true;
                 });
+        },
+
+        startCast(greeting: number): DramatisStartMember[] {
+            const view = engine.view();
+            if (!view) return [];
+            const lang = app.i18n.locale();
+            const out: DramatisStartMember[] = [];
+            // Card characters only: the chat's extras are faces met in play, not part of any starting scene.
+            for (const profile of view.card.characters) {
+                if (profile.kind === 'group') continue;
+                const start = startFor(profile, greeting);
+                const tie = profile.ties.find((item) => item.target === PLAYER_ID);
+                const member: DramatisStartMember = { name: profile.name, present: start?.present === true };
+                if (start?.doing) member.doing = start.doing;
+                if (start?.goal) member.goal = start.goal;
+                if (tie) {
+                    member.stance = tie.stance;
+                    member.stanceLabel = stanceLabel(tie.stance, lang, profile.gender);
+                    const reason = strongestReasons(tie.reasons ?? [], 1)[0];
+                    if (reason) member.reason = reason;
+                }
+                const mood = profile.core.baselineMood;
+                if (mood) member.mood = mood.label || moodLabel(mood.octant, lang);
+                if (profile.gender) member.gender = profile.gender;
+                out.push(member);
+            }
+            return out;
         },
 
         dependenceOwned(): string[] {
