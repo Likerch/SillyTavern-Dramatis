@@ -6,7 +6,10 @@
 //   at least one pair holds opposing values (ready friction). The model only writes text around the draw.
 // - Levels (§10.2): a sketch is made here from role templates without any model; a draft and a portrait come from three
 //   model candidates, one picked at random by weight. Promotion (scenes, interactions, canon, a pin) adds fields and
-//   never rewrites them; a gap fill writes only empty fields. Author, user, story and locked fields are never touched.
+//   never rewrites them; a gap fill writes only the empty fields it asked for. Author, inferred, user, story and locked
+//   fields are never touched.
+// - Authored characters (a card character the reading or the card's text knows: isAuthored) get no dice: their gaps,
+//   the core included, are filled from the card's own text (groundedPaths, generator-prompt.ts groundedMessages).
 // - Group rules (§4.5, В17): an individual matching a rule's holders draws its own appetite from it; a class target
 //   spreads over everyone who fits (NPCs too), a player target reaches only someone who knows the player, and minors
 //   never hold or receive sexual appetites.
@@ -59,6 +62,7 @@ import {
 import { UNKNOWN_ROLE, detectRole, rolePrior, stanceReason, stanceTell, toneStances } from './role-priors';
 import type { Lang, RolePrior, RolePriors } from './role-priors';
 import { clamp, clampStance, normalizeText } from './util';
+import { presentFromText } from './presence';
 
 export { BUNNYMO_VOCABULARY, fieldsToTags, sheetTags, tagsToFields };
 export type { TagFields };
@@ -605,6 +609,11 @@ export interface ApplyGeneratedOptions {
     origin: 'generated';
     /** The drawn parameters to write as well (values, temperament, drives, tactics, stance…). */
     params?: GenParams;
+    /**
+     * Only these profile paths are written (a fill writes the gaps it asked for, whatever else the answer holds); the
+     * level still rises. Absent = every path the generator may write.
+     */
+    only?: readonly string[];
     lang?: Lang;
     /** Defence style from BunnyMo (MBTI -U): beats the candidate's. */
     coping?: Coping;
@@ -651,8 +660,9 @@ export function applyGenerated(
     let profile = start;
     const written: string[] = [];
     const lang = options.lang ?? 'en';
+    const asked = (path: string) => !options.only || options.only.includes(path);
     const write = (path: string, value: unknown) => {
-        if (isEmptyValue(value) || !canGenerate(profile, path)) return;
+        if (isEmptyValue(value) || !asked(path) || !canGenerate(profile, path)) return;
         profile = setMeta(setPath(profile, path, value), path, generated());
         written.push(path);
     };
@@ -668,6 +678,37 @@ export function applyGenerated(
         write('core.commitment', params.commitment);
         const label = cleanText(candidate.moodLabel, LIMITS.name);
         write('core.baselineMood', label ? { octant: params.baselineMood, label } : { octant: params.baselineMood });
+    } else {
+        // A grounded fill: the core comes from the card's text, not from dice.
+        const top = (candidate.values ?? []).slice(0, LIMITS.values);
+        if (top.length) {
+            const sacrifice = candidate.sacrifice && !top.includes(candidate.sacrifice) ? candidate.sacrifice : '';
+            write('core.values', sacrifice ? { top, sacrifice } : { top });
+        }
+        const temperament: Partial<Record<HexacoAxis, Level5>> = {};
+        for (const axis of HEXACO) {
+            const level = candidate.temperament?.[axis];
+            if (level) temperament[axis] = level;
+        }
+        write('core.temperament', temperament);
+        if (candidate.drives?.high.length) {
+            const high = candidate.drives.high.slice(0, LIMITS.drivesHigh);
+            write('core.drives', {
+                high,
+                low: candidate.drives.low.filter((drive) => !high.includes(drive)).slice(0, LIMITS.drivesLow),
+            });
+        }
+        write('core.tactics', cleanList(candidate.tactics ?? [], LIMITS.tactics));
+        if (typeof candidate.proactivity === 'number' && candidate.proactivity >= 0) {
+            write('core.proactivity', clamp(Math.round(candidate.proactivity), 0, 10));
+        }
+        if (candidate.moodOctant) {
+            const label = cleanText(candidate.moodLabel, LIMITS.name);
+            write(
+                'core.baselineMood',
+                label ? { octant: candidate.moodOctant, label } : { octant: candidate.moodOctant },
+            );
+        }
     }
     const core = profile.core;
     write('core.concept', cleanText(candidate.concept, LIMITS.short));
@@ -693,7 +734,7 @@ export function applyGenerated(
     write('core.voice', cleanText(candidate.voice, LIMITS.short));
     // The mood label alone, when the octant was there already (a sketch's draw).
     const label = cleanText(candidate.moodLabel, LIMITS.name);
-    if (label && !core.baselineMood.label && !written.includes('core.baselineMood')) {
+    if (label && asked('core.baselineMood') && !core.baselineMood.label && !written.includes('core.baselineMood')) {
         const meta = metaAt(profile, 'core.baselineMood');
         if (meta?.origin === 'generated' && !isProtected(profile, 'core.baselineMood')) {
             profile = setPath(profile, 'core.baselineMood', { ...profile.core.baselineMood, label });
@@ -735,7 +776,7 @@ export function applyGenerated(
     /* where they are when met: the «any greeting» start */
     const doing = cleanText(candidate.doing, LIMITS.short);
     const goal = cleanText(candidate.sceneGoal, LIMITS.short);
-    if ((doing || goal) && canGenerate(profile, 'starts')) {
+    if ((doing || goal) && asked('starts') && canGenerate(profile, 'starts')) {
         const others = profile.starts.filter((start) => start.greeting !== -1);
         const old = profile.starts.find((start) => start.greeting === -1);
         const any: CharacterProfile['starts'][number] = { greeting: -1, present: old?.present ?? true };
@@ -753,7 +794,7 @@ export function applyGenerated(
     const reasonText = cleanText(candidate.stanceReason, LIMITS.short);
     const fill = options.kind === 'fill';
     const redraw = fill && isDiceStrangerTie(profile) && !isProtected(profile, tiePath);
-    if ((params || behaviour || redraw) && (canGenerate(profile, tiePath) || redraw)) {
+    if ((params || behaviour || redraw) && asked(tiePath) && (canGenerate(profile, tiePath) || redraw)) {
         // A fill reads the stance from the card (the model's playerStance), replacing a dice-made stranger tie;
         // drafts and portraits keep the drawn stance, the candidate only words it.
         const replace = fill && (!profile.ties.some((tie) => tie.target === PLAYER_ID) || isDiceStrangerTie(profile));
@@ -783,11 +824,18 @@ export function applyGenerated(
         }
     }
 
-    /* appetites the candidate gives (portraits), never a sexual one for a minor */
+    /* appetites the candidate gives (portraits), never a sexual one for a minor, never one craving twice */
     for (const raw of candidate.appetites) {
         if (raw.baseline <= 0) continue;
         if (profile.minor && SEXUAL_KINDS.includes(raw.kind)) continue;
-        if (profile.appetites.some((appetite) => appetite.kind === raw.kind)) continue;
+        const label = textKey(raw.label);
+        if (
+            profile.appetites.some(
+                (appetite) => appetite.kind === raw.kind || (!!label && textKey(appetite.label ?? '') === label),
+            )
+        ) {
+            continue;
+        }
         const id = slugId(
             raw.kind,
             profile.appetites.map((appetite) => appetite.id),
@@ -907,6 +955,35 @@ export function missingFields(profile: CharacterProfile): string[] {
         missing.push(tiePath);
     }
     return missing;
+}
+
+/** Defaulted core paths a grounded fill reads from the card when nobody set them yet. */
+const GROUNDED_DEFAULTED = ['core.proactivity', 'core.baselineMood'] as const;
+
+/**
+ * The paths a grounded fill of an authored character writes at this level: the gaps of missingFields, the resting
+ * mood and initiative nobody set, and for a portrait the secrets and intentions the card may give. Appetites never:
+ * the reading owns them.
+ */
+export function groundedPaths(profile: CharacterProfile, lod: Lod = profile.lod): string[] {
+    const paths = missingFields(profile);
+    for (const path of GROUNDED_DEFAULTED) if (!metaAt(profile, path) && canGenerate(profile, path)) paths.push(path);
+    if (lod === 'portrait') {
+        for (const path of ['agenda.secrets', 'agenda.intentions']) {
+            if (canGenerate(profile, path) && isEmptyValue(getPath(profile, path))) paths.push(path);
+        }
+    }
+    return paths;
+}
+
+/**
+ * A character the author wrote: the intent reading gave it fields (author or inferred), or the card's own text names
+ * it. Its gaps are filled from that text, never around dice (docs/model.md §10.1).
+ */
+export function isAuthored(profile: CharacterProfile, sourcesText = ''): boolean {
+    if (Object.values(profile.meta).some((meta) => meta.origin === 'author' || meta.origin === 'inferred')) return true;
+    if (!sourcesText.trim()) return false;
+    return presentFromText([sourcesText], [profile]).length > 0;
 }
 
 /** A character whose core has holes the generator may fill (groups are left to the author). */

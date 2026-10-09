@@ -10,8 +10,11 @@
 //   turn). Portraits read the character's CK archive as hints, or, without one, give Maestro ready BunnyMo tags
 //   («Оформить», settings.autoArchives); goals go to the canon.
 // - Gaps: authored characters present in the scene with an empty core get a fill after the intent reading (balanced
-//   and cinema modes; economy skips it; not while a generation runs) — only empty fields, never the author's, the
-//   user's or locked ones.
+//   and cinema modes; economy skips it; not while a generation runs) — only the empty fields it asks for, never the
+//   author's, the inferred, the user's or locked ones. A card character the reading or the card's text knows is filled
+//   from the card itself (its description, personality, scenario, opening greeting, creator's notes and the lore about
+//   it) with no dice — values, drives, temperament, tactics and the stance included; promoting one does the same. The
+//   dice stay for the faces the story brings in.
 // - Rules: group / species / world appetite rules are drawn for new faces and again whenever the rules change.
 // - API `generator` (api.ts) for the sheet UI: fillGaps, promote, pin — interactive requests.
 // Needs Maestro (background model, journal, notices); sketches themselves are code only.
@@ -29,7 +32,13 @@ import {
     fillFields,
     generatorMessages,
     generatorSchema,
+    groundedFields,
+    groundedMessages,
+    groundedPaths,
+    groundedSchema,
+    groundedSources,
     holderMatches,
+    isAuthored,
     maxLod,
     missingFields,
     needsFill,
@@ -55,6 +64,7 @@ import type {
     RuleGrant,
     TagFields,
 } from '../../domain/generator';
+import type { CardBookEntry } from '../../domain/intent-prompt';
 import { PLAYER_ID } from '../../domain/model';
 import type { CharacterProfile, ChatState, Lod, Scale5 } from '../../domain/model';
 import { matchName, normalizeName, presentFromDes, presentFromText } from '../../domain/presence';
@@ -94,6 +104,8 @@ const ROLE_KEY_RE = /role|occupation|job|profession|class|title|роль|зан�
 const SPECIES_KEY_RE = /species|race|folk|раса|вид|народ/i;
 const GENDER_KEY_RE = /gender|sex|^пол$|^пол_|_пол$/i;
 const TRANSIENT = new Set(['not-leader', 'cap', 'maestro-stopped']);
+/** Defaulted fields the dice of a fill write when nobody set them (initiative, persistence, resting mood). */
+const DICE_DEFAULTED = ['core.proactivity', 'core.commitment', 'core.baselineMood'];
 
 type Target = 'fill' | 'draft' | 'portrait';
 
@@ -512,7 +524,31 @@ function startGenerator({ app, settings, log, own }: ModuleContext<GeneratorSett
             .map((message) => String(message.mes ?? ''));
     }
 
-    function contextOf(view: EngineView, profile: CharacterProfile): GenContext {
+    /** The card's own text about a card character (grounded fills); '' without a card. */
+    async function cardSourcesFor(profile: CharacterProfile): Promise<string> {
+        let card: ReturnType<typeof app.readers.card.current> = null;
+        try {
+            card = app.readers.card.current();
+        } catch (error) {
+            log.debug('card unavailable for a grounded fill', error);
+        }
+        if (!card) return '';
+        let book: CardBookEntry[] = [];
+        try {
+            book = await app.readers.lore.cardBook();
+        } catch (error) {
+            log.debug('card lorebook unavailable for a grounded fill', error);
+        }
+        let greeting = 0;
+        try {
+            greeting = app.readers.card.greetingIndex();
+        } catch (error) {
+            log.debug('greeting index unavailable', error);
+        }
+        return groundedSources(card, book, namesOf(profile), greeting);
+    }
+
+    function contextOf(view: EngineView, profile: CharacterProfile, sources = ''): GenContext {
         const des = app.readers.des.available() ? app.readers.des.lastCast() : [];
         const member = des.find((item) => matchName(item.name, [profile], { strict: true }) === profile.id);
         const said = [
@@ -550,6 +586,7 @@ function startGenerator({ app, settings, log, own }: ModuleContext<GeneratorSett
             canon: view.card.invariants,
             relations,
             ...(story ? { story } : {}),
+            ...(sources ? { sources } : {}),
         };
     }
 
@@ -563,6 +600,34 @@ function startGenerator({ app, settings, log, own }: ModuleContext<GeneratorSett
             ...(missing.length ? { missing } : {}),
             ...(tags.length ? { tags } : {}),
         };
+    }
+
+    /**
+     * A grounded fill of an authored character: the card's text and only the gaps' fields, no dice. No field to ask
+     * for needs no model (a promotion then only raises the level).
+     */
+    async function groundedCandidate(
+        view: EngineView,
+        profile: CharacterProfile,
+        paths: string[],
+        tags: string[],
+        sources: string,
+        background: boolean,
+    ): Promise<{ candidate?: GenCandidate; error?: string }> {
+        const fields = groundedFields(paths);
+        if (!fields.length) return { candidate: emptyCandidate() };
+        const schema = groundedSchema(fields);
+        const result = await app.llm.request<unknown>({
+            task: GENERATE_TASK,
+            messages: groundedMessages(subjectOf(profile, paths, tags), contextOf(view, profile, sources), fields),
+            maxTokens: 4000,
+            temperature: 0.6,
+            schema: { name: schema.name, schema: schema.schema },
+            background,
+        });
+        if (!result.ok) return { error: result.error ?? 'failed' };
+        const candidate = pickCandidate(parseCandidates(result.data ?? parseJson(result.text)), app.rng);
+        return candidate ? { candidate } : { error: 'no-candidates' };
     }
 
     /** Asks the model for three candidates and picks one; a fill the dice alone can answer needs no model. */
@@ -617,15 +682,44 @@ function startGenerator({ app, settings, log, own }: ModuleContext<GeneratorSett
                 }
             }
             const hinted = tagFields ? applyTagFields(profile, tagFields).profile : profile;
-            const cast = view.present
-                .filter((other) => other !== id)
-                .map((other) => view.byId.get(other))
-                .filter(isProfile)
-                .map(castMember);
-            const role = hinted.role ?? detectRole([hinted.name]);
-            const sampled = sampleParams(role, view.state.worldTone, cast, app.rng, levers().diversity);
-            const params = paramsFromProfile(hinted, sampled);
-            const answer = await candidateFor(target, view, hinted, params, tags, background);
+            const lod: Lod = target === 'fill' ? profile.lod : target;
+            // A card character the author wrote: filled from the card's text, no dice (docs/model.md §10.1).
+            const sources = extra ? '' : await cardSourcesFor(profile);
+            const grounded = !extra && isAuthored(hinted, sources);
+            let answer: { candidate?: GenCandidate; error?: string };
+            let options: ApplyGeneratedOptions;
+            if (grounded) {
+                const paths = groundedPaths(hinted, lod);
+                answer = await groundedCandidate(view, hinted, paths, tags, sources, background);
+                options = {
+                    lod,
+                    origin: 'generated',
+                    kind: 'fill',
+                    only: paths,
+                    lang: lang(),
+                    ...(tagFields?.coping ? { coping: tagFields.coping } : {}),
+                };
+            } else {
+                const cast = view.present
+                    .filter((other) => other !== id)
+                    .map((other) => view.byId.get(other))
+                    .filter(isProfile)
+                    .map(castMember);
+                const role = hinted.role ?? detectRole([hinted.name]);
+                const sampled = sampleParams(role, view.state.worldTone, cast, app.rng, levers().diversity);
+                const params = paramsFromProfile(hinted, sampled);
+                answer = await candidateFor(target, view, hinted, params, tags, background);
+                options = {
+                    lod,
+                    origin: 'generated',
+                    kind: target,
+                    params,
+                    lang: lang(),
+                    // A fill writes the gaps it asked for and what the dice drew, nothing else the answer holds.
+                    ...(target === 'fill' ? { only: [...missingFields(hinted), ...DICE_DEFAULTED] } : {}),
+                    ...(tagFields?.coping ? { coping: tagFields.coping } : {}),
+                };
+            }
             if (!answer.candidate) {
                 const error = answer.error ?? 'failed';
                 if (background) noteAttempt(view, id, target, !TRANSIENT.has(error));
@@ -633,14 +727,6 @@ function startGenerator({ app, settings, log, own }: ModuleContext<GeneratorSett
                 return fail(error);
             }
             const candidate = answer.candidate;
-            const options: ApplyGeneratedOptions = {
-                lod: target === 'fill' ? profile.lod : target,
-                origin: 'generated',
-                kind: target,
-                params,
-                lang: lang(),
-                ...(tagFields?.coping ? { coping: tagFields.coping } : {}),
-            };
             const out: { before?: CharacterProfile; after?: CharacterProfile; written: string[] } = { written: [] };
             const rewrite = (fresh: CharacterProfile): CharacterProfile => {
                 const hints = tagFields ? applyTagFields(fresh, tagFields) : { profile: fresh, written: [] };
@@ -677,7 +763,15 @@ function startGenerator({ app, settings, log, own }: ModuleContext<GeneratorSett
             const before = out.before;
             const after = out.after;
             if (!saved || !before || !after) return fail('not-saved');
-            if (background) attempts.delete(attemptKey(view, id, target));
+            if (background) {
+                // A fill that left gaps the card has nothing for (no temperament anywhere in it) is not asked again
+                // by itself in this session: the sheet's button still can.
+                if (target === 'fill' && needsFill(after)) {
+                    attempts.set(attemptKey(view, id, target), { commit: commits, count: MAX_ATTEMPTS });
+                } else {
+                    attempts.delete(attemptKey(view, id, target));
+                }
+            }
             if (!out.written.length) return { ok: true, written: [] };
             const ref: ProfileRef = {
                 store: extra ? 'extras' : 'card',

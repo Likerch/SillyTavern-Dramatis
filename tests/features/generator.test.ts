@@ -11,14 +11,24 @@ import { emptyCardProfiles, setMeta } from '../../src/domain/profile-defaults';
 import { ensureCharacterState, initChatState } from '../../src/domain/state-init';
 import { ENGINE_API } from '../../src/features/engine/api';
 import type { EngineApi, EngineView } from '../../src/features/engine/api';
+import { GROUNDED_SYSTEM_PROMPT } from '../../src/domain/generator';
+import type { CardBookEntry } from '../../src/domain/intent-prompt';
 import { JOURNAL_KIND, JOURNAL_TARGET, generatorModule, identityOf, roleSources } from '../../src/features/generator';
 import { GENERATOR_API } from '../../src/features/generator/api';
 import type { GeneratorApi } from '../../src/features/generator/api';
 import { TURN_API } from '../../src/features/turn/api';
 import type { ApiJournalChange, ApiLlmRequest, ApiLlmResult } from '../../src/shared/apis';
-import type { App, ArchiveSheet, DesCharacter, DramatisModule, LlmRouter } from '../../src/shared/contracts';
+import type {
+    App,
+    ArchiveSheet,
+    CardSource,
+    DesCharacter,
+    DramatisModule,
+    LlmRouter,
+} from '../../src/shared/contracts';
 import { seeded } from '../domain/appetites-fixtures';
 import { profile as makeProfile } from '../domain/cast-fixtures';
+import { GUARDIAN_CARD } from '../domain/guardian-fixtures';
 import { fakeMaestro, memoryLogger, staticBridge } from '../helpers/fakes';
 
 /* ------------------------------------------------------------------ a fake engine */
@@ -148,6 +158,9 @@ interface RigOptions {
     leader?: boolean;
     settings?: Record<string, unknown>;
     chat?: STChatMessage[];
+    /** The open card (grounded fills read it); none by default. */
+    cardSource?: CardSource;
+    cardBook?: CardBookEntry[];
 }
 
 async function rig(options: RigOptions = {}) {
@@ -234,9 +247,9 @@ async function rig(options: RigOptions = {}) {
             lore: {
                 archives: async (names: string[]) =>
                     archives.filter((sheet) => names.some((name) => name.toLowerCase() === sheet.name.toLowerCase())),
-                cardBook: async () => [],
+                cardBook: async () => options.cardBook ?? [],
             },
-            card: { current: () => null, greetingIndex: () => 0 },
+            card: { current: () => options.cardSource ?? null, greetingIndex: () => 0 },
         },
         maestro: bridge,
         llm,
@@ -527,6 +540,85 @@ describe('generator module', () => {
         expect(outcome.written).not.toContain('core.want');
         expect(r.engine.card.characters.find((item) => item.id === 'ilva')!.core.want).toBe('keep the inn');
         expect(r.styleUp).not.toHaveBeenCalled();
+    });
+
+    it('fills a card character from the card itself — no dice — and keeps the dice for the others', async () => {
+        let mirelle = makeProfile('mirelle-varrow', 'Mirelle Varrow', { lod: 'portrait', role: 'adoptive mother' });
+        mirelle = setMeta(
+            { ...mirelle, core: { ...mirelle.core, concept: 'An ancient sorceress raising the child she adopted' } },
+            'core.concept',
+            { origin: 'inferred' },
+        );
+        const fenn = makeProfile('fenn', 'Фенн', { lod: 'draft', role: 'peasant' });
+        const fromCard = {
+            candidates: [
+                {
+                    values: ['benevolence', 'security', 'power'],
+                    sacrifice: 'universalism',
+                    temperament: { emotionality: 2, agreeableness: -1 },
+                    drivesHigh: ['family', 'power'],
+                    drivesLow: ['status'],
+                    tactics: ['intimidation'],
+                    proactivity: 6,
+                    moodOctant: 'relaxed',
+                    moodLabel: 'calm and motherly',
+                    want: 'Kai safe and grown',
+                    signatures: ['if Kai is threatened → turns merciless'],
+                    keys: ['Kai learning what she did'],
+                    concept: 'A cult leader',
+                    appetites: [
+                        {
+                            kind: 'thrill',
+                            label: 'teaching caution',
+                            baseline: 3,
+                            target: 'thing',
+                            targetClass: '',
+                            triggers: [],
+                            excuse: '',
+                        },
+                    ],
+                    summary: 'From the card',
+                    fit: 5,
+                    typicality: 2,
+                },
+            ],
+        };
+        const r = await rig({
+            card: (c) => ({ ...c, characters: [mirelle, fenn], intent: { at: 1, sourcesHash: 'h' } }),
+            cast: [
+                { name: 'Mirelle Varrow', present: true, details: {} },
+                { name: 'Фенн', present: true, details: {} },
+            ],
+            cardSource: GUARDIAN_CARD,
+            cardBook: [{ uid: 1, keys: ['Mirelle'], comment: 'The witch', content: 'Mirelle keeps a grimoire.' }],
+            // No fills by themselves: the sheet's button asks for them below.
+            settings: { mode: 'economy' },
+        });
+        expect(r.maestro.requests).toHaveLength(0);
+        r.maestro.reply = (request) =>
+            request.messages[0]!.content === GROUNDED_SYSTEM_PROMPT
+                ? { ok: true, data: fromCard }
+                : { ok: true, data: candidates() };
+        await r.api.fillGaps('mirelle-varrow');
+        await r.api.fillGaps('fenn');
+        const asked = r.maestro.requests.filter((request) => request.messages[0]!.content === GROUNDED_SYSTEM_PROMPT);
+        expect(asked).toHaveLength(1);
+        const text = asked[0]!.messages[1]!.content;
+        expect(text).toContain('<sources>\n[Card description]\nMirelle Varrow is an elven sorceress');
+        expect(text).toContain('[Lorebook · The witch]\nMirelle keeps a grimoire.');
+        expect(text).not.toContain('<params>');
+        const after = r.engine.card.characters.find((item) => item.id === 'mirelle-varrow')!;
+        expect(after.core.drives).toEqual({ high: ['family', 'power'], low: ['status'] });
+        expect(after.core.values.top).toEqual(['benevolence', 'security', 'power']);
+        expect(after.core.baselineMood).toEqual({ octant: 'relaxed', label: 'calm and motherly' });
+        expect(after.core.concept).toBe('An ancient sorceress raising the child she adopted');
+        expect(after.appetites).toEqual([]);
+        // Фенн is nobody the card wrote: the dice still decide his core.
+        const dice = r.maestro.requests.filter((request) => request.messages[0]!.content !== GROUNDED_SYSTEM_PROMPT);
+        expect(dice.some((request) => request.messages[1]!.content.includes('<params>'))).toBe(true);
+        const fennAfter = r.engine.card.characters.find((item) => item.id === 'fenn')!;
+        expect(fennAfter.core.values.top.length).toBeGreaterThan(0);
+        expect(fennAfter.agenda.secrets).toEqual([]);
     });
 
     it('waits with gap fills while a generation runs', async () => {
