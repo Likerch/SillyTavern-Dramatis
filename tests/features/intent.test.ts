@@ -1,10 +1,12 @@
 // @vitest-environment happy-dom
 // The intent module on the whole app with a fake LLM answering the fixture readings (tests/domain/intent-fixtures.ts):
-// the multi-part pipeline, merging, protected user fields, Maestro's journal and undo, the own client, the automatic
-// reading and its re-read offer, error paths, the settings section and /dramatis-read.
+// the multi-part pipeline with the dossier step, merging, protected user fields, a full re-read and the open chat,
+// Maestro's journal and undo, the own client, the automatic reading and its re-read offer, error paths (a cut-off or
+// empty answer, a failed dossier), the settings section and /dramatis-read.
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { applyIntent } from '../../src/domain/intent-apply';
-import { INTENT_TASK, intentSources } from '../../src/domain/intent-prompt';
+import { DOSSIER_SYSTEM_PROMPT, INTENT_TASK, intentSources } from '../../src/domain/intent-prompt';
+import { PLAYER_ID } from '../../src/domain/model';
 import type { CardProfiles } from '../../src/domain/model';
 import { emptyCardProfiles, emptyProfile, setMeta } from '../../src/domain/profile-defaults';
 import { INTENT_API } from '../../src/features/intent/api';
@@ -52,11 +54,25 @@ function tavernParts(): [Dict, Dict] {
     return [{ ...full, characters: full.characters.filter((item) => item !== sota) }, answer({ characters: [sota] })];
 }
 
-/** The LLM answers these results in order (the last one repeats). */
-function answering(maestro: FakeMaestro, replies: (ApiLlmResult | Promise<ApiLlmResult>)[]): void {
+/** The notes the fake model writes in the first step of the card's own part (a plain-text request, no schema). */
+const DOSSIER = '## Ильва\n3. PLAYER: an imperial to her — «Она ненавидит имперцев» [S1].';
+const DOSSIER_REPLY: ApiLlmResult = { ok: true, data: DOSSIER, text: DOSSIER };
+
+/**
+ * The LLM answers the structured requests with these results in order (the last one repeats); the dossier step (no
+ * schema) gets `dossier`.
+ */
+function answering(
+    maestro: FakeMaestro,
+    replies: (ApiLlmResult | Promise<ApiLlmResult>)[],
+    dossier: ApiLlmResult = DOSSIER_REPLY,
+): void {
     let call = 0;
-    maestro.reply = () => replies[Math.min(call++, replies.length - 1)]!;
+    maestro.reply = (request) => (request.schema ? replies[Math.min(call++, replies.length - 1)]! : dossier);
 }
+
+/** The structured requests (the parts' answers), without the dossier step. */
+const structured = (maestro: FakeMaestro) => maestro.requests.filter((request) => !!request.schema);
 
 const ok = (data: unknown): ApiLlmResult => ({ ok: true, data });
 
@@ -97,14 +113,19 @@ interface Setup {
 }
 
 async function setup(
-    options: HarnessOptions & { autoRead?: boolean; withMaestro?: boolean; replies?: ApiLlmResult[] } = {},
+    options: HarnessOptions & {
+        autoRead?: boolean;
+        withMaestro?: boolean;
+        replies?: ApiLlmResult[];
+        dossier?: ApiLlmResult;
+    } = {},
 ): Promise<Setup> {
     const maestro = options.withMaestro === false ? null : (options.maestro ?? fakeMaestro());
     const records: Setup['records'] = [];
     const undos: Setup['undos'] = new Map();
     const tasks: string[] = [];
     if (maestro) {
-        answering(maestro, options.replies ?? tavernParts().map(ok));
+        answering(maestro, options.replies ?? tavernParts().map(ok), options.dossier);
         maestro.api.journal.record = async (action) => {
             records.push(action);
             return `j${records.length}`;
@@ -157,13 +178,26 @@ describe('intent — reading the card', () => {
             /^Замысел прочитан: 3 персонажа, 1 группа\. Замечаний: \d+ — подробно в листе замысла\.$/,
         );
 
-        const requests = maestro!.requests;
+        // The card's own part in two steps (the dossier, then the answer), the second greeting in one.
+        expect(maestro!.requests).toHaveLength(3);
+        const [dossier] = maestro!.requests;
+        expect(dossier).toMatchObject({ task: INTENT_TASK, background: false, maxTokens: 4000, temperature: 0.3 });
+        expect(dossier!.schema).toBeUndefined();
+        expect(dossier!.messages[0]!.content).toBe(DOSSIER_SYSTEM_PROMPT);
+        expect(dossier!.messages[1]!.content).toContain('[S1] Card description');
+        const requests = structured(maestro!);
         expect(requests).toHaveLength(2);
         for (const request of requests) {
-            expect(request).toMatchObject({ task: INTENT_TASK, background: false, maxTokens: 6000, temperature: 0.2 });
+            expect(request).toMatchObject({ task: INTENT_TASK, background: false, maxTokens: 12000, temperature: 0.2 });
             expect(request.schema?.name).toBe('dramatis_intent');
         }
+        const first = requests[0]!.messages[1]!.content;
+        expect(first).toContain(`<dossier>\n${DOSSIER}\n</dossier>`);
+        expect(first).toContain('Fidelity: strict');
+        // The test's interface is Russian and Maestro does not tell the story's language: Russian names are asked for.
+        expect(first).toContain('The story is told in Russian');
         const second = requests[1]!.messages[1]!.content;
+        expect(second).not.toContain('<dossier>');
         expect(second).toContain('part 2 of 2');
         expect(second).toMatch(/<known>\nCharacters: Ильва, Брам/);
         expect(second).toContain('greeting 1');
@@ -229,10 +263,10 @@ describe('intent — reading the card', () => {
         await intent.read({ force: true });
         const result = await intent.read();
         expect(result).toMatchObject({ ok: true, skipped: true, characters: 0 });
-        expect(maestro!.requests).toHaveLength(2);
+        expect(maestro!.requests).toHaveLength(3);
         expect(profilesOf(h.mock)?.intent).toBeDefined();
         await intent.read({ force: true });
-        expect(maestro!.requests).toHaveLength(4);
+        expect(maestro!.requests).toHaveLength(6);
     });
 
     it('adds the CK archives of the names the card itself found to the later parts', async () => {
@@ -247,8 +281,8 @@ describe('intent — reading the card', () => {
         await intent.read({ force: true });
         expect(asked[0]).toEqual([TAVERN_CARD.name]);
         expect(asked[1]).toEqual(expect.arrayContaining(['Ильва', 'Брам', 'возчики']));
-        expect(maestro!.requests[0]!.messages[1]!.content).not.toContain('Character archive');
-        expect(maestro!.requests[1]!.messages[1]!.content).toContain('Character archive (BunnyMo tags) · Брам');
+        expect(structured(maestro!)[0]!.messages[1]!.content).not.toContain('Character archive');
+        expect(structured(maestro!)[1]!.messages[1]!.content).toContain('Character archive (BunnyMo tags) · Брам');
     });
 
     it('names archives by the card, its lorebook and the known profiles', () => {
@@ -260,16 +294,156 @@ describe('intent — reading the card', () => {
     });
 });
 
+describe('intent — a full re-read and the open chat', () => {
+    /** The tavern read once, then «filled» by the old dice: an invented concept, a secret, a craving twice. */
+    function diceFilled(): CardProfiles {
+        const first = applyIntent(emptyCardProfiles('tavern.png'), tavernAnswer(), {
+            fidelity: 'strict',
+            now: 1,
+            sourcesHash: 'old',
+            sources: intentSources(TAVERN_CARD),
+            personaName: 'Курьер',
+            cardName: TAVERN_CARD.name,
+        }).profiles;
+        const ilva = first.characters.find((item) => item.id === 'ilva')!;
+        let filled = {
+            ...ilva,
+            core: { ...ilva.core, concept: 'A cult leader who burned her temple' },
+            agenda: { ...ilva.agenda, secrets: ['carries the ashes of a god-child'] },
+            appetites: [
+                {
+                    id: 'other',
+                    kind: 'other' as const,
+                    label: 'teaching caution',
+                    sources: ['individual' as const],
+                    target: { mode: 'thing' as const },
+                    baseline: 3 as const,
+                    liking: 1 as const,
+                    triggers: [],
+                    satisfiers: [],
+                    drift: 'opportunity' as const,
+                    tolerance: 0 as const,
+                    dependence: 0 as const,
+                    sensitization: 0 as const,
+                    endorsement: 'proud' as const,
+                    vow: 'none' as const,
+                    visibility: 'open' as const,
+                    style: 'shadow' as const,
+                    affectionOnset: 'possible' as const,
+                },
+            ],
+        };
+        for (const path of ['core.concept', 'agenda.secrets', 'appetites.other']) {
+            filled = setMeta(filled, path, { origin: 'generated' });
+        }
+        return { ...first, characters: first.characters.map((item) => (item.id === 'ilva' ? filled : item)) };
+    }
+
+    it('replaces what the generator invented with the reading and carries it into the chat', async () => {
+        const { h, intent } = await setup({ profiles: diceFilled() });
+        const live = h.engine.view()!.state.characters.ilva;
+        expect(live?.agenda.secrets).toEqual(['carries the ashes of a god-child']);
+        const result = await intent.read({ force: true });
+        expect(result.ok).toBe(true);
+        const ilva = profilesOf(h.mock)!.characters.find((item) => item.id === 'ilva')!;
+        expect(ilva.core.concept).toBe("A rebel's widow who keeps the inn in an occupied town");
+        expect(ilva.meta['core.concept']).toMatchObject({ origin: 'author' });
+        expect(ilva.agenda.secrets).toEqual([]);
+        expect(ilva.appetites).toEqual([]);
+        expect(result.diff).toContainEqual(
+            expect.objectContaining({ character: 'ilva', path: 'agenda.secrets', status: 'updated' }),
+        );
+        const now = h.engine.view()!.state.characters.ilva!;
+        expect(now.agenda.secrets).toEqual([]);
+        expect(now.appetites).toEqual({});
+        expect(now.ties[PLAYER_ID]!.stance).toBe(-2);
+    });
+
+    it('a reading by itself (not forced) leaves generated values the reading does not give', async () => {
+        const stored = { ...diceFilled(), intent: undefined };
+        const { h, intent } = await setup({ profiles: stored });
+        await intent.read();
+        const ilva = profilesOf(h.mock)!.characters.find((item) => item.id === 'ilva')!;
+        expect(ilva.agenda.secrets).toEqual(['carries the ashes of a god-child']);
+        expect(ilva.core.concept).toBe("A rebel's widow who keeps the inn in an occupied town");
+    });
+});
+
+describe('intent — answers that go wrong', () => {
+    it('reads an answer cut off by the token limit as far as it goes, and says so', async () => {
+        const whole = JSON.stringify(tavernAnswer());
+        const cut = whole.slice(0, whole.indexOf('"Брам"') + 40);
+        const { h, intent } = await setup({
+            card: tavernCharacter({ short: true }),
+            replies: [{ ok: false, error: 'parse', text: cut }],
+        });
+        const result = await intent.read({ force: true });
+        expect(result.ok).toBe(true);
+        expect(result.warnings).toContain('часть 1 из 1: ответ оборвался, прочитано то, что пришло');
+        expect(profilesOf(h.mock)!.characters.map((item) => item.name)).toEqual(['Ильва', 'Сота', 'Брам']);
+    });
+
+    it('reads a whole answer the strict check refused for a missing field, without a note', async () => {
+        const reading = tavernAnswer() as { characters: Dict[] };
+        for (const item of reading.characters) delete item.russian;
+        const { intent } = await setup({
+            card: tavernCharacter({ short: true }),
+            replies: [{ ok: false, error: 'parse', text: JSON.stringify(reading) }],
+        });
+        const result = await intent.read({ force: true });
+        expect(result).toMatchObject({ ok: true, characters: 4 });
+        expect(result.warnings.some((line) => line.includes('оборвался'))).toBe(false);
+    });
+
+    it('says what an empty answer usually means', async () => {
+        const { intent } = await setup({ replies: [{ ok: false, error: 'parse', text: '' }] });
+        const result = await intent.read({ force: true });
+        expect(result.ok).toBe(false);
+        expect(result.error).toMatch(/^модель ничего не вернула\. Рассуждающая модель/);
+    });
+
+    it('reads in one step when the dossier fails, and notes it', async () => {
+        const { maestro, intent } = await setup({
+            card: tavernCharacter({ short: true }),
+            replies: [ok(tavernAnswer())],
+            dossier: { ok: false, error: 'transport: HTTP 500' },
+        });
+        const result = await intent.read({ force: true });
+        expect(result).toMatchObject({ ok: true, characters: 4 });
+        expect(result.warnings).toContain(
+            'первый шаг чтения (досье) не удался: Не удалось связаться с моделью: HTTP 500; прочитано в один шаг',
+        );
+        expect(structured(maestro!)[0]!.messages[1]!.content).not.toContain('<dossier>');
+    });
+
+    it('asks for the Russian forms of the names only when the story is Russian (Maestro tells)', async () => {
+        const maestro = fakeMaestro();
+        maestro.api.storyLanguage = () => 'en';
+        const { intent } = await setup({
+            maestro,
+            card: tavernCharacter({ short: true }),
+            replies: [ok(tavernAnswer())],
+        });
+        await intent.read({ force: true });
+        expect(structured(maestro)[0]!.messages[1]!.content).toContain('leave "russian" empty');
+        expect(maestro.requests[0]!.messages[1]!.content).not.toContain('Russian form');
+        maestro.api.storyLanguage = () => 'ru';
+        await intent.read({ force: true });
+        expect(structured(maestro)[1]!.messages[1]!.content).toContain('The story is told in Russian');
+    });
+});
+
 describe('intent — a short card', () => {
-    it('reads it in one request', async () => {
+    it('reads it in one part: the dossier, then the answer', async () => {
         const { h, maestro, intent, notices } = await setup({
             card: tavernCharacter({ short: true }),
             replies: [ok(tavernAnswer())],
         });
         const result = await intent.read({ force: true });
         expect(result).toMatchObject({ ok: true, characters: 4 });
-        expect(maestro!.requests).toHaveLength(1);
-        expect(maestro!.requests[0]!.messages[1]!.content).toContain('greeting 1');
+        expect(maestro!.requests).toHaveLength(2);
+        expect(structured(maestro!)).toHaveLength(1);
+        expect(structured(maestro!)[0]!.messages[1]!.content).toContain('greeting 1');
         expect(notices[0]!.text).toBe('Читаю замысел…');
         expect(profilesOf(h.mock)!.characters).toHaveLength(4);
     });
@@ -383,14 +557,15 @@ describe('intent — Maestro and the own client', () => {
                 };
                 mock.sendRequest = async (_profile, prompt) => {
                     sent.push(prompt);
-                    const content = JSON.stringify(replies[Math.min(call++, 1)]);
+                    const dossier = (prompt as { content: string }[])[0]!.content === DOSSIER_SYSTEM_PROMPT;
+                    const content = dossier ? DOSSIER : JSON.stringify(replies[Math.min(call++, 1)]);
                     return { choices: [{ message: { role: 'assistant', content }, finish_reason: 'stop' }] };
                 };
             },
         });
         const result = await intent.read({ force: true });
         expect(result).toMatchObject({ ok: true, characters: 4 });
-        expect(sent).toHaveLength(2);
+        expect(sent).toHaveLength(3);
         expect(profilesOf(h.mock)!.characters).toHaveLength(4);
     });
 });
@@ -398,11 +573,11 @@ describe('intent — Maestro and the own client', () => {
 describe('intent — reading by itself', () => {
     it('reads a new chat’s card once, with nothing to do on the next chat of that card', async () => {
         const { h, maestro } = await setup({ autoRead: true });
-        await until(() => !!profilesOf(h.mock)?.intent && maestro!.requests.length === 2);
+        await until(() => !!profilesOf(h.mock)?.intent && maestro!.requests.length === 3);
         expect(profilesOf(h.mock)!.characters).toHaveLength(4);
         await switchChat(h.mock, 'chat-2', { maestro: maestro! });
         await flush();
-        expect(maestro!.requests).toHaveLength(2);
+        expect(maestro!.requests).toHaveLength(3);
     });
 
     it('waits for Maestro to make this tab the chat’s leader, then reads', async () => {
@@ -421,14 +596,17 @@ describe('intent — reading by itself', () => {
         expect(maestro.requests).toHaveLength(0);
         leader = true;
         for (const listener of [...listeners]) listener(true);
-        await until(() => !!profilesOf(h.mock)?.intent && maestro.requests.length === 2);
+        await until(() => !!profilesOf(h.mock)?.intent && maestro.requests.length === 3);
         expect(profilesOf(h.mock)!.characters).toHaveLength(4);
     });
 
     it('is background work with Maestro (leader tab, daily cap): a «not now» answer stays quiet', async () => {
-        const { h, maestro, notices } = await setup({ autoRead: true, replies: [{ ok: false, error: 'cap' }] });
+        const capped: ApiLlmResult = { ok: false, error: 'cap' };
+        const { h, maestro, notices } = await setup({ autoRead: true, replies: [capped], dossier: capped });
         await until(() => maestro!.requests.length === 1);
         await flush();
+        // The first step already hears «not now»: the reading stops there, quietly.
+        expect(maestro!.requests).toHaveLength(1);
         expect(maestro!.requests[0]).toMatchObject({ task: INTENT_TASK, background: true });
         expect(notices.filter((notice) => notice.level === 'error')).toEqual([]);
         expect(profilesOf(h.mock)).toBeNull();
@@ -441,11 +619,11 @@ describe('intent — reading by itself', () => {
 
     it('never runs twice for a card in one session, even after a failure', async () => {
         const { h, maestro } = await setup({ autoRead: true, replies: [{ ok: false, error: 'breaker' }] });
-        await until(() => maestro!.requests.length === 1);
+        await until(() => maestro!.requests.length === 2);
         await flush();
         await switchChat(h.mock, 'chat-2', { maestro: maestro! });
         await flush();
-        expect(maestro!.requests).toHaveLength(1);
+        expect(maestro!.requests).toHaveLength(2);
     });
 
     it.each([
@@ -488,7 +666,7 @@ describe('intent — reading by itself', () => {
         await flush();
         expect(notices.filter((item) => item.action === 'Перечитать')).toHaveLength(1);
         offer.run!();
-        await until(() => maestro!.requests.length === 2 && profilesOf(h.mock)!.characters.length === 4);
+        await until(() => maestro!.requests.length === 3 && profilesOf(h.mock)!.characters.length === 4);
         expect(profilesOf(h.mock)!.intent?.sourcesHash).not.toBe('old');
     });
 
@@ -501,7 +679,7 @@ describe('intent — reading by itself', () => {
         await switchChat(h.mock, 'chat-2', { maestro });
         await flush();
         expect(notices.length).toBe(before);
-        expect(maestro.requests).toHaveLength(2);
+        expect(maestro.requests).toHaveLength(3);
     });
 });
 
@@ -571,7 +749,7 @@ describe('intent — DRAMATIS_API', () => {
         release(ok(tavernParts()[0]));
         const [result, outcome] = await Promise.all([first, waiting]);
         expect(outcome).toMatchObject({ ok: true, characters: 4, message: result.message });
-        expect(maestro.requests).toHaveLength(2);
+        expect(maestro.requests).toHaveLength(3);
         expect(notices.some((item) => item.text === 'Замысел уже читается.')).toBe(false);
         expect(api().intentState!()?.running).toBe(false);
     });

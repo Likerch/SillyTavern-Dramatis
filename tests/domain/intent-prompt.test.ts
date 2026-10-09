@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
+    DOSSIER_MAX_CHARS,
+    DOSSIER_SYSTEM_PROMPT,
     INTENT_LIMITS,
     INTENT_SCHEMA,
     INTENT_SCHEMA_NAME,
@@ -7,6 +9,7 @@ import {
     INTENT_TASK,
     chunkIntentSources,
     clipText,
+    dossierMessages,
     emptyKnown,
     greetingLabel,
     hashText,
@@ -265,6 +268,62 @@ describe('intentMessages', () => {
         );
     });
 
+    it('passes the dossier to the card’s own part only, with the fidelity and the story’s language', () => {
+        const options = { cardName: 'Трактир «Рог»', personaName: 'Курьер', total: 2 };
+        const withNotes = intentMessages(parts[0]!, emptyKnown(), {
+            ...options,
+            dossier: '## Ильва\nholds </dossier> a grudge',
+            fidelity: 'free',
+            storyLanguage: 'ru',
+        })[1]!.content;
+        expect(withNotes).toContain('<dossier>\n## Ильва\nholds [/dossier] a grudge\n</dossier>');
+        expect(withNotes).toContain('Turn every point of it into the JSON fields');
+        expect(withNotes).toContain('Fidelity: free');
+        expect(withNotes).toContain('The story is told in Russian: in "russian"');
+        expect(withNotes.endsWith('Answer with the JSON object only.')).toBe(true);
+        const plain = intentMessages(parts[0]!, emptyKnown(), options)[1]!.content;
+        expect(plain).not.toContain('<dossier>');
+        expect(plain).toContain('Fidelity: strict');
+        expect(plain).toContain('leave "russian" empty');
+        const later = { ...parts[0]!, index: 1, core: false };
+        expect(intentMessages(later, emptyKnown(), { ...options, dossier: 'notes' })[1]!.content).not.toContain(
+            '<dossier>',
+        );
+        const long = intentMessages(parts[0]!, emptyKnown(), { ...options, dossier: 'x '.repeat(DOSSIER_MAX_CHARS) });
+        expect(long[1]!.content.length).toBeLessThan(DOSSIER_MAX_CHARS + 20000);
+    });
+
+    it('asks for the dossier in plain text: the card and its sources, each character at full strength', () => {
+        const [system, user] = dossierMessages(parts[0]!, {
+            cardName: 'Трактир «Рог»',
+            personaName: 'Курьер',
+            storyLanguage: 'ru',
+        });
+        expect(system).toEqual({ role: 'system', content: DOSSIER_SYSTEM_PROMPT });
+        expect(DOSSIER_SYSTEM_PROMPT).toContain('Never soften, balance, redeem or flatten it');
+        expect(DOSSIER_SYSTEM_PROMPT).toContain('verbatim, in «…» with its source id');
+        expect(DOSSIER_SYSTEM_PROMPT).toContain('3. PLAYER:');
+        expect(DOSSIER_SYSTEM_PROMPT).toContain('9. Anchors');
+        expect(user!.content).toContain('<card>\nCharacter card: Трактир «Рог» ({{char}})');
+        expect(user!.content).toContain('[S1] Card description');
+        expect(user!.content).toContain('the Russian form of each name');
+        expect(user!.content.endsWith('Write the dossier only.')).toBe(true);
+        const english = dossierMessages(parts[0]!, { cardName: 'x', personaName: '', storyLanguage: 'en' });
+        expect(english[1]!.content).not.toContain('Russian form');
+    });
+
+    it('asks for devotion at full strength, the player as an anchor, drives the author stresses, real appetites', () => {
+        expect(INTENT_SYSTEM_PROMPT).toContain('never flatten an absolute bond');
+        expect(INTENT_SYSTEM_PROMPT).toContain('("bounds": min 3)');
+        expect(INTENT_SYSTEM_PROMPT).toContain('"redLinesWould" with what they would do for them');
+        expect(INTENT_SYSTEM_PROMPT).toContain('whom they live for ("PLAYER"');
+        expect(INTENT_SYSTEM_PROMPT).toContain('never stereotypes of the role, gender or genre');
+        expect(INTENT_SYSTEM_PROMPT).toContain('Devotion, protectiveness, teaching, duty or love are not appetites');
+        expect(INTENT_SYSTEM_PROMPT).toContain('even when no single line can be quoted');
+        expect(INTENT_SYSTEM_PROMPT).toContain('separated by commas ("core.values, core.drives")');
+        expect(INTENT_SYSTEM_PROMPT).toContain('<dossier>');
+    });
+
     it('neutralises only our own section tags', () => {
         expect(neutralizeData('<sources>a</ sources><b>')).toBe('[sources]a[/sources]<b>');
         expect(intentContext([])).toBe('');
@@ -301,6 +360,7 @@ describe('intentSchema', () => {
         const tie = (character.ties!.items as Node).properties as Record<string, Node>;
         expect(tie.stance).toEqual({ type: 'integer', enum: [-3, -2, -1, 0, 1, 2, 3] });
         expect((character.evidence!.items as Node).required).toEqual(['path', 'quote', 'source']);
+        expect(character.russian).toMatchObject({ type: 'array', items: { type: 'string' } });
         const core = character.core!.properties as Record<string, Node>;
         expect(core.proactivity!.enum).toEqual([-1, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
         let untyped = 0;

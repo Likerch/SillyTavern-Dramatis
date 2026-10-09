@@ -6,6 +6,7 @@ import {
     looksLikeRefusal,
     matchesSchema,
     parseJsonText,
+    repairJsonText,
     stripThinking,
 } from '../../src/core/llm';
 import { Settings } from '../../src/core/settings';
@@ -278,5 +279,25 @@ describe('reply helpers', () => {
     it('does not take quoted story text for a refusal', () => {
         expect(looksLikeRefusal('"I can\'t help it," she said.')).toBe(false);
         expect(looksLikeRefusal('Извините, но я не могу это написать.')).toBe(true);
+    });
+});
+
+describe('repairJsonText', () => {
+    it('reads an answer cut off by the token limit as far as it goes', () => {
+        const cut = '{"characters": [{"name": "Mirelle", "core": {"concept": "An ancient sorc';
+        expect(repairJsonText(cut)).toEqual({
+            characters: [{ name: 'Mirelle', core: { concept: 'An ancient sorc' } }],
+        });
+        // A key without its value is dropped back to the last comma.
+        expect(repairJsonText('{"a": 1, "b": {"c": [1, 2], "d":')).toEqual({ a: 1, b: { c: [1, 2] } });
+        expect(repairJsonText('<think>…</think>```json\n{"a": [true, fal')).toEqual({ a: [true] });
+        expect(repairJsonText('{"a": "x\\')).toEqual({ a: 'x' });
+    });
+
+    it('takes a whole answer as it is and gives up on text without JSON', () => {
+        expect(repairJsonText('{"a": 1}')).toEqual({ a: 1 });
+        expect(repairJsonText('no json here')).toBeUndefined();
+        expect(repairJsonText('{"a": 1]}')).toBeUndefined();
+        expect(repairJsonText('')).toBeUndefined();
     });
 });

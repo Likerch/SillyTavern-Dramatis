@@ -384,8 +384,9 @@ function anchorsOf(w: Work, id: string): string[] {
     return profile.core.anchors.map((anchor) => w.resolve(anchor) ?? anchor);
 }
 
+/** An anchor is near: someone present, or the player (an anchor of «the one she lives for» is in every scene). */
 function anchorPresent(w: Work, id: string): boolean {
-    return anchorsOf(w, id).some((anchor) => w.presentSet.has(anchor));
+    return anchorsOf(w, id).some((anchor) => anchor === PLAYER_ID || w.presentSet.has(anchor));
 }
 
 function playerStance(w: Work, id: string): Stance {

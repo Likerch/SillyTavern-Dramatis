@@ -10,6 +10,7 @@ import { applyRemorse, corruptionApplies, coarseProfile, recover } from './corru
 import type { CorruptionLever } from './corruption';
 import { promote } from './intentions';
 import type { Lang } from './ladders';
+import { PLAYER_ID } from './model';
 import type { AppetiteState, CharacterProfile, ChatState, StateEvent } from './model';
 import { endScene } from './scene';
 import type { SceneBreak } from './scene';
@@ -147,7 +148,7 @@ export function runScenePass(input: ScenePassInput, ctx: ScenePassContext): Scen
         if (!chapterEnd) continue;
         // Rest restores self-control (§5.7 «Сдержки») and eases stress, more with an anchor near.
         character.selfControl = FULL_SELF_CONTROL;
-        const anchorPresent = profile.core.anchors.some((anchor) => present.has(anchor));
+        const anchorPresent = profile.core.anchors.some((anchor) => anchor === PLAYER_ID || present.has(anchor));
         character.stress = relieveStress(character.stress, anchorPresent);
         const tracked = corruptionApplies(ctx.levers.corruption, coarseProfile(profile.appetites));
         if (!tracked && character.corruption.stains <= 0) continue;

@@ -352,6 +352,61 @@ export function parseJsonText(text: string): unknown {
     return undefined;
 }
 
+/** Closes what a cut-off JSON text left open (a string, objects, arrays); undefined when the brackets disagree. */
+function closeJson(body: string): string | undefined {
+    const stack: string[] = [];
+    let inString = false;
+    let escaped = false;
+    for (const char of body) {
+        if (inString) {
+            if (escaped) escaped = false;
+            else if (char === '\\') escaped = true;
+            else if (char === '"') inString = false;
+            continue;
+        }
+        if (char === '"') inString = true;
+        else if (char === '{') stack.push('}');
+        else if (char === '[') stack.push(']');
+        else if (char === '}' || char === ']') {
+            if (stack.pop() !== char) return undefined;
+        }
+    }
+    let out = body;
+    if (inString) out = `${escaped ? out.slice(0, -1) : out}"`;
+    out = out.replace(/[\s,:]+$/, '');
+    return out + stack.reverse().join('');
+}
+
+/**
+ * A JSON value from an answer that was cut off (the token limit): the open string and brackets are closed, and what
+ * cannot be completed (a key without its value) is cut back to the last comma. Undefined when nothing usable is left.
+ */
+export function repairJsonText(text: string): unknown {
+    const cleaned = stripThinking(text)
+        .replace(/```[a-zA-Z]*\s*/g, '')
+        .replace(/```/g, '');
+    const start = cleaned.search(/[{[]/);
+    if (start < 0) return undefined;
+    // The value the answer opens with, whole: not an inner array of a cut-off object.
+    const whole = parseJsonText(cleaned.slice(start));
+    if (whole !== undefined && Array.isArray(whole) === (cleaned[start] === '[')) return whole;
+    let body = cleaned.slice(start).trimEnd();
+    for (let attempt = 0; attempt < 200 && body; attempt++) {
+        const closed = closeJson(body);
+        if (closed !== undefined) {
+            try {
+                return JSON.parse(closed) as unknown;
+            } catch {
+                // cut further back
+            }
+        }
+        const cut = body.lastIndexOf(',');
+        if (cut <= 0) break;
+        body = body.slice(0, cut);
+    }
+    return undefined;
+}
+
 function outermost(text: string, open: string, close: string): string | undefined {
     const start = text.indexOf(open);
     const end = text.lastIndexOf(close);

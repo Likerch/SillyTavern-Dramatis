@@ -119,18 +119,24 @@ export function createEngine(deps: EngineDeps): EngineImpl {
         return found.size === 1 ? [...found][0]! : null;
     }
 
-    /** The one profile Maestro's world model calls the same person, or null. */
+    /**
+     * The one profile Maestro's world model calls the same person, or null. Every name the profile answers to is asked
+     * (the card's «Mirelle Varrow», the reading's «Мирель» for a Russian story, the English name).
+     */
     function maestroMatch(name: string, profiles: readonly CharacterProfile[]): string | null {
         const api = app.maestro.api();
         if (!api || !name?.trim()) return null;
-        const hits = profiles.filter((profile) => {
-            try {
-                return api.names.same(name, profile.name);
-            } catch (error) {
-                log.debug('Maestro names.same failed', error);
-                return false;
-            }
-        });
+        const hits = profiles.filter((profile) =>
+            [profile.name, ...profile.aliases, profile.english ?? ''].some((own) => {
+                if (!own.trim()) return false;
+                try {
+                    return api.names.same(name, own);
+                } catch (error) {
+                    log.debug('Maestro names.same failed', error);
+                    return false;
+                }
+            }),
+        );
         return hits.length === 1 ? hits[0]!.id : null;
     }
 

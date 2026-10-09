@@ -104,6 +104,7 @@ export function characterAnswer(name: string, patch: Dict = {}): Dict {
         name,
         english: '',
         aliases: [],
+        russian: [],
         kind: 'character',
         gender: '',
         minor: false,

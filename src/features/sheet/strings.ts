@@ -115,10 +115,13 @@ export const SHEET_STRINGS: I18nParts = {
         'sheet.page.deleteExtraBody': '{name} leaves this chat for good.',
 
         'sheet.origin.author': 'author',
+        'sheet.origin.inferred': 'from the card, no quote',
         'sheet.origin.generated': '✎ generated',
         'sheet.origin.story': 'story',
         'sheet.origin.user': 'yours',
         'sheet.origin.author.hint': 'From the card or the lorebook, with a quote.',
+        'sheet.origin.inferred.hint':
+            'Read from the card or the lorebook without a quote to show: drawn from the text, nothing invented on top. The generator never rewrites it.',
         'sheet.origin.generated.hint': 'Written by the generator: tentative until you lock it.',
         'sheet.origin.story.hint': 'Changed by the story.',
         'sheet.origin.user.hint': 'Your edit: a new reading of the intent will not touch it.',
@@ -641,10 +644,13 @@ export const SHEET_STRINGS: I18nParts = {
         'sheet.page.deleteExtraBody': '{name} насовсем уйдёт из этого чата.',
 
         'sheet.origin.author': 'автор',
+        'sheet.origin.inferred': 'из карточки, без цитаты',
         'sheet.origin.generated': '✎ дописано',
         'sheet.origin.story': 'сюжет',
         'sheet.origin.user': 'твоё',
         'sheet.origin.author.hint': 'Из карточки или лора, с цитатой.',
+        'sheet.origin.inferred.hint':
+            'Прочитано из карточки или лора, но без дословной цитаты: выведено из текста, ничего сверху не придумано. Генератор это не переписывает.',
         'sheet.origin.generated.hint': 'Дописано генератором: пробное, пока ты не закрепишь.',
         'sheet.origin.story.hint': 'Изменено ходом истории.',
         'sheet.origin.user.hint': 'Твоя правка: новое чтение замысла её не тронет.',

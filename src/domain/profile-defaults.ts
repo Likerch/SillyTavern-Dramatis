@@ -65,7 +65,7 @@ export const LIMITS = {
     text: 600,
 } as const;
 
-const ORIGINS: readonly Origin[] = ['author', 'generated', 'story', 'user'];
+const ORIGINS: readonly Origin[] = ['author', 'inferred', 'generated', 'story', 'user'];
 const LODS: readonly Lod[] = ['sketch', 'draft', 'portrait'];
 const TONES: readonly WorldTone[] = ['hostile', 'indifferent', 'neutral', 'welcoming'];
 const SOURCES: readonly AppetiteSource[] = ['individual', 'species', 'culture', 'situation', 'world'];

@@ -12,8 +12,12 @@
 /** Target id of the player's character in ties, beliefs and appetites. */
 export const PLAYER_ID = '@player';
 
-/** Where a value came from: the card/lore, the generator, the story (turn/scene passes) or the user's own edit. */
-export type Origin = 'author' | 'generated' | 'story' | 'user';
+/**
+ * Where a value came from: the card/lore with a verbatim quote ('author'), the card/lore read without a quote the code
+ * could verify ('inferred': the reading drew it from the sources, nothing was invented on top), the generator, the
+ * story (turn/scene passes) or the user's own edit. Only 'generated' values are open to the generator.
+ */
+export type Origin = 'author' | 'inferred' | 'generated' | 'story' | 'user';
 
 /**
  * Provenance of one field (key = dotted path inside the profile: 'core.values', 'appetites.drink.baseline',

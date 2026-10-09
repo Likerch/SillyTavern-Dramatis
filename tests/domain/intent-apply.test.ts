@@ -99,17 +99,23 @@ describe('applyIntent — the tavern card', () => {
         expect(byId(profiles, 'vozchiki').starts).toEqual([{ greeting: 0, present: true, doing: 'dice' }]);
     });
 
-    it('drops fields without evidence and with invented quotes (strict)', () => {
-        expect(ilva.core.values.top).toEqual([]);
-        expect(ilva.core.want).toBeUndefined();
-        expect(warnings).toContainEqual({ code: 'unevidenced', name: 'Ильва', path: 'core.values' });
-        expect(warnings).toContainEqual({ code: 'unevidenced', name: 'Ильва', path: 'core.want' });
+    it('keeps fields read without a usable quote as inferred, and refuses the invented quote (strict)', () => {
+        // No quote at all: still the reading, marked «from the card, no quote».
+        expect(ilva.core.values.top).toEqual(['benevolence', 'self-direction', 'tradition']);
+        expect(ilva.meta['core.values']).toEqual({ origin: 'inferred' });
+        // An invented quote is not evidence: the field stays, without it.
+        expect(ilva.core.want).toBe('Wants every guest to feel welcome');
+        expect(ilva.meta['core.want']).toEqual({ origin: 'inferred' });
         expect(warnings).toContainEqual({
             code: 'quote-unverified',
             name: 'Ильва',
             path: 'core.want',
             detail: 'Ильва любит всех гостей и рада каждому',
         });
+        // One note per character, not one per field.
+        const notes = warnings.filter((item) => item.code === 'inferred');
+        expect(notes.find((item) => item.name === 'Ильва')).toMatchObject({ code: 'inferred', detail: '2' });
+        expect(new Set(notes.map((item) => item.name)).size).toBe(notes.length);
     });
 
     it('keeps the intended hostility toward the player, with keys and the author ceiling', () => {
@@ -213,7 +219,7 @@ describe('applyIntent — fidelity', () => {
         expect(warnings.some((item) => item.code === 'quote-unverified')).toBe(true);
     });
 
-    it('free keeps unevidenced fields as generated', () => {
+    it('free keeps unevidenced fields as inferred and takes paraphrased quotes silently', () => {
         const { profiles, warnings } = applyIntent(
             emptyCardProfiles('t'),
             tavernAnswer(),
@@ -221,8 +227,9 @@ describe('applyIntent — fidelity', () => {
         );
         const ilva = byId(profiles, 'ilva');
         expect(ilva.core.values.top).toEqual(['benevolence', 'self-direction', 'tradition']);
-        expect(ilva.meta['core.values']).toEqual({ origin: 'generated' });
-        expect(warnings.filter((item) => item.code === 'unevidenced' || item.code === 'quote-unverified')).toEqual([]);
+        expect(ilva.meta['core.values']).toEqual({ origin: 'inferred' });
+        expect(ilva.meta['core.want']).toMatchObject({ origin: 'author' });
+        expect(warnings.filter((item) => item.code === 'quote-unverified')).toEqual([]);
     });
 
     it('takes quotes on trust without the sources, keeping the refs', () => {
@@ -425,7 +432,10 @@ describe('applyIntent — appetite rules (decision В17)', () => {
         expect(open.diff[0]).toMatchObject({ status: 'updated' });
         const unevidenced = JSON.parse(JSON.stringify(raid)) as { rules: Record<string, unknown>[] };
         unevidenced.rules[0]!.evidence = [];
-        expect(applyIntent(emptyCardProfiles('x'), unevidenced, options()).profiles.rules).toEqual([]);
+        const inferred = applyIntent(emptyCardProfiles('x'), unevidenced, options()).profiles;
+        expect(inferred.rules).toHaveLength(1);
+        expect(inferred.rules[0]!.evidence).toBeUndefined();
+        expect(inferred.meta[`rules.${inferred.rules[0]!.id}`]).toEqual({ origin: 'inferred' });
     });
 });
 
@@ -533,9 +543,11 @@ describe('applyIntent — several parts and bad answers', () => {
         expect(toPlayer.reasons.map((item) => item.text)).toEqual(['an imperial', 'the Empire hanged her husband']);
         expect(profiles.worldTone).toBe('hostile');
         expect(profiles.reputation.map((item) => item.label)).toEqual(['a courier']);
-        expect(byId(profiles, 'fenn').agenda.dream).toBeUndefined();
-        expect(warnings).toContainEqual({ code: 'unevidenced', name: 'Фенн', path: 'agenda.dream' });
-        expect(warnings).toContainEqual({ code: 'unevidenced', name: '', path: 'invariants' });
+        expect(byId(profiles, 'fenn').agenda.dream).toBe('sleep');
+        expect(byId(profiles, 'fenn').meta['agenda.dream']).toEqual({ origin: 'inferred' });
+        expect(warnings).toContainEqual({ code: 'inferred', name: 'Фенн', detail: '1' });
+        expect(profiles.invariants).toEqual(['x']);
+        expect(profiles.meta.invariants).toEqual({ origin: 'inferred' });
     });
 
     it('warns about an answer that is not an object and changes nothing but the stamp', () => {
@@ -637,7 +649,8 @@ describe('parseIntentResult', () => {
         const bram = parsed.characters[0]!;
         expect(parsed.characters).toHaveLength(1);
         expect(parsed.worldTone).toEqual({ tone: '', evidence: [] });
-        expect(bram).toMatchObject({ name: 'Bram', english: '', kind: 'character', gender: '' });
+        // A name given only in English is the name, and stays the English name too.
+        expect(bram).toMatchObject({ name: 'Bram', english: 'Bram', kind: 'character', gender: '', russian: [] });
         expect(bram.core.values).toEqual({ top: ['power'], sacrifice: undefined });
         expect((bram.core.temperament as Record<string, number>).honesty).toBe(2);
         expect(bram.core.proactivity).toBe(10);

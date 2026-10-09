@@ -380,6 +380,12 @@
     color: var(--dramatis-accent);
 }
 
+.dramatis-sheet-origin[data-origin='inferred'] {
+    border-style: dotted;
+    border-color: var(--dramatis-accent);
+    color: var(--dramatis-accent);
+}
+
 .dramatis-sheet-origin[data-origin='user'] {
     border-color: var(--dramatis-friendly);
     color: var(--dramatis-friendly);

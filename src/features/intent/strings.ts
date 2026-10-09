@@ -71,7 +71,12 @@ export const INTENT_STRINGS: I18nParts = {
         'intent.path.invariants': 'the invariants',
         'intent.path.rules': 'the group rule',
         'intent.path.player': 'you',
-        'intent.warning.unevidenced': '{who}{path} has no quote and was left out',
+        'intent.warning.inferred':
+            '{who}{n} fields read without a quote — kept, marked «from the card, no quote» in the sheet',
+        'intent.warning.truncated': 'part {n} of {total}: the answer was cut off; what came was read',
+        'intent.warning.dossierFailed': 'the first reading step (the dossier) failed: {error}; read in one step',
+        'intent.error.emptyAnswer':
+            'the model returned nothing. A reasoning model may spend the whole answer on thoughts: turn reasoning off for the «Dramatis: author intent» profile, or pick another model',
         'intent.warning.quote-unverified': '{who}{path}: the quote was not found in the sources',
         'intent.warning.stance-capped': '{who}{path} was lowered: the sources speak of hostility',
         'intent.warning.stranger-stance': '{who}the stance toward the player was taken from how they treat strangers',
@@ -162,7 +167,11 @@ export const INTENT_STRINGS: I18nParts = {
         'intent.path.invariants': 'инварианты',
         'intent.path.rules': 'правило группы',
         'intent.path.player': 'тебе',
-        'intent.warning.unevidenced': '{who}{path} — без цитаты, не взято',
+        'intent.warning.inferred': '{who}полей без цитаты: {n} — взяты, в листе помечены «из карточки, без цитаты»',
+        'intent.warning.truncated': 'часть {n} из {total}: ответ оборвался, прочитано то, что пришло',
+        'intent.warning.dossierFailed': 'первый шаг чтения (досье) не удался: {error}; прочитано в один шаг',
+        'intent.error.emptyAnswer':
+            'модель ничего не вернула. Рассуждающая модель может потратить весь ответ на размышления: выключи рассуждения в профиле «Dramatis: чтение замысла» или выбери другую модель',
         'intent.warning.quote-unverified': '{who}{path}: цитата не нашлась в источниках',
         'intent.warning.stance-capped': '{who}{path} снижено: источники говорят о враждебности',
         'intent.warning.stranger-stance': '{who}позиция к игроку взята из отношения к чужакам',
@@ -209,6 +218,7 @@ export function warningText(i18n: I18n, warning: IntentWarning): string {
         who: name ? `${name}: ` : '',
         name,
         path: pathLabel(i18n, warning.path ?? ''),
+        n: warning.detail ?? '',
     });
 }
 

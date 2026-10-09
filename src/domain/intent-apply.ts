@@ -1,10 +1,15 @@
 // Applies the intent reading (docs/model.md §7) to the card's profiles. The answer is untrusted: every value is
-// validated and clamped, fields without evidence are dropped (except fidelity 'free', where they come in as
-// generated), quotes are checked against the sources, and the code itself refuses softening — when the evidence
-// speaks of hostility, contempt or cruelty toward the player or strangers, the intended stance cannot be above −1, and
-// 'strict' fidelity adds the author's ceiling. The user's edits and locks are never overwritten: a re-read lists them
-// as differences instead. Characters merge with existing profiles by name and alias; groups become kind 'group';
-// minors are flagged and never get, or become the target of, sexual appetites. Pure.
+// validated and clamped and quotes are checked against the sources. A field backed by a verified quote is the
+// author's; a field the reading filled without one is kept as 'inferred' («из карточки, без цитаты») — evidence decides
+// the provenance, never whether the reading is kept (fidelity 'strict' only refuses quotes it cannot find). The code
+// itself refuses softening — when the evidence speaks of hostility, contempt or cruelty toward the player or
+// strangers (not of what they do to third parties for the player's sake), the intended stance cannot be above −1, and
+// 'strict' fidelity adds the author's ceiling; devotion the author wrote about the player gets the author's floor.
+// The user's edits and locks are never overwritten: a re-read lists them as differences instead; a full re-read
+// (`replaceGenerated`) drops what the generator wrote for the characters it reads, so the new reading and a grounded
+// fill take its place. Characters merge with existing profiles by name and alias; their English name, first name,
+// nicknames and Russian forms become names the story can call them by; groups become kind 'group'; minors are flagged
+// and never get, or become the target of, sexual appetites. Pure.
 import {
     APPETITE_KINDS,
     DRIVES,
@@ -38,7 +43,8 @@ import type {
     WorldTone,
 } from './model';
 import { PLAYER_REF, QUOTE_MAX } from './intent-prompt';
-import type { IntentSource } from './intent-prompt';
+import type { Fidelity, IntentSource } from './intent-prompt';
+import { clearGenerated } from './intent-reread';
 import { matchName, normalizeName } from './presence';
 import { SEXUAL_KINDS } from './group-rules';
 import {
@@ -67,7 +73,7 @@ import {
     toStance,
 } from './profile-defaults';
 
-export type Fidelity = 'strict' | 'balanced' | 'free';
+export type { Fidelity };
 
 export interface ApplyOptions {
     fidelity: Fidelity;
@@ -81,6 +87,12 @@ export interface ApplyOptions {
     /** The card's character name ({{char}} in quotes; the main character becomes a portrait). */
     cardName?: string;
     model?: string;
+    /**
+     * A full re-read («Перечитать полностью»): what the generator wrote for the characters this reading covers is
+     * dropped first, so the reading (and later a grounded gap fill) takes its place. The user's edits, locks, the
+     * author's and inferred values, group-rule draws and BunnyMo hints stay.
+     */
+    replaceGenerated?: boolean;
 }
 
 export interface IntentDiff {
@@ -96,7 +108,7 @@ export interface IntentDiff {
 
 export type IntentWarningCode =
     | 'bad-answer'
-    | 'unevidenced'
+    | 'inferred'
     | 'quote-unverified'
     | 'stance-capped'
     | 'stranger-stance'
@@ -165,6 +177,8 @@ export interface ParsedCharacter {
     name: string;
     english: string;
     aliases: string[];
+    /** Russian forms of the name (a Russian story), stored as aliases. */
+    russian: string[];
     kind: 'character' | 'group';
     gender: '' | 'female' | 'male';
     minor: boolean;
@@ -229,18 +243,42 @@ function quoteWords(value: string): string[] {
         .filter((word) => word.length >= 3);
 }
 
+/** The names the card reader put in place of `{{char}}` / `{{user}}` in the sources. */
+export interface MacroNames {
+    char?: string;
+    user?: string;
+}
+
+/** The quote as written and with `{{char}}` / `{{user}}` replaced by the names the sources carry instead. */
+function quoteVariants(quote: string, names: MacroNames): string[] {
+    const out = [quote];
+    if (!/\{\{(char|user)\}\}/i.test(quote)) return out;
+    const replaced = quote
+        .replace(/\{\{char\}\}/gi, names.char?.trim() || '{{char}}')
+        .replace(/\{\{user\}\}/gi, names.user?.trim() || '{{user}}');
+    if (replaced !== quote) out.push(replaced);
+    return out;
+}
+
 /**
  * The quote occurs in the text: as a whole (punctuation and case aside), as fragments around «…», or with at least
- * 85 % of its words (≥ 3 letters, at least 3 of them) found in the text — macros replaced by names and small edits
- * pass, invented quotes do not.
+ * 85 % of its words (≥ 3 letters, at least 3 of them) found in the text — macros written back for the names the
+ * sources carry, small edits pass, invented quotes do not.
  */
-export function quoteFound(quote: string, sourceText: string, aliases: readonly string[] = []): boolean {
+export function quoteFound(
+    quote: string,
+    sourceText: string,
+    aliases: readonly string[] = [],
+    names: MacroNames = {},
+): boolean {
     const haystack = quoteKey(sourceText);
-    const fragments = quote
-        .split(/…|\.\.\./)
-        .map(quoteKey)
-        .filter((fragment) => fragment.length >= 4);
-    if (fragments.length && fragments.every((fragment) => haystack.includes(fragment))) return true;
+    for (const variant of quoteVariants(quote, names)) {
+        const fragments = variant
+            .split(/…|\.\.\./)
+            .map(quoteKey)
+            .filter((fragment) => fragment.length >= 4);
+        if (fragments.length && fragments.every((fragment) => haystack.includes(fragment))) return true;
+    }
     const words = quoteWords(quote);
     if (words.length < 3) return false;
     const pool = new Set([...quoteWords(sourceText), 'char', 'user', ...aliases.flatMap(quoteWords)]);
@@ -252,6 +290,8 @@ interface ParseContext {
     sources?: readonly IntentSource[];
     /** Names a quote may use for {{char}} / {{user}}. */
     aliases: string[];
+    /** What the sources carry instead of the macros (the card reader replaced them). */
+    names: MacroNames;
 }
 
 function readEvidence(value: unknown, context: ParseContext): Evidence[] {
@@ -271,11 +311,13 @@ function readEvidence(value: unknown, context: ParseContext): Evidence[] {
             continue;
         }
         const cited = context.sources.find((source) => source.ref.toUpperCase() === ref);
-        if (cited && quoteFound(quote, cited.text, context.aliases)) {
+        if (cited && quoteFound(quote, cited.text, context.aliases, context.names)) {
             out.push({ path, quote: clipped, source: cited.id, verified: true });
             continue;
         }
-        const elsewhere = context.sources.find((source) => quoteFound(quote, source.text, context.aliases));
+        const elsewhere = context.sources.find((source) =>
+            quoteFound(quote, source.text, context.aliases, context.names),
+        );
         if (elsewhere) out.push({ path, quote: clipped, source: elsewhere.id, verified: true });
         else out.push({ path, quote: clipped, source: cited?.id ?? ref, verified: false });
     }
@@ -440,20 +482,35 @@ function readCharacter(raw: Dict, context: ParseContext): ParsedCharacter | null
     }
     return {
         name,
-        english: english && textKey(english) !== textKey(name) ? english : '',
+        english,
         aliases: names(raw.aliases).filter((alias) => textKey(alias) !== textKey(name)),
+        russian: names(raw.russian, 4).filter((alias) => textKey(alias) !== textKey(name)),
         kind: raw.kind === 'group' ? 'group' : 'character',
         gender: oneOf(['', 'female', 'male'] as const, raw.gender, ''),
         minor: raw.minor === true,
         role: short(raw.role),
         species: cleanText(raw.species, LIMITS.name),
         core: readCore(isDict(raw.core) ? raw.core : {}),
-        appetites: records(raw.appetites, LIMITS.appetites).map(readAppetite),
+        appetites: dedupeAppetites(records(raw.appetites, LIMITS.appetites * 2).map(readAppetite)),
         agenda: readAgenda(isDict(raw.agenda) ? raw.agenda : {}),
         ties,
         starts,
         evidence: readEvidence(raw.evidence, { ...context, aliases: [...context.aliases, name, english] }),
     };
+}
+
+/**
+ * One appetite per kind and per craving: a later entry of a kind already listed, or with the same label under another
+ * kind («teaching caution» as thrill and as other), is the same craving twice and is dropped.
+ */
+export function dedupeAppetites<T extends { kind: AppetiteKind; label?: string }>(list: readonly T[]): T[] {
+    const out: T[] = [];
+    for (const item of list) {
+        const label = textKey(item.label ?? '');
+        const twin = out.some((other) => other.kind === item.kind || (label && textKey(other.label ?? '') === label));
+        if (!twin) out.push(item);
+    }
+    return out.slice(0, LIMITS.appetites);
 }
 
 function readRule(raw: Dict, context: ParseContext): ParsedRule | null {
@@ -493,6 +550,7 @@ export function parseIntentResult(
     const context: ParseContext = {
         sources: options.sources,
         aliases: [options.cardName ?? '', options.personaName ?? ''].filter(Boolean),
+        names: { char: options.cardName, user: options.personaName },
     };
     const tone = isDict(raw.worldTone) ? raw.worldTone : {};
     const characters: ParsedCharacter[] = [];
@@ -574,7 +632,10 @@ function mergeCharacter(a: ParsedCharacter, b: ParsedCharacter): ParsedCharacter
     }
     const appetites = [...a.appetites];
     for (const appetite of b.appetites) {
-        const at = appetites.findIndex((other) => other.kind === appetite.kind);
+        const label = textKey(appetite.label);
+        const at = appetites.findIndex(
+            (other) => other.kind === appetite.kind || (!!label && textKey(other.label) === label),
+        );
         if (at < 0) appetites.push(appetite);
         else appetites[at] = mergeDeep(appetites[at], appetite) as ParsedAppetite;
     }
@@ -589,6 +650,11 @@ function mergeCharacter(a: ParsedCharacter, b: ParsedCharacter): ParsedCharacter
                 (alias) => textKey(alias) !== textKey(a.name) && textKey(alias) !== textKey(english),
             ),
             LIMITS.aliases,
+            LIMITS.name,
+        ),
+        russian: cleanList(
+            [...a.russian, ...b.russian].filter((alias) => textKey(alias) !== textKey(a.name)),
+            4,
             LIMITS.name,
         ),
         kind: a.kind === 'group' || b.kind === 'group' ? 'group' : 'character',
@@ -662,22 +728,70 @@ const NEGATION_RU = /(?:^|[^\p{L}])(не|ни|нет|без|никогда)\s+(?
 const STRANGER_RE =
     /(stranger|outsider|newcomer|foreigner|traveller|traveler|visitor|intruder|чужак|чужих|чужие|чужим|незнаком|приезж|пришл|чужезем|путник|гост)/iu;
 
-/** Some text speaks of hostility, contempt or cruelty (English and Russian; «not cruel» does not count). */
-export function hostileSignal(texts: readonly string[]): boolean {
+/** Some text matches one of the patterns outside a negation («not cruel», «не любит» do not count). */
+function signalIn(texts: readonly string[], patterns: readonly RegExp[]): boolean {
     for (const value of texts) {
         if (!value) continue;
-        for (const re of [HOSTILE_EN, HOSTILE_RU]) {
+        for (const re of patterns) {
             re.lastIndex = 0;
             for (let match = re.exec(value); match; match = re.exec(value)) {
                 const word = match[1] ?? match[0];
                 const at = match.index + match[0].length - word.length;
                 const before = value.slice(Math.max(0, at - 30), at);
-                const negation = re === HOSTILE_EN ? NEGATION_EN : NEGATION_RU;
+                const negation = /\p{Script=Cyrillic}/u.test(word) ? NEGATION_RU : NEGATION_EN;
                 if (!negation.test(before)) return true;
             }
         }
     }
     return false;
+}
+
+/** Some text speaks of hostility, contempt or cruelty (English and Russian; «not cruel» does not count). */
+export function hostileSignal(texts: readonly string[]): boolean {
+    return signalIn(texts, [HOSTILE_EN, HOSTILE_RU]);
+}
+
+const WARM_EN =
+    /\b(lov(?:e|es|ed|ing)|beloved|adore\w*|devot\w*|cherish\w*|dot(?:e|es|ed|ing) on|affection\w*|protect\w*|cares? (?:only )?(?:for|about)|caring|safety|mother\w*|father\w*|parent\w*|adopt\w*|loyal\w*|her child|his child|their child|would die for|sake)\b/gi;
+const WARM_RU =
+    /(?:^|[^\p{L}])(люб(?:ит|ят|ила|ил|овь|ви|имый|имая|имого|имой|ящ\p{L}*)|обожа\p{L}*|предан\p{L}*|защищ\p{L}*|защит\p{L}*|забот\p{L}*|нежн\p{L}*|ласков\p{L}*|матер\p{L}*|мать|мама|отец|приёмн\p{L}*|приемн\p{L}*|усынов\p{L}*|удочер\p{L}*|верност\p{L}*|безопасност\p{L}*|ради (?:него|неё|нее|них|тебя))/giu;
+
+/** Some text speaks of love, devotion, protection or parenthood (English and Russian, negations aside). */
+export function warmSignal(texts: readonly string[]): boolean {
+    return signalIn(texts, [WARM_EN, WARM_RU]);
+}
+
+/**
+ * Clauses about other people or about a danger to the one they are tied to: «kills anyone who threatens Kai», «cold
+ * to everyone else», «when Kai's life is threatened», «убьёт любого, кто угрожает Каю», «холодна ко всем остальным».
+ * Hostility there is aimed elsewhere — often for the sake of the target — and says nothing against the target.
+ */
+const ELSEWHERE_EN = [
+    // «becomes merciless whenever Kai is threatened», «if anyone endangers him, …» (the whole sentence after it).
+    /(?:\b\w+\s+){0,6}\b(?:when|whenever|if|once)\b[^.;!?]*?\b(?:threatened|threatens|endangered|endangers|in danger|at risk|under threat|in peril|attacked)\b[^.;!?]*/gi,
+    // «would burn the world for him», «would kill for Kai».
+    /\b(?:\w+\s+){0,2}(?:kill|murder|destroy|burn|fight|slaughter|die)\w*\s+(?:(?:the|a|an|whole|entire|anything|anyone|everything|everyone|world|cities|kingdoms|it|all)\s+){0,3}for\b[^.;!?,]*/gi,
+    // «kills anyone who threatens Kai», «cold to everyone else».
+    /\b(?:\w+\s+){0,2}(?:anyone|anybody|whoever|everyone|everybody|those|others|other people|the rest|all who|all that)\b(?:\s+(?:else|who|that|but|except))?[^.;!?,]*/gi,
+    /\b(?:is|are|was|were|be|being|gets?|got|feels?)\s+(?:\w+\s+)?(?:threatened|endangered|attacked|harmed|hurt|in danger|at risk)\b/gi,
+    /\bthreats?\s+(?:to|against)\b[^.;!?,]*/gi,
+];
+const ELSEWHERE_RU = [
+    // «когда Каю угрожает опасность, становится безжалостной».
+    /(?:\p{L}+\s+){0,6}(?<![\p{L}])(?:когда|если|стоит)(?![\p{L}])[^.;!?]*?(?:угрожа\p{L}*|опасност\p{L}*|под угрозой)[^.;!?]*/giu,
+    // «уничтожит весь мир ради Кая».
+    /(?:\p{L}+\s+){0,3}(?<![\p{L}])ради\s+(?:него|неё|нее|них|тебя|вас|\p{Lu}\p{L}*)/gu,
+    // «убьёт любого, кто угрожает Каю», «холодна ко всем остальным».
+    /(?:\p{L}+\s+){0,2}(?:любо(?:го|й|му|м)|всяко(?:го|му)|кажд\p{L}*|всех|всем|всеми|тех|кто угодно|остальн\p{L}*|други(?:х|м|ми|е)|прочи(?:х|м|ми|е))(?:,?\s*(?:кто|кроме))?[^.;!?,]*/giu,
+    /\p{L}*\s*угрожа\p{L}*\s+опасност\p{L}*/giu,
+    /(?:в|под)\s+(?:опасности|угрозой)/giu,
+];
+
+/** The text without clauses whose hostility is aimed at third parties or at a danger to the target. */
+export function aimedAtTarget(text: string): string {
+    let out = text;
+    for (const re of [...ELSEWHERE_EN, ...ELSEWHERE_RU]) out = out.replace(re, ' ');
+    return out;
 }
 
 /** A tie target that means newcomers in general («strangers», «чужаки»). */
@@ -731,20 +845,46 @@ const AGENDA_FIELDS: Record<string, string> = {
     ifignored: 'agenda.ifIgnored',
 };
 
-const IDENTITY_FIELDS = ['name', 'english', 'aliases', 'kind', 'gender', 'minor', 'role', 'species'];
+const IDENTITY_FIELDS = ['name', 'english', 'aliases', 'russian', 'kind', 'gender', 'minor', 'role', 'species'];
+
+/** Sub-fields of a tie an evidence path may name after the target ('ties.PLAYER.stance'). */
+const TIE_FIELDS = new Set([
+    'stance',
+    'reasons',
+    'reason',
+    'behaviour',
+    'behavior',
+    'intent',
+    'changeif',
+    'want',
+    'gaze',
+]);
+
+/** What a character's answer lists, for paths that name its entries by index or by label. */
+export interface PathEntries {
+    /** Appetite kinds in the answer's order, and their labels. */
+    appetites: readonly { kind: AppetiteKind; label?: string }[];
+    /** Tie targets in the answer's order, as written. */
+    ties?: readonly string[];
+}
 
 /**
  * The answer's evidence path → the profile path it backs: 'core.drivesHigh' → 'core.drives', 'values' →
- * 'core.values', 'appetites.drink' → 'appetites.drink' (kind), 'ties.PLAYER' → 'ties.@player', 'starts.1'. Null when
- * it names nothing known.
+ * 'core.values', 'appetites.drink' → 'appetites.drink' (kind; also by index or by the appetite's label),
+ * 'ties.PLAYER' and 'ties.PLAYER.stance' → 'ties.@player', 'ties[1]' → that tie's target, 'starts.1'. Null when it
+ * names nothing known.
  */
 export function canonicalPath(
     path: string,
     resolveTarget: (target: string) => string,
-    appetiteKinds: readonly AppetiteKind[],
+    entries: readonly AppetiteKind[] | PathEntries,
 ): string | null {
+    const list: PathEntries = Array.isArray(entries)
+        ? { appetites: (entries as readonly AppetiteKind[]).map((kind) => ({ kind })) }
+        : (entries as PathEntries);
     const cleaned = path
         .trim()
+        .replace(/^["'«“]+|["'»”]+$/g, '')
         .replace(/\[(\d+)\]/g, '.$1')
         .replace(/^characters?\.\d+\./i, '')
         .replace(/^characters?\./i, '');
@@ -755,27 +895,75 @@ export function canonicalPath(
     if (head === 'core') return CORE_FIELDS[second] ?? null;
     if (head === 'agenda') return AGENDA_FIELDS[second] ?? null;
     if (head === 'ties' || head === 'tie') {
-        const target = parts.slice(1).join('.');
-        return target ? `ties.${resolveTarget(target)}` : null;
+        const rest = parts.slice(1);
+        while (rest.length > 1 && TIE_FIELDS.has(rest[rest.length - 1]!.toLowerCase().replace(/[_\s-]/g, ''))) {
+            rest.pop();
+        }
+        if (rest.length === 2 && /^\d+$/.test(rest[1]!)) rest.pop();
+        const target = rest.join('.');
+        if (!target) return list.ties?.length === 1 ? `ties.${resolveTarget(list.ties[0]!)}` : null;
+        if (/^\d+$/.test(target) && list.ties?.[Number(target)])
+            return `ties.${resolveTarget(list.ties[Number(target)]!)}`;
+        return `ties.${resolveTarget(target)}`;
     }
     if (head === 'appetites' || head === 'appetite') {
         const key = (parts[1] ?? '').toLowerCase();
         if ((APPETITE_KINDS as readonly string[]).includes(key)) return `appetites.${key}`;
-        if (/^\d+$/.test(key) && appetiteKinds[Number(key)]) return `appetites.${appetiteKinds[Number(key)]}`;
-        return appetiteKinds.length === 1 ? `appetites.${appetiteKinds[0]}` : null;
+        if (/^\d+$/.test(key) && list.appetites[Number(key)]) return `appetites.${list.appetites[Number(key)]!.kind}`;
+        const labelled = key ? list.appetites.find((item) => item.label && textKey(item.label) === textKey(key)) : null;
+        if (labelled) return `appetites.${labelled.kind}`;
+        return list.appetites.length === 1 ? `appetites.${list.appetites[0]!.kind}` : null;
     }
     if (head === 'starts' || head === 'start') return /^-?\d+$/.test(parts[1] ?? '') ? `starts.${parts[1]}` : 'starts';
     const flat = head.replace(/[_\s-]/g, '');
     if (CORE_FIELDS[flat]) return CORE_FIELDS[flat];
     if (AGENDA_FIELDS[flat]) return AGENDA_FIELDS[flat];
     if (IDENTITY_FIELDS.includes(head)) return head;
+    // A bare player reference ("PLAYER", "{{user}}") names the tie to him.
+    if (parts.length === 1 && resolveTarget(parts[0]!) === PLAYER_ID) return `ties.${PLAYER_ID}`;
     return null;
+}
+
+/**
+ * Every profile path one evidence path backs: several fields may share a quote ("core.values, core.drives",
+ * "core.values; agenda.goals", "core.values and core.drives"). Duplicates and unknown names are left out.
+ */
+export function canonicalPaths(
+    path: string,
+    resolveTarget: (target: string) => string,
+    entries: readonly AppetiteKind[] | PathEntries,
+): string[] {
+    const out: string[] = [];
+    const pieces = path
+        .split(/\s*[,;|&+]\s*/)
+        .flatMap((piece) => piece.split(/\s+and\s+(?=(?:core|agenda|ties?|appetites?|starts?)\.)/i));
+    for (const piece of pieces) {
+        if (!piece.trim()) continue;
+        const canonical = canonicalPath(piece, resolveTarget, entries);
+        if (canonical && !out.includes(canonical)) out.push(canonical);
+    }
+    return out;
 }
 
 /* ------------------------------------------------------------------ applying */
 
 const MINOR_CLASS_RE = /(child|children|kid|minor|underage|teen|ребен|ребён|дет|малолет|несовершеннолет|подрост)/iu;
-const PLAYER_WORDS = ['player', 'the player', 'user', '{{user}}', 'you', 'игрок', PLAYER_REF.toLowerCase(), PLAYER_ID];
+const PLAYER_WORDS = [
+    'player',
+    'the player',
+    "player's character",
+    "the player's character",
+    'player character',
+    'the player character',
+    'user',
+    '{{user}}',
+    'you',
+    'игрок',
+    'игрока',
+    'персонаж игрока',
+    PLAYER_REF.toLowerCase(),
+    PLAYER_ID,
+];
 const PLAYER_QUOTE_RE =
     /(\{\{user\}\}|\bhero\b|\bthe player\b|\byou\b|\byour\b|геро[йяюе]\p{L}*|(?:^|[^\p{L}])(?:ты|тебя|тебе|тобой|вас|вам)(?=[^\p{L}]|$))/iu;
 
@@ -812,11 +1000,13 @@ interface Session {
     options: ApplyOptions;
     diff: IntentDiff[];
     warnings: IntentWarning[];
+    /** Fields written without a quote, per character name (one note per character, not one per field). */
+    inferred: Map<string, number>;
 }
 
-/** Meta of an applied field: author with quotes, or generated when it came without evidence ('free'). */
+/** Meta of an applied field: the author's with quotes, or inferred when the reading had no quote for it. */
 function metaOf(evidence: readonly Evidence[]): FieldMeta {
-    if (!evidence.length) return { origin: 'generated' };
+    if (!evidence.length) return { origin: 'inferred' };
     const quotes = cleanList(
         evidence.map((item) => item.quote),
         LIMITS.evidence,
@@ -876,12 +1066,14 @@ function usable(session: Session, evidence: readonly Evidence[], name: string): 
     return out;
 }
 
-/** Evidence for a field, or null when it must be dropped (no evidence, fidelity not free). */
-function gate(session: Session, evidence: readonly Evidence[], name: string, path: string): Evidence[] | null {
-    if (evidence.length) return [...evidence];
-    if (session.options.fidelity === 'free') return [];
-    session.warnings.push({ code: 'unevidenced', name, path });
-    return null;
+/**
+ * Evidence for a field. A field without any is still the reading's — kept as inferred (the prompt forbids invention
+ * beyond the sources; a missing quote only says no single line could be cited) and counted for the character's note.
+ */
+function gate(session: Session, evidence: readonly Evidence[], name: string): Evidence[] {
+    // Card-level fields (name '') show their badge in the sheet; the note counts the characters' fields.
+    if (!evidence.length && name) session.inferred.set(name, (session.inferred.get(name) ?? 0) + 1);
+    return [...evidence];
 }
 
 interface CharacterPlan {
@@ -890,10 +1082,32 @@ interface CharacterPlan {
     evidence: Map<string, Evidence[]>;
 }
 
+/**
+ * A tie target, bound or anchor that means the player's character: PLAYER, {{user}}, «the player's character», the
+ * persona's name (any case form: «Тарена» of «Тарен»), also with a parenthesis («PLAYER (Тарен)»).
+ */
 function isPlayerRef(target: string, persona: string): boolean {
-    const key = target.trim().toLowerCase();
-    if (PLAYER_WORDS.includes(key)) return true;
-    return !!persona && normalizeName(target) === normalizeName(persona);
+    const raw = target.trim();
+    const bare = raw.replace(/\s*\([^)]*\)\s*$/, '').trim();
+    for (const value of [raw, bare]) {
+        const key = value.toLowerCase().replace(/[’`]/g, "'").replace(/\s+/g, ' ');
+        if (PLAYER_WORDS.includes(key)) return true;
+    }
+    if (!persona) return false;
+    return (
+        normalizeName(bare) === normalizeName(persona) ||
+        matchName(bare, [{ id: PLAYER_ID, name: persona, aliases: [] }]) === PLAYER_ID
+    );
+}
+
+/** A verified quote of the author that names the player's character and speaks of love, devotion or protection. */
+function devotionQuoted(evidence: readonly Evidence[], persona: string): boolean {
+    return evidence.some(
+        (item) =>
+            item.verified &&
+            (PLAYER_QUOTE_RE.test(item.quote) || (!!persona && quoteKey(item.quote).includes(quoteKey(persona)))) &&
+            warmSignal([item.quote]),
+    );
 }
 
 function authorReasons(texts: readonly string[], stance: number): Reason[] {
@@ -918,14 +1132,16 @@ export function applyIntent(current: CardProfiles, result: unknown, options: App
 
 /** Applies an already parsed (and merged) reading. */
 export function applyParsedIntent(current: CardProfiles, parsed: ParsedIntent, options: ApplyOptions): ApplyResult {
-    const session: Session = { options, diff: [], warnings: [] };
+    const session: Session = { options, diff: [], warnings: [], inferred: new Map() };
     let card = normalizeCardProfiles(current, current.card);
     const persona = options.personaName?.trim() ?? '';
 
     /* characters: match or create */
     const plans: CharacterPlan[] = [];
     for (const character of parsed.characters) {
-        const candidates = [character.name, character.english, ...character.aliases].filter(Boolean);
+        const candidates = [character.name, character.english, ...character.aliases, ...character.russian].filter(
+            Boolean,
+        );
         let id: string | null = null;
         for (const candidate of candidates) {
             id = matchName(candidate, card.characters, { strict: true });
@@ -953,34 +1169,51 @@ export function applyParsedIntent(current: CardProfiles, parsed: ParsedIntent, o
 
     const resolveTarget = (target: string): string => {
         if (isPlayerRef(target, persona)) return PLAYER_ID;
-        return matchName(target, card.characters, { strict: true }) ?? cleanText(target, LIMITS.name);
+        const bare = target.replace(/\s*\([^)]*\)\s*$/, '').trim() || target;
+        return matchName(bare, card.characters, { strict: true }) ?? cleanText(bare, LIMITS.name);
     };
 
     for (const plan of plans) {
-        const kinds = plan.parsed.appetites.map((appetite) => appetite.kind);
+        const entries: PathEntries = {
+            appetites: plan.parsed.appetites.map((appetite) => ({ kind: appetite.kind, label: appetite.label })),
+            ties: plan.parsed.ties.map((tie) => tie.target),
+        };
         for (const item of usable(session, plan.parsed.evidence, plan.parsed.name)) {
-            const path = canonicalPath(item.path, resolveTarget, kinds);
-            if (!path) continue;
-            const list = plan.evidence.get(path) ?? [];
-            list.push(item);
-            plan.evidence.set(path, list);
+            for (const path of canonicalPaths(item.path, resolveTarget, entries)) {
+                const list = plan.evidence.get(path) ?? [];
+                list.push(item);
+                plan.evidence.set(path, list);
+            }
         }
+    }
+
+    /* a full re-read: what the generator wrote for these characters gives way to the reading */
+    const cleared = new Map<string, Map<string, unknown>>();
+    if (options.replaceGenerated) {
+        const ids = new Set(plans.map((plan) => plan.id));
+        card = {
+            ...card,
+            characters: card.characters.map((profile) => {
+                if (!ids.has(profile.id)) return profile;
+                const out = clearGenerated(profile);
+                if (out.cleared.size) cleared.set(profile.id, out.cleared);
+                return out.profile;
+            }),
+        };
     }
 
     /* card level: world tone, invariants, rules, reputation */
     const cardWhere = { id: '', name: '' };
     const tone = parsed.worldTone;
     if (tone.tone) {
-        const evidence = gate(session, usable(session, tone.evidence, ''), '', 'worldTone');
-        if (evidence) card = writeField(session, card, cardWhere, 'worldTone', tone.tone, evidence);
+        const evidence = gate(session, usable(session, tone.evidence, ''), '');
+        card = writeField(session, card, cardWhere, 'worldTone', tone.tone, evidence);
     }
     const invariants: string[] = [];
     const invariantEvidence: Evidence[] = [];
     for (const item of parsed.invariants) {
-        const evidence = gate(session, usable(session, item.evidence, ''), '', 'invariants');
-        if (!evidence) continue;
         invariants.push(item.text);
-        invariantEvidence.push(...evidence);
+        invariantEvidence.push(...gate(session, usable(session, item.evidence, ''), ''));
     }
     if (invariants.length) {
         const union = cleanList([...card.invariants, ...invariants], 24, LIMITS.text);
@@ -988,8 +1221,7 @@ export function applyParsedIntent(current: CardProfiles, parsed: ParsedIntent, o
     }
     const ruleIds = new Map<string, string>();
     for (const rule of parsed.rules) {
-        let evidence = gate(session, usable(session, rule.evidence, rule.name), rule.name, 'rules');
-        if (!evidence) continue;
+        let evidence = gate(session, usable(session, rule.evidence, rule.name), '');
         let target: AppetiteRule['target'] =
             rule.target === 'player'
                 ? { mode: 'player' }
@@ -1035,7 +1267,7 @@ export function applyParsedIntent(current: CardProfiles, parsed: ParsedIntent, o
             exclusivity: rule.exclusivity,
             affectionOnset: rule.affectionOnset,
             groupMode: rule.groupMode,
-            evidence: metaOf(evidence).evidence,
+            ...(evidence.length ? { evidence: metaOf(evidence).evidence } : {}),
         };
         const path = `rules.${id}`;
         if (isProtected(card, path)) {
@@ -1073,14 +1305,13 @@ export function applyParsedIntent(current: CardProfiles, parsed: ParsedIntent, o
     const seeds: ReputationSeed[] = [];
     const seedEvidence: Evidence[] = [];
     for (const seed of parsed.reputation) {
-        const evidence = gate(session, usable(session, seed.evidence, ''), '', 'reputation');
-        if (!evidence) continue;
+        const evidence = gate(session, usable(session, seed.evidence, ''), '');
         seeds.push({
             among: seed.among,
             label: seed.label,
             stance: seed.stance,
             greeting: seed.greeting,
-            evidence: metaOf(evidence).evidence,
+            ...(evidence.length ? { evidence: metaOf(evidence).evidence } : {}),
         });
         seedEvidence.push(...evidence);
     }
@@ -1098,6 +1329,20 @@ export function applyParsedIntent(current: CardProfiles, parsed: ParsedIntent, o
         const before = profiles.get(plan.id)!;
         const after = applyCharacter(session, before, plan, resolveTarget, ruleIds);
         profiles.set(plan.id, after);
+        // What the full re-read dropped: replaced by the reading, or left empty for a grounded fill.
+        for (const [path, old] of cleared.get(plan.id) ?? []) {
+            const now = getPath(after, path);
+            if (!same(old, now)) {
+                session.diff.push({
+                    character: after.id,
+                    name: after.name,
+                    path,
+                    before: old,
+                    after: now,
+                    status: 'updated',
+                });
+            }
+        }
     }
     card = { ...card, characters: card.characters.map((profile) => profiles.get(profile.id) ?? profile) };
     card = enforceMinors(session, card);
@@ -1109,10 +1354,13 @@ export function applyParsedIntent(current: CardProfiles, parsed: ParsedIntent, o
             ...(options.model ? { model: options.model } : {}),
         },
     };
+    for (const [name, count] of session.inferred) {
+        session.warnings.push({ code: 'inferred', name, detail: String(count) });
+    }
     return { profiles: card, diff: session.diff, warnings: session.warnings };
 }
 
-/** One field of a character: gated by evidence of any of its backing paths, then written. */
+/** One field of a character: backed by the evidence of any of its paths (inferred without), then written. */
 function field(
     session: Session,
     profile: CharacterProfile,
@@ -1123,9 +1371,73 @@ function field(
 ): CharacterProfile {
     if (isEmptyValue(value)) return profile;
     const evidence = backing.flatMap((key) => plan.evidence.get(key) ?? []);
-    const gated = gate(session, evidence, plan.parsed.name, path);
-    if (!gated) return profile;
+    const gated = gate(session, evidence, plan.parsed.name);
     return writeField(session, profile, { id: profile.id, name: profile.name }, path, value, gated);
+}
+
+const LATIN_NAME_RE = /^[\p{Script=Latin}\s'’.-]+$/u;
+/** Words before a name that are no name on their own («Lady Mirelle» is never just «Lady»). */
+const TITLES = new Set([
+    'lady',
+    'lord',
+    'sir',
+    'dame',
+    'king',
+    'queen',
+    'prince',
+    'princess',
+    'captain',
+    'master',
+    'mistress',
+    'mr',
+    'mrs',
+    'miss',
+    'dr',
+    'леди',
+    'лорд',
+    'сэр',
+    'госпожа',
+    'господин',
+    'король',
+    'королева',
+    'принц',
+    'принцесса',
+    'капитан',
+    'мастер',
+]);
+
+/**
+ * The first word of a full name, when the sources call the character by it alone («Mirelle» of «Mirelle Varrow»): at
+ * least three letters, and found more often than the full name itself.
+ */
+export function firstNameAlias(name: string, sources: readonly Pick<IntentSource, 'text'>[]): string | null {
+    const words = name.trim().split(/\s+/);
+    const first = words[0] ?? '';
+    if (words.length < 2 || first.length < 3 || !/^\p{Lu}/u.test(first)) return null;
+    if (TITLES.has(first.toLowerCase().replace(/\.$/, ''))) return null;
+    const escape = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const count = (needle: string) => {
+        const re = new RegExp(`(?<![\\p{L}\\p{N}])${escape(needle)}(?![\\p{L}\\p{N}])`, 'gu');
+        return sources.reduce((sum, source) => sum + (source.text.match(re)?.length ?? 0), 0);
+    };
+    return count(first) > count(name.trim()) ? first : null;
+}
+
+/**
+ * A friendly stance the texts contradict (anti-softening): the author's verified quotes speak of hostility, or the
+ * reading's own words do while not speaking of love. Toward the player, hostility aimed elsewhere for his sake («kills
+ * anyone who threatens him», «merciless when he is in danger») does not count, and the author's own words of devotion
+ * to him outweigh the rest.
+ */
+function softened(tie: ParsedTie, evidence: readonly Evidence[], player: boolean, persona: string): boolean {
+    const aim = (text: string) => (player ? aimedAtTarget(text) : text);
+    if (player && devotionQuoted(evidence, persona)) return false;
+    const quoted = evidence.filter((item) => item.verified).map((item) => aim(item.quote));
+    if (hostileSignal(quoted)) return true;
+    const own = [...tie.reasons, tie.behaviour, ...evidence.filter((item) => !item.verified).map((item) => item.quote)];
+    if (!hostileSignal(own.map(aim))) return false;
+    // The reading's own warm words for a close bond outweigh its own harsh ones (no line of the author says otherwise).
+    return !(player && tie.stance >= 2 && warmSignal([...tie.reasons, tie.behaviour]));
 }
 
 function applyCharacter(
@@ -1137,6 +1449,7 @@ function applyCharacter(
 ): CharacterProfile {
     const { parsed } = plan;
     const fidelity = session.options.fidelity;
+    const persona = session.options.personaName?.trim() ?? '';
     let profile = start;
     const where = { id: profile.id, name: profile.name };
     // Who they are needs no quote; it keeps its old provenance unless a quote backs it.
@@ -1164,10 +1477,16 @@ function applyCharacter(
     identity('role', parsed.role);
     identity('species', parsed.species);
     identity('gender', parsed.gender || undefined);
-    identity('english', parsed.english || undefined);
-    const aliases = cleanList([...profile.aliases, ...parsed.aliases], LIMITS.aliases, LIMITS.name).filter(
-        (alias) => textKey(alias) !== textKey(profile.name),
-    );
+    // The English name: as read, else the name itself when it is written in Latin letters.
+    const english = parsed.english || (LATIN_NAME_RE.test(profile.name) ? profile.name : '');
+    identity('english', english || undefined);
+    // Every name the story may call them by: the reading's aliases, its Russian forms, the first name the sources use.
+    const first = session.options.sources ? firstNameAlias(profile.name, session.options.sources) : null;
+    const aliases = cleanList(
+        [...profile.aliases, ...parsed.aliases, ...parsed.russian, ...(first ? [first] : [])],
+        LIMITS.aliases,
+        LIMITS.name,
+    ).filter((alias) => textKey(alias) !== textKey(profile.name));
     identity('aliases', aliases);
     if (parsed.minor && !profile.minor) profile = { ...profile, minor: true };
 
@@ -1198,10 +1517,14 @@ function applyCharacter(
     coreField('corruption', raw.corruption === undefined ? undefined : core.corruption);
     coreField(
         'anchors',
-        core.anchors.map((anchor) => {
-            const id = resolveTarget(anchor);
-            return id === anchor ? anchor : id;
-        }),
+        cleanList(
+            core.anchors.map((anchor) => {
+                const id = resolveTarget(anchor);
+                return id === anchor ? anchor : id;
+            }),
+            LIMITS.anchors,
+            LIMITS.name,
+        ),
     );
 
     /* agenda */
@@ -1243,10 +1566,14 @@ function applyCharacter(
     agendaField('secrets', agenda.secrets);
     agendaField('ifIgnored', agenda.ifIgnored);
 
-    /* appetites (before ties: ties point at them) */
+    /* appetites (before ties: ties point at them); one per craving, never a twin of one the profile holds */
     const appetiteIds = new Map<AppetiteKind, string>();
     for (const appetite of parsed.appetites) {
-        const existing = profile.appetites.find((item) => item.kind === appetite.kind);
+        const label = textKey(appetite.label);
+        const existing =
+            profile.appetites.find((item) => item.kind === appetite.kind) ??
+            (label ? profile.appetites.find((item) => textKey(item.label ?? '') === label) : undefined);
+        if (existing && existing.kind !== appetite.kind) continue;
         const id =
             existing?.id ??
             slugId(
@@ -1282,10 +1609,8 @@ function applyCharacter(
             rule: appetite.rule ? (ruleIds.get(textKey(appetite.rule)) ?? slugId(appetite.rule)) : existing?.rule,
         })!;
         const path = `appetites.${id}`;
-        const evidence = plan.evidence.get(`appetites.${appetite.kind}`) ?? [];
-        const gated = gate(session, evidence, parsed.name, path);
-        if (!gated) continue;
-        profile = writeField(session, profile, where, path, value, gated);
+        const evidence = gate(session, plan.evidence.get(`appetites.${appetite.kind}`) ?? [], parsed.name);
+        profile = writeField(session, profile, where, path, value, evidence);
     }
 
     /* ties */
@@ -1297,9 +1622,9 @@ function applyCharacter(
         const id = resolveTarget(tie.target);
         if (id === profile.id) continue;
         const evidence = plan.evidence.get(`ties.${id}`) ?? [];
-        const signal = [...tie.reasons, tie.behaviour, ...evidence.map((item) => item.quote)];
         let stance = tie.stance;
-        if ((id === PLAYER_ID || isStrangerClass(id)) && stance > -1 && hostileSignal(signal)) {
+        const guarded = id === PLAYER_ID || isStrangerClass(id);
+        if (guarded && stance > -1 && softened(tie, evidence, id === PLAYER_ID, persona)) {
             session.warnings.push({
                 code: 'stance-capped',
                 name: parsed.name,
@@ -1313,8 +1638,13 @@ function applyCharacter(
         else if (isStrangerClass(id) && !strangerTie) strangerTie = { tie: entry.tie, evidence };
         ties.push(entry);
     }
-    // The player is a stranger at the start: when the author quoted nothing about him but spoke of strangers coldly.
-    if (strangerTie && strangerTie.tie.stance < 0 && (!playerTie || !playerTie.evidence.length)) {
+    // The player is a stranger at the start: when the author quoted nothing about him but spoke of strangers coldly —
+    // unless the reading made him someone close (a stance above +1 is a bond, not a stranger's welcome).
+    if (
+        strangerTie &&
+        strangerTie.tie.stance < 0 &&
+        (!playerTie || (!playerTie.evidence.length && playerTie.tie.stance <= 1))
+    ) {
         const stance = Math.min(strangerTie.tie.stance, playerTie?.tie.stance ?? 0) as Stance;
         const derived: ParsedTie = { ...strangerTie.tie, target: PLAYER_REF, stance, want: 0, gaze: '', appetite: '' };
         session.warnings.push({ code: 'stranger-stance', name: parsed.name, path: `ties.${PLAYER_ID}` });
@@ -1326,8 +1656,7 @@ function applyCharacter(
     }
     for (const entry of ties) {
         const path = `ties.${entry.id}`;
-        const gated = gate(session, entry.evidence, parsed.name, path);
-        if (!gated) continue;
+        const gated = gate(session, entry.evidence, parsed.name);
         const existing = profile.ties.find((item) => item.target === entry.id);
         const base: Tie = existing ?? emptyTie(entry.id);
         const kept = base.reasons.filter((reason) => !reason.id.startsWith('author-'));
@@ -1354,49 +1683,42 @@ function applyCharacter(
         ...ties.filter((entry) => entry.tie.changeIf.length).map((entry) => `ties.${entry.id}`),
     ]);
 
-    /* stance bounds: the answer's, plus the author's ceiling for a hostile start under strict fidelity */
+    /*
+     * stance bounds: the answer's, plus (strict) the author's ceiling for a hostile start and the author's floor for
+     * devotion to the player the sources state in so many words
+     */
     const bounds: StanceBound[] = core.stanceBounds.map((bound) => ({ ...bound, target: resolveTarget(bound.target) }));
     const boundEvidence = [...(plan.evidence.get('core.stanceBounds') ?? [])];
-    if (
-        fidelity === 'strict' &&
-        playerTie &&
-        playerTie.tie.stance <= -1 &&
-        playerTie.evidence.length > 0 &&
-        !bounds.some((bound) => bound.target === PLAYER_ID)
-    ) {
-        bounds.push({ target: PLAYER_ID, max: 0 });
-        boundEvidence.push(...playerTie.evidence);
+    const playerBound = bounds.some((bound) => bound.target === PLAYER_ID);
+    if (fidelity === 'strict' && playerTie && !playerBound && playerTie.evidence.length > 0) {
+        if (playerTie.tie.stance <= -1) {
+            bounds.push({ target: PLAYER_ID, max: 0 });
+            boundEvidence.push(...playerTie.evidence);
+        } else if (playerTie.tie.stance >= 3 && devotionQuoted(playerTie.evidence, persona)) {
+            bounds.push({ target: PLAYER_ID, min: 2 });
+            boundEvidence.push(...playerTie.evidence);
+        }
     }
     if (bounds.length) {
-        const gated = gate(session, boundEvidence, parsed.name, 'core.stanceBounds');
-        if (gated)
-            profile = writeField(session, profile, where, 'core.stanceBounds', bounds.slice(0, LIMITS.bounds), gated);
+        const gated = gate(session, boundEvidence, parsed.name);
+        profile = writeField(session, profile, where, 'core.stanceBounds', bounds.slice(0, LIMITS.bounds), gated);
     }
 
     /* starts per greeting */
     if (parsed.starts.length) {
-        const fresh = parsed.starts.filter((start) => {
-            const evidence = [
-                ...(plan.evidence.get(`starts.${start.greeting}`) ?? []),
-                ...(plan.evidence.get('starts') ?? []),
-            ];
-            return gate(session, evidence, parsed.name, `starts.${start.greeting}`) !== null;
-        });
-        if (fresh.length) {
-            const evidence = fresh
-                .flatMap((start) => [...(plan.evidence.get(`starts.${start.greeting}`) ?? [])])
-                .concat(plan.evidence.get('starts') ?? []);
-            const merged = [
-                ...profile.starts.filter((old) => !fresh.some((start) => start.greeting === old.greeting)),
-                ...fresh.map((start) => ({
-                    greeting: start.greeting,
-                    present: start.present,
-                    ...(start.doing ? { doing: start.doing } : {}),
-                    ...(start.goal ? { goal: start.goal } : {}),
-                })),
-            ].sort((a, b) => a.greeting - b.greeting);
-            profile = writeField(session, profile, where, 'starts', merged, evidence);
-        }
+        const evidence = parsed.starts
+            .flatMap((start) => [...(plan.evidence.get(`starts.${start.greeting}`) ?? [])])
+            .concat(plan.evidence.get('starts') ?? []);
+        const merged = [
+            ...profile.starts.filter((old) => !parsed.starts.some((start) => start.greeting === old.greeting)),
+            ...parsed.starts.map((start) => ({
+                greeting: start.greeting,
+                present: start.present,
+                ...(start.doing ? { doing: start.doing } : {}),
+                ...(start.goal ? { goal: start.goal } : {}),
+            })),
+        ].sort((a, b) => a.greeting - b.greeting);
+        profile = writeField(session, profile, where, 'starts', merged, gate(session, evidence, parsed.name));
     }
     return profile;
 }

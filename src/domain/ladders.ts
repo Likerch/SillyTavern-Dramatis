@@ -666,6 +666,7 @@ export function lodLabel(value: Lod, lang: Lang): string {
 
 const ORIGIN: Record<Origin, Word> = {
     author: { en: 'author', ru: 'автор' },
+    inferred: { en: 'from the card, no quote', ru: 'из карточки, без цитаты' },
     generated: { en: 'generated', ru: 'дописано' },
     story: { en: 'story', ru: 'история' },
     user: { en: 'your edit', ru: 'твоя правка' },
