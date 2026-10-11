@@ -74,8 +74,11 @@ export interface TurnDraft {
     ids: string[];
 }
 
-/** Errors of a background request that mean «not now»: another tab leads, the daily cap, Maestro restarting. */
-const SILENT_ERRORS = new Set(['not-leader', 'cap', 'aborted', 'maestro-stopped']);
+/**
+ * Errors of a background request that mean «not now»: another tab leads, the daily cap, Maestro restarting, a workshop
+ * chat (Maestro 1.21+ «Мастерская»).
+ */
+const SILENT_ERRORS = new Set(['not-leader', 'cap', 'aborted', 'maestro-stopped', 'workshop']);
 
 interface Pending {
     controller: AbortController;

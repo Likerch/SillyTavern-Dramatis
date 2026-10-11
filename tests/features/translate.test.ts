@@ -314,6 +314,16 @@ describe('translate — runs', () => {
         expect(translations(maestro!)).toHaveLength(1);
     });
 
+    it('stops on a «workshop» refusal (Maestro 1.21 «Мастерская») without counting the strings as failed', async () => {
+        const { h, maestro } = await setup();
+        maestro!.reply = () => ({ ok: false, error: 'workshop' });
+        const outcome = await translator(h).request([{ text: 'an imperial' }], { interactive: true });
+        expect(outcome).toMatchObject({ ok: false, error: 'workshop', failed: 0 });
+        translating(maestro!);
+        const again = await translator(h).request([{ text: 'an imperial' }], { interactive: true });
+        expect(again).toMatchObject({ ok: true, translated: 1 });
+    });
+
     it('without Maestro: nothing in the background, the user’s own request on the own connection profile', async () => {
         const sent: unknown[] = [];
         const { h } = await setup({

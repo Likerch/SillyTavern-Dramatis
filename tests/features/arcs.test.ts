@@ -8,7 +8,7 @@ import type { EngineApi, EngineView } from '../../src/features/engine/api';
 import type { ApiJournalChange, ApiProposal } from '../../src/shared/apis';
 import type { App, Unsubscribe } from '../../src/shared/contracts';
 import { chat, liveState, profile } from '../domain/cast-fixtures';
-import { fakeMaestro, memoryLogger, staticBridge } from '../helpers/fakes';
+import { fakeMaestro, freshSession, memoryLogger, staticBridge } from '../helpers/fakes';
 import { flush } from '../helpers/st-mock';
 
 function ilva(): CharacterProfile {
@@ -123,7 +123,13 @@ async function setup(options: { leader?: boolean; chatId?: string } = {}) {
         },
     } as unknown as App;
     const owned: (Unsubscribe | (() => void | Promise<void>))[] = [];
-    await arcsModule.init({ app, settings: {}, log: memoryLogger(), own: (d) => owned.push(d) });
+    await arcsModule.init({
+        app,
+        settings: {},
+        log: memoryLogger(),
+        own: (d) => owned.push(d),
+        session: freshSession,
+    });
     return {
         engine,
         proposals,

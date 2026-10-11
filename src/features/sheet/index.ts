@@ -31,12 +31,16 @@ export const sheetModule: DramatisModule<SheetSettings> = {
     enabledByDefault: true,
     defaults: () => ({ filter: 'all', tab: 'core' }),
     i18n: SHEET_STRINGS,
-    init({ app, settings, log, own }) {
+    init({ app, settings, log, own, session }) {
         // Stored values from another version fall back to the defaults.
         if (!FILTERS.includes(settings.filter)) settings.filter = 'all';
         if (!SECTIONS.includes(settings.tab)) settings.tab = 'core';
-        const results = new Map<string, { result: IntentReadResult; taken: Set<number> }>();
-        const deps = { app, settings, log, results, seen: new Map<string, string>() };
+        // The reading panel per card and the readings already shown: kept for the session, past a stop and start.
+        const { results, seen } = session(() => ({
+            results: new Map<string, { result: IntentReadResult; taken: Set<number> }>(),
+            seen: new Map<string, string>(),
+        }));
+        const deps = { app, settings, log, results, seen };
         const engine = () => app.modules.api<EngineApi>(ENGINE_API);
 
         own(app.ui.style('sheet', sheetCss));

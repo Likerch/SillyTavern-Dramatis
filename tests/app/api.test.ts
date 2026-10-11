@@ -107,6 +107,26 @@ describe('DRAMATIS_API publication', () => {
         expect(await publisher.api.readIntent!()).toMatchObject({ ok: false, error: 'core.api.noReading' });
     });
 
+    it('says a workshop chat (Maestro 1.21 «Мастерская») is why nothing can read', async () => {
+        const log = memoryLogger();
+        const settings = new Settings(
+            () => ({}),
+            () => {},
+            log,
+        );
+        const i18n = createI18n(() => 'ru');
+        i18n.register(CORE_STRINGS);
+        let workshop = true;
+        const bus = createBus(log);
+        const publisher = createApiPublisher({ version: '0.0.1', settings, bus, log, i18n, workshop: () => workshop });
+        expect(await publisher.api.readIntent!()).toMatchObject({
+            ok: false,
+            error: 'Это чат мастерской (Maestro «Мастерская»): здесь Dramatis молчит.',
+        });
+        workshop = false;
+        expect(await publisher.api.readIntent!()).toMatchObject({ ok: false, error: NO_READING });
+    });
+
     it('answers from the latest part that defines a method, and from defaults when it throws', () => {
         const { publisher, log } = setup();
         const offFirst = publisher.registerPart({ castBlockActive: () => true, dependenceOwned: () => ['Брам'] });

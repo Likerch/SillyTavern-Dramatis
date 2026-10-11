@@ -2,7 +2,8 @@
 // event, and removed on disable. Every method has a safe default; modules fill them in with parts —
 // `app.modules.expose('api', part)` during init (released automatically when the module stops) — and the latest part
 // that defines a method answers it. While Dramatis is switched off in its settings every method gives its default
-// (readIntent: a failed outcome saying the reading is not available).
+// (readIntent: a failed outcome saying the reading is not available). In a workshop chat (Maestro 1.21+ «Мастерская»)
+// no module runs, so every method gives its default too; readIntent then says it is a workshop chat.
 // onChange listeners fire (once per microtask) when the state, the profiles, the chat, the parts or the switch change.
 import { DRAMATIS_API_GLOBAL, DRAMATIS_API_READY_EVENT } from '../shared/apis';
 import type {
@@ -40,6 +41,8 @@ export interface ApiPublisherDeps {
     log: Logger;
     /** For the words of the defaults (readIntent while nothing can read); the key itself without it. */
     i18n?: I18n;
+    /** The open chat is a workshop chat (MaestroBridge.workshop): readIntent's default says so. */
+    workshop?: () => boolean;
 }
 
 type Method = keyof DramatisApiPart;
@@ -70,7 +73,8 @@ export function createApiPublisher(deps: ApiPublisherDeps): ApiPublisher {
 
     /** readIntent when no part can read (Dramatis or its intent module is off) or the reading broke. */
     function noReading(): DramatisReadOutcome {
-        const error = deps.i18n?.t('core.api.noReading') ?? 'core.api.noReading';
+        const key = deps.workshop?.() ? 'core.llm.workshop' : 'core.api.noReading';
+        const error = deps.i18n?.t(key) ?? key;
         return { ok: false, characters: 0, error, message: error };
     }
 

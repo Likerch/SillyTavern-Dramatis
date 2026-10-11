@@ -11,7 +11,7 @@ import type { EngineApi, EngineView } from '../../src/features/engine/api';
 import { METRICS_STRINGS, STATS_SLASH, metricsDue, metricsModule, statsText } from '../../src/features/metrics';
 import type { App, Unsubscribe } from '../../src/shared/contracts';
 import { tavern } from '../domain/cast-fixtures';
-import { fakeMaestro, memoryLogger, staticBridge } from '../helpers/fakes';
+import { fakeMaestro, freshSession, memoryLogger, staticBridge } from '../helpers/fakes';
 import { message } from '../helpers/st-mock';
 import { buttonByText, flush, harness } from './sheet/harness';
 import type { Harness } from './sheet/harness';
@@ -97,7 +97,13 @@ async function setup(options: { leader?: boolean; maestro?: boolean } = {}) {
         },
     } as unknown as App;
     const owned: (Unsubscribe | (() => void | Promise<void>))[] = [];
-    await metricsModule.init({ app, settings: {}, log: memoryLogger(), own: (d) => owned.push(d) });
+    await metricsModule.init({
+        app,
+        settings: {},
+        log: memoryLogger(),
+        own: (d) => owned.push(d),
+        session: freshSession,
+    });
     return {
         app,
         engine,

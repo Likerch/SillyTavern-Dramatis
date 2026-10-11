@@ -2,7 +2,7 @@
 import { createHost } from '../../src/host';
 import type { HostImpl } from '../../src/host';
 import type { ApiLlmRequest, ApiLlmResult, ApiTurnEvent, MaestroApiV1 } from '../../src/shared/apis';
-import type { Logger, MaestroBridge } from '../../src/shared/contracts';
+import type { Logger, MaestroBridge, ModuleContext } from '../../src/shared/contracts';
 
 export interface MemoryLogger extends Logger {
     lines: { level: string; args: unknown[] }[];
@@ -33,10 +33,18 @@ export interface FakeMaestro {
     available: boolean;
     turnListeners: Set<(event: ApiTurnEvent) => void | Promise<void>>;
     emitTurn(event: ApiTurnEvent): Promise<void>;
+    /** «Мастерская» (with `{ workshop }`): what `workshop.active()` answers. */
+    workshopActive: boolean;
+    workshopListeners: Set<(active: boolean) => void | Promise<void>>;
+    /** Flips the workshop state and awaits every listener, as Maestro does in its first CHAT_CHANGED listener. */
+    setWorkshop(active: boolean): Promise<void>;
 }
 
-/** A MAESTRO_API v1 double: records LLM requests and lets the test fire turn events. */
-export function fakeMaestro(): FakeMaestro {
+/**
+ * A MAESTRO_API v1 double: records LLM requests and lets the test fire turn events. With `workshop` it is a Maestro
+ * 1.21+ with «Мастерская» (the optional `workshop` member), starting in that state.
+ */
+export function fakeMaestro(options: { workshop?: boolean } = {}): FakeMaestro {
     const fake: FakeMaestro = {
         requests: [],
         reply: () => ({ ok: true, text: 'ok', data: 'ok', costUsd: 0.001 }),
@@ -44,6 +52,13 @@ export function fakeMaestro(): FakeMaestro {
         turnListeners: new Set(),
         async emitTurn(event) {
             for (const listener of [...fake.turnListeners]) await listener(event);
+        },
+        workshopActive: options.workshop === true,
+        workshopListeners: new Set(),
+        async setWorkshop(active) {
+            if (fake.workshopActive === active) return;
+            fake.workshopActive = active;
+            for (const listener of [...fake.workshopListeners]) await listener(active);
         },
         api: undefined as unknown as MaestroApiV1,
     };
@@ -72,17 +87,37 @@ export function fakeMaestro(): FakeMaestro {
         speech: () => null,
         quiet: () => () => {},
     };
+    if (options.workshop !== undefined) {
+        fake.api.workshop = {
+            active: () => fake.workshopActive,
+            onChange(listener) {
+                fake.workshopListeners.add(listener);
+                return () => fake.workshopListeners.delete(listener);
+            },
+        };
+    }
     return fake;
 }
 
-/** A bridge with a switchable API (no globals). */
-export function staticBridge(api: MaestroApiV1 | null = null): MaestroBridge & { set(api: MaestroApiV1 | null): void } {
+/** A bridge with a switchable API and workshop state (no globals; flips are not announced). */
+export function staticBridge(api: MaestroApiV1 | null = null): MaestroBridge & {
+    set(api: MaestroApiV1 | null): void;
+    setWorkshop(active: boolean): void;
+} {
     let current = api;
+    let workshop = false;
     return {
         api: () => current,
         present: () => current !== null,
+        workshop: () => current !== null && workshop,
         set(next) {
             current = next;
         },
+        setWorkshop(active) {
+            workshop = active;
+        },
     };
 }
+
+/** ModuleContext.session for a module started by hand: a fresh memory on every start. */
+export const freshSession: ModuleContext<object>['session'] = (create) => create();

@@ -43,6 +43,7 @@ Language models are sycophantic: characters warm up for no reason, villains refo
 - **Corruption with gifts and brands.** At 3, 5 and 7 a character is branded and decides whether to take the gift; at 7 the craving becomes part of who they are.
 - **Director in Cinema mode.** Right before the reply a short request decides who acts this beat, with what intent and toward whom.
 - **Measurements.** The share of NPC lines addressed to you, initiative, drift, distinguishable voices — on the "Measurements" page and with `/dramatis-stats`.
+- **The workshop** (Maestro 1.21+). In the chat of a helper card tagged «мастерская» (a scenario or character creator) Dramatis stays silent altogether — no AI requests, no prompt injections, no notices — and comes back when you return to the story.
 - **Chat preparation and the Character Sheet.** Maestro's chat preparation reads the intent too and shows the result with an **«Open»** link to the sheet; DES's Character Sheet / Workshop gets a **«Dramatis»** tab: how they stand toward you, what they want, what is going on now, appetites, who they are and their secrets.
 
 ## How it works

@@ -103,7 +103,8 @@ const SAID_MESSAGES = 30;
 const ROLE_KEY_RE = /role|occupation|job|profession|class|title|роль|занят|профес|должн|ремесл|звани/i;
 const SPECIES_KEY_RE = /species|race|folk|раса|вид|народ/i;
 const GENDER_KEY_RE = /gender|sex|^пол$|^пол_|_пол$/i;
-const TRANSIENT = new Set(['not-leader', 'cap', 'maestro-stopped']);
+/** «Not now» refusals (another tab leads, the daily cap, Maestro restarting, a workshop chat): not an attempt. */
+const TRANSIENT = new Set(['not-leader', 'cap', 'maestro-stopped', 'workshop']);
 /** Defaulted fields the dice of a fill write when nobody set them (initiative, persistence, resting mood). */
 const DICE_DEFAULTED = ['core.proactivity', 'core.commitment', 'core.baselineMood'];
 
@@ -161,17 +162,21 @@ export function identityOf(member?: DesCharacter): { gender?: 'female' | 'male';
     return out;
 }
 
-function startGenerator({ app, settings, log, own }: ModuleContext<GeneratorSettings>): GeneratorApi {
+function startGenerator({ app, settings, log, own, session }: ModuleContext<GeneratorSettings>): GeneratorApi {
     const engine = (): EngineApi | null => app.modules.api<EngineApi>(ENGINE_API) ?? null;
     const maestro = () => app.maestro.api();
     const t = (key: string, params?: Record<string, string | number>) => app.i18n.t(key, params);
     const inflight = new Set<string>();
-    const attempts = new Map<string, { commit: number; count: number }>();
-    /** Committed turns seen in this session: retries wait for the next one (state.turn belongs to the turn module). */
-    let commits = 0;
+    // What counts per session survives a stop and start (Maestro's restart, a workshop chat round trip).
+    const memory = session(() => ({
+        attempts: new Map<string, { commit: number; count: number }>(),
+        /** Committed turns seen in this session: retries wait for the next one (state.turn is the turn module's). */
+        commits: 0,
+        /** Names sketched in this session per chat: never twice, even if the engine still lists them. */
+        sketched: new Set<string>(),
+    }));
+    const { attempts, sketched } = memory;
     const rulesSeen = new Map<string, string>();
-    /** Names sketched in this session per chat: never twice, even if the engine still lists them. */
-    const sketched = new Set<string>();
     let queue: Promise<void> = Promise.resolve();
     let pending = false;
     let alive = true;
@@ -244,13 +249,13 @@ function startGenerator({ app, settings, log, own }: ModuleContext<GeneratorSett
 
     function mayTry(view: EngineView, id: string, target: Target): boolean {
         const last = attempts.get(attemptKey(view, id, target));
-        return !last || (last.count < MAX_ATTEMPTS && commits > last.commit);
+        return !last || (last.count < MAX_ATTEMPTS && memory.commits > last.commit);
     }
 
     function noteAttempt(view: EngineView, id: string, target: Target, counts: boolean): void {
         const key = attemptKey(view, id, target);
         const last = attempts.get(key);
-        attempts.set(key, { commit: commits, count: (last?.count ?? 0) + (counts ? 1 : 0) });
+        attempts.set(key, { commit: memory.commits, count: (last?.count ?? 0) + (counts ? 1 : 0) });
     }
 
     /* ---------------------------------------------------------------- rules */
@@ -767,7 +772,7 @@ function startGenerator({ app, settings, log, own }: ModuleContext<GeneratorSett
                 // A fill that left gaps the card has nothing for (no temperament anywhere in it) is not asked again
                 // by itself in this session: the sheet's button still can.
                 if (target === 'fill' && needsFill(after)) {
-                    attempts.set(attemptKey(view, id, target), { commit: commits, count: MAX_ATTEMPTS });
+                    attempts.set(attemptKey(view, id, target), { commit: memory.commits, count: MAX_ATTEMPTS });
                 } else {
                     attempts.delete(attemptKey(view, id, target));
                 }
@@ -864,7 +869,7 @@ function startGenerator({ app, settings, log, own }: ModuleContext<GeneratorSett
     }
 
     async function onCommitted(messageIndex: number): Promise<void> {
-        commits += 1;
+        memory.commits += 1;
         const eng = engine();
         if (!eng || !leads()) return;
         const view = (await eng.ready()) ?? eng.view();

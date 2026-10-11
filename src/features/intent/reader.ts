@@ -60,8 +60,17 @@ const NOTICE_NOTES = 3;
 
 type PreparableCardReader = CardReader & { prepare?: () => Promise<void> };
 
-/** Errors of a background request that mean «not now» (another tab leads, the daily cap, Maestro restarting). */
-const QUIET_ERRORS = new Set(['not-leader', 'cap', 'maestro-stopped']);
+/**
+ * Errors of a background request that mean «not now» (another tab leads, the daily cap, Maestro restarting, a workshop
+ * chat). An automatic reading stops on them without a notice; a workshop chat (Maestro 1.21+ «Мастерская», where
+ * Dramatis stays silent) keeps even the user's reading quiet.
+ */
+const QUIET_ERRORS = new Set(['not-leader', 'cap', 'maestro-stopped', 'workshop']);
+
+/** A failed reading with this error gives no notice. */
+function quietError(error: string | undefined, auto: boolean): boolean {
+    return error === 'workshop' || (auto && QUIET_ERRORS.has(error ?? ''));
+}
 
 export interface ReadOptions {
     force?: boolean;
@@ -153,12 +162,17 @@ export function storyLanguageOf(app: Pick<App, 'maestro' | 'i18n'>, log?: Logger
     return app.i18n.locale() === 'ru' ? 'ru' : 'en';
 }
 
-export function createIntentReader(deps: { app: App; log: Logger }): IntentReader {
+export function createIntentReader(deps: {
+    app: App;
+    log: Logger;
+    /** Where the last result is kept (the module's session memory: it outlives this reader). */
+    memory?: { last: IntentReadResult | null };
+}): IntentReader {
     const { app, log } = deps;
     const t = (key: string, params?: Record<string, string | number>) => app.i18n.t(key, params);
+    const memory = deps.memory ?? { last: null };
     let busy = false;
     let controller: AbortController | null = null;
-    let last: IntentReadResult | null = null;
 
     const engine = (): EngineApi | null => app.modules.api<EngineApi>(ENGINE_API) ?? null;
 
@@ -236,6 +250,8 @@ export function createIntentReader(deps: { app: App; log: Logger }): IntentReade
         auto: boolean,
         signal: AbortSignal,
     ): Promise<IntentReadResult & { quiet?: boolean }> {
+        // A workshop chat (Maestro 1.21+): Dramatis stays silent there — no progress notices, no reading.
+        if (app.maestro.workshop()) return { ...failure(llmErrorText(app.i18n, 'workshop')), quiet: true };
         const background = auto && app.llm.viaMaestro();
         const gathered = await cardAndBook();
         if (!gathered) return failure(t('intent.error.noCard'));
@@ -300,7 +316,12 @@ export function createIntentReader(deps: { app: App; log: Logger }): IntentReade
             progress(index, total);
             const step = part.core ? await dossierFor(part) : { text: '' };
             if (signal.aborted) return failure(llmErrorText(app.i18n, 'aborted'));
-            if (step.stop) return { ...failure(llmErrorText(app.i18n, step.stop)), ...(auto ? { quiet: true } : {}) };
+            if (step.stop) {
+                return {
+                    ...failure(llmErrorText(app.i18n, step.stop)),
+                    ...(quietError(step.stop, auto) ? { quiet: true } : {}),
+                };
+            }
             const dossier = step.text;
             const response = await app.llm.request<unknown>({
                 task: INTENT_TASK,
@@ -335,7 +356,7 @@ export function createIntentReader(deps: { app: App; log: Logger }): IntentReade
                 if (index === 0) {
                     return {
                         ...failure(error),
-                        ...(auto && QUIET_ERRORS.has(response.error ?? '') ? { quiet: true } : {}),
+                        ...(quietError(response.error, auto) ? { quiet: true } : {}),
                     };
                 }
                 notes.push(t('intent.warning.partFailed', { n: index + 1, total, error }));
@@ -477,7 +498,7 @@ export function createIntentReader(deps: { app: App; log: Logger }): IntentReade
                 if (controller === abort) controller = null;
             }
             const { quiet, ...outcome } = result;
-            last = outcome;
+            memory.last = outcome;
             if (!outcome.ok && !quiet)
                 app.ui.notice(t('intent.failed', { error: outcome.error ?? '?' }), { level: 'error' });
             return outcome;
@@ -485,7 +506,7 @@ export function createIntentReader(deps: { app: App; log: Logger }): IntentReade
 
         running: () => busy,
 
-        lastResult: () => last,
+        lastResult: () => memory.last,
 
         async fingerprint(): Promise<{ card: string; hash: string } | null> {
             const gathered = await cardAndBook();

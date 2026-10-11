@@ -9,7 +9,7 @@ import { DRAMATIS_API_GLOBAL, MAESTRO_API_GLOBAL } from '../../src/shared/apis';
 import type { DramatisApiV1 } from '../../src/shared/apis';
 import { resetSlashSlots } from '../../src/ui/slash';
 import { fakeMaestro } from '../helpers/fakes';
-import { character, flush, installStMock, openSoloChat } from '../helpers/st-mock';
+import { EVENT_TYPES, character, flush, installStMock, openSoloChat } from '../helpers/st-mock';
 import type { StMock } from '../helpers/st-mock';
 import packageJson from '../../package.json';
 import manifest from '../../manifest.json';
@@ -32,6 +32,11 @@ afterEach(async () => {
     delete globals[MAESTRO_API_GLOBAL];
     document.body.innerHTML = '';
 });
+
+/** Fires GENERATION_AFTER_COMMANDS like ST does before a generation. */
+async function generate(): Promise<void> {
+    await mock.eventSource.emit(EVENT_TYPES.GENERATION_AFTER_COMMANDS!, 'normal', {}, false);
+}
 
 describe('startDramatis', () => {
     it('takes its version from package.json, matching the manifest', () => {
@@ -89,6 +94,54 @@ describe('startDramatis', () => {
         expect(runtime.app.maestro.present()).toBe(true);
         expect(runtime.turn.mode()).toBe('maestro');
         expect(runtime.app.llm.viaMaestro()).toBe(true);
+    });
+
+    it('pauses every module in a workshop chat (Maestro 1.21 «Мастерская») and resumes out of it', async () => {
+        const maestro = fakeMaestro({ workshop: false });
+        globals[MAESTRO_API_GLOBAL] = maestro.api;
+        mock.extensionSettings[SETTINGS_KEY] = { slices: { intent: { autoRead: false } } };
+        runtime = await startDramatis();
+        const app = runtime.app;
+        const running = () =>
+            runtime!.modules
+                .list()
+                .filter((item) => item.running)
+                .map((item) => item.module.key);
+        const all = running();
+        expect(all).toContain('engine');
+        expect(all).toContain('turn');
+        const event = EVENT_TYPES.CHAT_CHANGED!;
+        // Maestro decides in its first CHAT_CHANGED listener and awaits Dramatis there; a later listener of the same
+        // CHAT_CHANGED already sees every module stopped.
+        mock.eventSource.makeFirst(event, () => maestro.setWorkshop(mock.chatId === 'workshop'));
+        const seen: string[][] = [];
+        mock.eventSource.on(event, () => void seen.push(running()));
+        maestro.requests.length = 0;
+
+        mock.chatId = 'workshop';
+        await mock.eventSource.emit(event, 'workshop');
+        expect(running()).toEqual([]);
+        expect(seen).toEqual([[]]);
+        expect(app.maestro.workshop()).toBe(true);
+        expect((globals[DRAMATIS_API_GLOBAL] as DramatisApiV1).active()).toBe(false);
+        const read = mock.slashCommands.get('dramatis-read')!;
+        expect(await read.callback({}, '')).toBe('Команда /dramatis-read выключена вместе со своим модулем.');
+        // Nothing reaches the model, and a module switched on stays waiting.
+        const ask = { task: 'dramatis.intent', messages: [], maxTokens: 10, background: false };
+        expect(await app.llm.request(ask)).toEqual({ ok: false, error: 'workshop' });
+        await app.modules.enable('metrics');
+        expect(running()).toEqual([]);
+        await generate();
+        expect([...mock.prompts.values()].filter((prompt) => prompt.value)).toEqual([]);
+        expect(maestro.requests).toHaveLength(0);
+
+        mock.chatId = 'chat-1';
+        await mock.eventSource.emit(event, 'chat-1');
+        await flush();
+        expect(running()).toEqual(all);
+        expect(seen[1]).toEqual(all);
+        expect(app.maestro.workshop()).toBe(false);
+        expect((globals[DRAMATIS_API_GLOBAL] as DramatisApiV1).intentState?.()).not.toBeNull();
     });
 
     it('stops cleanly: no API, no drawer, no windows, no ST listeners', async () => {

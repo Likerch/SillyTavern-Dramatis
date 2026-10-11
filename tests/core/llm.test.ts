@@ -127,6 +127,19 @@ describe('route through Maestro', () => {
         expect(await router.request(request())).toEqual({ ok: false, error: 'maestro: down' });
     });
 
+    it('is silent in a workshop chat (Maestro 1.21 «Мастерская»): «workshop» without asking anyone', async () => {
+        const { router, maestro, bridge } = setup({ maestro: true });
+        bridge.setWorkshop(true);
+        expect(await router.request(request({ background: true }))).toEqual({ ok: false, error: 'workshop' });
+        expect(await router.request(request())).toEqual({ ok: false, error: 'workshop' });
+        expect(router.available('dramatis.intent', false)).toBe(false);
+        expect(maestro.requests).toHaveLength(0);
+        expect(sent).toHaveLength(0);
+        bridge.setWorkshop(false);
+        expect((await router.request(request())).ok).toBe(true);
+        expect(router.available('dramatis.intent', false)).toBe(true);
+    });
+
     it('asks Maestro whether a task is available', () => {
         const { router, maestro } = setup({ maestro: true });
         expect(router.available('dramatis.turn', true)).toBe(true);

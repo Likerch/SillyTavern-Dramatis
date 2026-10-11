@@ -2,7 +2,9 @@
 // exposing it as IntentApi.
 // - Automatically (setting `autoRead`): a solo chat that opens with no user message yet, with a card never read before,
 //   is read once per card and session — only when an AI connection is ready (and, with Maestro, in its leading tab);
-//   a card whose sources changed since its reading gets an offer to read it again.
+//   a card whose sources changed since its reading gets an offer to read it again, once per session. Both marks live in
+//   the module's session memory: a stop and start (a workshop chat round trip) neither reads nor offers again. The
+//   paths that ask for the check (the start, a chat change, Maestro's leader pick) share one run at a time.
 // - `/dramatis-read` and the button in the «Замысел» settings section read again on demand; the section also opens the
 //   «Лист замысла» window.
 // - With Maestro: the task is listed in its profiles («Dramatis: чтение замысла») and every reading goes into its journal
@@ -37,14 +39,19 @@ export const intentModule: DramatisModule<IntentSettings> = {
     defaults: () => ({ autoRead: true }),
     i18n: INTENT_STRINGS,
 
-    init({ app, settings, log, own }) {
+    init({ app, settings, log, own, session }) {
         const t = (key: string, params?: Record<string, string | number>) => app.i18n.t(key, params);
-        const reader = createIntentReader({ app, log });
+        const memory = session(() => ({
+            /** Cards read automatically in this session (never twice, even when the reading failed). */
+            autoRead: new Set<string>(),
+            /** Re-read offers made in this session: card + fingerprint. */
+            offered: new Set<string>(),
+            /** The last reading of this session (IntentApi.lastResult). */
+            last: null as IntentReadResult | null,
+        }));
+        const { autoRead, offered } = memory;
+        const reader = createIntentReader({ app, log, memory });
         let stopped = false;
-        /** Cards read automatically in this session (never twice, even when the reading failed). */
-        const autoRead = new Set<string>();
-        /** Re-read offers made in this session: card + fingerprint. */
-        const offered = new Set<string>();
         const maestroOffs: ApiUnsubscribe[] = [];
 
         const engine = (): EngineApi | null => app.modules.api<EngineApi>(ENGINE_API) ?? null;
@@ -197,8 +204,25 @@ export const intentModule: DramatisModule<IntentSettings> = {
             });
         }
 
-        const check = () => {
-            void onChatOpened().catch((error: unknown) => log.error('intent check failed', error));
+        /** A check is running; one asked meanwhile runs again after it (not beside it: one offer, one reading). */
+        let checking = false;
+        let recheck = false;
+        const check = (): void => {
+            if (checking) {
+                recheck = true;
+                return;
+            }
+            checking = true;
+            void (async () => {
+                try {
+                    do {
+                        recheck = false;
+                        await onChatOpened().catch((error: unknown) => log.error('intent check failed', error));
+                    } while (recheck && !stopped);
+                } finally {
+                    checking = false;
+                }
+            })();
         };
 
         app.modules.expose(INTENT_API, {

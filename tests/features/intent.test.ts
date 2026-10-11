@@ -15,6 +15,7 @@ import { PARTIAL_MARK, PROFILES_TARGET, archiveNames, sourcesFingerprint } from 
 import { plural } from '../../src/features/intent/strings';
 import { createI18n } from '../../src/core/i18n';
 import { INTENT_STRINGS } from '../../src/features/intent/strings';
+import type { HostImpl } from '../../src/host';
 import { DRAMATIS_API_GLOBAL } from '../../src/shared/apis';
 import type { ApiJournalChange, ApiLlmResult, DramatisApiV1 } from '../../src/shared/apis';
 import { fakeMaestro } from '../helpers/fakes';
@@ -462,6 +463,18 @@ describe('intent — errors', () => {
         });
     });
 
+    it('stays quiet on a «workshop» refusal (Maestro 1.21 «Мастерская»), even for the user’s own reading', async () => {
+        const workshop: ApiLlmResult = { ok: false, error: 'workshop' };
+        const { h, intent, maestro, notices } = await setup({ replies: [workshop], dossier: workshop });
+        const result = await intent.read({ force: true });
+        expect(result.ok).toBe(false);
+        expect(result.error).toBe('Это чат мастерской (Maestro «Мастерская»): здесь Dramatis молчит.');
+        // The dossier step already hears it: nothing more is asked, nothing is saved, no error toast.
+        expect(maestro!.requests).toHaveLength(1);
+        expect(profilesOf(h.mock)).toBeNull();
+        expect(notices.filter((notice) => notice.level === 'error')).toEqual([]);
+    });
+
     it('keeps the parts it got when a later one fails, and marks the reading for a re-read', async () => {
         const [first] = tavernParts();
         const { h, intent, notices } = await setup({
@@ -668,6 +681,69 @@ describe('intent — reading by itself', () => {
         offer.run!();
         await until(() => maestro!.requests.length === 3 && profilesOf(h.mock)!.characters.length === 4);
         expect(profilesOf(h.mock)!.intent?.sourcesHash).not.toBe('old');
+    });
+
+    it('does not offer or read again after the module stops and starts (a workshop chat round trip)', async () => {
+        const stored = { ...emptyCardProfiles('tavern.png'), intent: { at: 1, sourcesHash: 'old' } };
+        const { h, maestro, notices } = await setup({ autoRead: true, profiles: stored });
+        await until(() => notices.some((item) => item.action === 'Перечитать'));
+        await h.app.modules.disable('intent');
+        await h.app.modules.enable('intent');
+        await switchChat(h.mock, 'chat-1', { maestro: maestro! });
+        await flush();
+        expect(notices.filter((item) => item.action === 'Перечитать')).toHaveLength(1);
+        expect(maestro!.requests).toHaveLength(0);
+    });
+
+    it('several checks at once (the start, a chat change, the leader pick) share their runs and offer once', async () => {
+        const maestro = fakeMaestro();
+        const leaders: ((leader: boolean) => void)[] = [];
+        maestro.api.leader = {
+            isLeader: () => true,
+            onChange: (listener) => {
+                leaders.push(listener);
+                return () => {};
+            },
+        };
+        const stored = { ...emptyCardProfiles('tavern.png'), intent: { at: 1, sourcesHash: 'old' } };
+        const { h, notices } = await setup({ autoRead: false, profiles: stored, maestro });
+        h.app.settings.module<{ autoRead: boolean }>('intent', () => ({ autoRead: true })).autoRead = true;
+        const cardBook = vi.spyOn(h.runtime.readers.lore, 'cardBook');
+        await h.app.bus.emit('chat:changed', { chatId: 'chat-1' });
+        void h.app.bus.emit('chat:changed', { chatId: 'chat-1' });
+        for (const listener of leaders) listener(true);
+        await until(() => notices.some((item) => item.action === 'Перечитать'));
+        await flush();
+        await flush();
+        expect(notices.filter((item) => item.action === 'Перечитать')).toHaveLength(1);
+        // One run, then one more for everything asked while it ran — not one per path.
+        expect(cardBook.mock.calls.length).toBe(2);
+    });
+
+    it('a workshop chat round trip offers nothing new: the module comes back after the new chat’s persona', async () => {
+        const maestro = fakeMaestro({ workshop: false });
+        const stored = { ...emptyCardProfiles('tavern.png'), intent: { at: 1, sourcesHash: 'old' } };
+        const { h, notices } = await setup({ autoRead: true, profiles: stored, maestro });
+        await until(() => notices.some((item) => item.action === 'Перечитать'));
+        const event = 'chat_id_changed';
+        // Maestro decides in its first CHAT_CHANGED listener; SillyTavern loads the chat's persona in its own, later.
+        h.mock.eventSource.makeFirst(event, () => maestro.setWorkshop(h.mock.chatId === 'workshop'));
+        h.mock.eventSource.on(event, () => {
+            h.mock.name1 = h.mock.chatId === 'workshop' ? 'Мастер' : 'Курьер';
+        });
+        (h.app.host as HostImpl).events.reassertOrder();
+
+        for (let trip = 0; trip < 2; trip++) {
+            await switchChat(h.mock, 'workshop');
+            expect(h.app.modules.list().some((item) => item.running)).toBe(false);
+            await switchChat(h.mock, 'chat-1', { maestro });
+            await until(() => h.app.modules.list().some((item) => item.module.key === 'intent' && item.running));
+            await flush();
+            await flush();
+        }
+        expect(h.mock.name1).toBe('Курьер');
+        expect(notices.filter((item) => item.action === 'Перечитать')).toHaveLength(1);
+        expect(maestro.requests).toHaveLength(0);
     });
 
     it('offers nothing when the card is as it was read', async () => {

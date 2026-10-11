@@ -1,5 +1,5 @@
 //#region package.json
-var version$2 = "1.4.0";
+var version$2 = "1.4.1";
 //#endregion
 //#region src/adapters/card/index.ts
 function str$4(value) {
@@ -603,11 +603,32 @@ function isMaestroApi(value) {
 	const api = value;
 	return api.version === 1 && !!api.llm && typeof api.llm.request === "function" && typeof api.llm.available === "function" && typeof api.onTurn === "function";
 }
+/** A resume waiting for the end of a chat switch goes ahead after this long anyway (a CHAT_CHANGED that never ends). */
+var RESUME_FALLBACK_MS = 5e3;
+/** `workshop.active()` of an API object; false without the member (Maestro before 1.21) or when it throws. */
+function workshopOf(api, log) {
+	const member = api?.workshop;
+	if (!member || typeof member.active !== "function") return false;
+	try {
+		return member.active() === true;
+	} catch (error) {
+		log.debug("MAESTRO_API.workshop.active failed", error);
+		return false;
+	}
+}
 function createMaestroBridge(host, bus, log) {
 	/** The API object seen last (null: absent). A restarted Maestro publishes a new object. */
 	let current = null;
 	let warned = false;
 	const unsubscribers = [];
+	/** The subscription to `workshop.onChange` of `current` (null: none, or a Maestro without «Мастерская»). */
+	let offWorkshop = null;
+	/** The workshop state announced last on the bus (true from the pause until the resume is announced). */
+	let workshop = false;
+	/** The chat whose CHAT_CHANGED reached Dramatis' last listener: another chat open now means a switch under way. */
+	let settledChat = null;
+	/** A resume waiting for the switch under way (the fallback timer); null when none waits. */
+	let resumeTimer = null;
 	function lookup() {
 		const value = globalThis[MAESTRO_API_GLOBAL];
 		if (value === void 0 || value === null) return null;
@@ -619,13 +640,62 @@ function createMaestroBridge(host, bus, log) {
 		}
 		return null;
 	}
+	function cancelResume() {
+		if (resumeTimer) clearTimeout(resumeTimer);
+		resumeTimer = null;
+	}
+	/** Announces a flip (nothing when it is the state announced last); resolves when every bus handler finished. */
+	function announceWorkshop(active) {
+		cancelResume();
+		if (active === workshop) return Promise.resolve();
+		workshop = active;
+		log.info(active ? "workshop chat: Dramatis pauses" : "out of the workshop chat: Dramatis resumes");
+		return bus.emit("maestro:workshop", { active });
+	}
+	/** What Maestro (or its absence) says now: a pause at once, a resume during a chat switch once it is through. */
+	function followState(active) {
+		if (active || !workshop || host.chatId() === settledChat) return announceWorkshop(active);
+		resumeTimer ??= setTimeout(() => {
+			resumeTimer = null;
+			announceWorkshop(workshopOf(current, log));
+		}, RESUME_FALLBACK_MS);
+		return Promise.resolve();
+	}
+	/** Dramatis' last CHAT_CHANGED listener: the switch is through (persona and all), a waiting resume goes now. */
+	const onChatSettled = () => {
+		settledChat = host.chatId();
+		return resumeTimer ? announceWorkshop(workshopOf(current, log)) : void 0;
+	};
+	function releaseWorkshop() {
+		const off = offWorkshop;
+		offWorkshop = null;
+		if (!off) return;
+		try {
+			off();
+		} catch (error) {
+			log.debug("MAESTRO_API.workshop unsubscribe failed", error);
+		}
+	}
+	/** Follows `workshop.onChange` of this API object; a call from an object no longer current is ignored. */
+	function followWorkshop(api) {
+		releaseWorkshop();
+		const member = api?.workshop;
+		if (!api || !member || typeof member.onChange !== "function") return;
+		try {
+			offWorkshop = member.onChange((active) => current === api ? followState(active === true) : void 0);
+		} catch (error) {
+			log.warn("could not follow Maestro’s workshop chats", error);
+		}
+	}
 	function note(api) {
 		if (api === current) return;
 		const replaced = api !== null && current !== null;
 		current = api;
+		followWorkshop(api);
 		const now = api !== null;
 		log.info(now ? `Maestro ${api?.maestroVersion ?? "?"} ${replaced ? "restarted" : "connected"}` : "Maestro is gone");
 		queueMicrotask(() => void bus.emit("maestro:changed", { present: now }));
+		queueMicrotask(() => void followState(workshopOf(current, log)));
 	}
 	const onReady = () => {
 		note(lookup());
@@ -640,6 +710,11 @@ function createMaestroBridge(host, bus, log) {
 			const api = lookup();
 			note(api);
 			return api !== null;
+		},
+		workshop() {
+			const api = lookup();
+			note(api);
+			return workshopOf(api, log) || workshop;
 		},
 		check() {
 			const api = lookup();
@@ -656,10 +731,15 @@ function createMaestroBridge(host, bus, log) {
 				const name = host.events.name(key);
 				if (name) unsubscribers.push(host.events.on(name, onReady));
 			}
+			const chatChanged = host.events.name("CHAT_CHANGED");
+			if (chatChanged) unsubscribers.push(host.events.on(chatChanged, onChatSettled, { order: "last" }));
+			settledChat = host.chatId();
 			onReady();
 		},
 		dispose() {
 			for (const off of unsubscribers.splice(0)) off();
+			releaseWorkshop();
+			cancelResume();
 		}
 	};
 }
@@ -678,7 +758,10 @@ function createReaders(host, log) {
 }
 //#endregion
 //#region src/core/bus.ts
-/** Dramatis' internal event bus. Handlers run in registration order; one failing handler does not stop others. */
+/**
+* Dramatis' internal event bus. Handlers run in registration order; one failing handler does not stop others, and one
+* removed while an emit is under way is not called by it.
+*/
 var EventBus = class {
 	log;
 	handlers = /* @__PURE__ */ new Map();
@@ -699,10 +782,13 @@ var EventBus = class {
 	async emit(event, payload) {
 		const set = this.handlers.get(event);
 		if (!set) return;
-		for (const handler of [...set]) try {
-			await handler(payload);
-		} catch (error) {
-			this.log.error(`bus handler for ${String(event)} failed`, error);
+		for (const handler of [...set]) {
+			if (!set.has(handler)) continue;
+			try {
+				await handler(payload);
+			} catch (error) {
+				this.log.error(`bus handler for ${String(event)} failed`, error);
+			}
 		}
 	}
 	/** Drops every handler (app stop). */
@@ -1143,6 +1229,10 @@ function createLlmRouter(deps) {
 	}
 	return {
 		async request(request) {
+			if (bridge.workshop()) return {
+				ok: false,
+				error: "workshop"
+			};
 			const api = bridge.api();
 			if (api) {
 				const wire = dropUndefined({
@@ -1182,6 +1272,7 @@ function createLlmRouter(deps) {
 			return viaOwnClient(request);
 		},
 		available(task, background) {
+			if (bridge.workshop()) return false;
 			const api = bridge.api();
 			if (api) try {
 				return api.llm.available(task);
@@ -2427,6 +2518,7 @@ var CORE_STRINGS = {
 		"core.llm.badTask": "Maestro does not know this AI task.",
 		"core.llm.badRequest": "Maestro refused the AI request as malformed.",
 		"core.llm.maestroStopped": "Maestro is stopped, so the AI request did not run.",
+		"core.llm.workshop": "This is a workshop chat (Maestro «Мастерская»): Dramatis stays silent here.",
 		"core.llm.parse": "The model’s answer could not be read.",
 		"core.llm.empty": "The model returned an empty answer.",
 		"core.llm.transport": "Could not reach the model: {error}",
@@ -2446,6 +2538,7 @@ var CORE_STRINGS = {
 		"core.llm.badTask": "Maestro не знает такой задачи ИИ.",
 		"core.llm.badRequest": "Maestro отклонил запрос к ИИ как неправильный.",
 		"core.llm.maestroStopped": "Maestro остановлен, поэтому запрос к ИИ не выполнен.",
+		"core.llm.workshop": "Это чат мастерской (Maestro «Мастерская»): здесь Dramatis молчит.",
 		"core.llm.parse": "Не получилось разобрать ответ модели.",
 		"core.llm.empty": "Модель вернула пустой ответ.",
 		"core.llm.transport": "Не удалось связаться с моделью: {error}",
@@ -2467,6 +2560,7 @@ function llmErrorText(i18n, error) {
 		case "bad-task": return i18n.t("core.llm.badTask");
 		case "bad-request": return i18n.t("core.llm.badRequest");
 		case "maestro-stopped": return i18n.t("core.llm.maestroStopped");
+		case "workshop": return i18n.t("core.llm.workshop");
 		case "parse": return i18n.t("core.llm.parse");
 		case "empty": return i18n.t("core.llm.empty");
 		default:
@@ -2706,7 +2800,9 @@ function createHostEvents(ctx, log) {
 		on(event, handler, options) {
 			const raw = resolve(event);
 			const order = options?.order ?? "normal";
+			let active = true;
 			const listener = (...args) => {
+				if (!active) return void 0;
 				try {
 					const result = handler(...args);
 					if (result instanceof Promise) return result.catch((error) => log.error(`listener for ${raw} failed`, error));
@@ -2726,7 +2822,6 @@ function createHostEvents(ctx, log) {
 			else if (order === "last") placeLast(es, raw, listener, true);
 			else es.on(raw, listener);
 			registrations.add(registration);
-			let active = true;
 			return () => {
 				if (!active) return;
 				active = false;
@@ -4108,7 +4203,8 @@ function createApiPublisher(deps) {
 	}
 	/** readIntent when no part can read (Dramatis or its intent module is off) or the reading broke. */
 	function noReading() {
-		const error = deps.i18n?.t("core.api.noReading") ?? "core.api.noReading";
+		const key = deps.workshop?.() ? "core.llm.workshop" : "core.api.noReading";
+		const error = deps.i18n?.t(key) ?? key;
 		return {
 			ok: false,
 			characters: 0,
@@ -4199,10 +4295,13 @@ var Modules = class {
 	deps;
 	entries = /* @__PURE__ */ new Map();
 	apis = /* @__PURE__ */ new Map();
+	/** Each module's session memory (ModuleContext.session), kept past its stops. */
+	memories = /* @__PURE__ */ new Map();
 	app = null;
 	/** startAll() ran and stopAll() has not: modules may start. */
 	active = false;
 	offMaestro = null;
+	offWorkshop = null;
 	/** Serialises starts and stops (Maestro may come and go while modules start). */
 	queue = Promise.resolve();
 	constructor(deps) {
@@ -4228,6 +4327,7 @@ var Modules = class {
 		this.app = app;
 		this.active = true;
 		this.offMaestro ??= this.deps.bus.on("maestro:changed", () => this.followMaestro());
+		this.offWorkshop ??= this.deps.bus.on("maestro:workshop", () => this.followWorkshop());
 		return this.serial(async () => {
 			for (const entry of this.ordered()) if (this.canStart(entry)) await this.start(entry);
 		});
@@ -4243,6 +4343,8 @@ var Modules = class {
 	async dispose() {
 		this.offMaestro?.();
 		this.offMaestro = null;
+		this.offWorkshop?.();
+		this.offWorkshop = null;
 		await this.stopAll();
 	}
 	list() {
@@ -4284,6 +4386,7 @@ var Modules = class {
 	}
 	canStart(entry) {
 		if (!this.active || !this.app || entry.running || !this.enabled(entry)) return false;
+		if (this.deps.bridge.workshop()) return false;
 		return !entry.module.needsMaestro || this.deps.bridge.present();
 	}
 	serial(job) {
@@ -4306,6 +4409,20 @@ var Modules = class {
 				if (present && this.canStart(entry)) await this.start(entry);
 				else if (!present) await this.stop(entry);
 			}
+		});
+	}
+	/**
+	* «Мастерская» flipped: in a workshop chat every running module stops (reverse stage order, as stopAll), out of it
+	* every module that can start starts again. The bridge is read when the job runs, so flips queued behind a slow
+	* start end in the latest state.
+	*/
+	followWorkshop() {
+		return this.serial(async () => {
+			if (this.deps.bridge.workshop()) {
+				for (const entry of this.ordered().reverse()) await this.stop(entry);
+				return;
+			}
+			for (const entry of this.ordered()) if (this.canStart(entry)) await this.start(entry);
 		});
 	}
 	/** A running module that needs Maestro and started with another MAESTRO_API object. */
@@ -4356,7 +4473,8 @@ var Modules = class {
 				app: this.scopedApp(app, entry),
 				settings: this.deps.settings.module(entry.module.key, entry.module.defaults),
 				log,
-				own: (dispose) => entry.disposers.push(dispose)
+				own: (dispose) => entry.disposers.push(dispose),
+				session: (create) => this.memory(entry.module.key, create)
 			});
 			entry.running = true;
 			log.debug("started");
@@ -4364,6 +4482,14 @@ var Modules = class {
 			log.error("init failed", error);
 			await this.release(entry);
 		}
+	}
+	memory(key, create) {
+		let memory = this.memories.get(key);
+		if (!memory) {
+			memory = create();
+			this.memories.set(key, memory);
+		}
+		return memory;
 	}
 	async stop(entry) {
 		if (entry.starting) await entry.starting;
@@ -19709,10 +19835,12 @@ var SAID_MESSAGES = 30;
 var ROLE_KEY_RE = /role|occupation|job|profession|class|title|роль|занят|профес|должн|ремесл|звани/i;
 var SPECIES_KEY_RE = /species|race|folk|раса|вид|народ/i;
 var GENDER_KEY_RE = /gender|sex|^пол$|^пол_|_пол$/i;
+/** «Not now» refusals (another tab leads, the daily cap, Maestro restarting, a workshop chat): not an attempt. */
 var TRANSIENT = /* @__PURE__ */ new Set([
 	"not-leader",
 	"cap",
-	"maestro-stopped"
+	"maestro-stopped",
+	"workshop"
 ]);
 /** Defaulted fields the dice of a fill write when nobody set them (initiative, persistence, resting mood). */
 var DICE_DEFAULTED = [
@@ -19771,17 +19899,20 @@ function identityOf(member) {
 	}
 	return out;
 }
-function startGenerator({ app, settings, log, own }) {
+function startGenerator({ app, settings, log, own, session }) {
 	const engine = () => app.modules.api("engine") ?? null;
 	const maestro = () => app.maestro.api();
 	const t = (key, params) => app.i18n.t(key, params);
 	const inflight = /* @__PURE__ */ new Set();
-	const attempts = /* @__PURE__ */ new Map();
-	/** Committed turns seen in this session: retries wait for the next one (state.turn belongs to the turn module). */
-	let commits = 0;
+	const memory = session(() => ({
+		attempts: /* @__PURE__ */ new Map(),
+		/** Committed turns seen in this session: retries wait for the next one (state.turn is the turn module's). */
+		commits: 0,
+		/** Names sketched in this session per chat: never twice, even if the engine still lists them. */
+		sketched: /* @__PURE__ */ new Set()
+	}));
+	const { attempts, sketched } = memory;
 	const rulesSeen = /* @__PURE__ */ new Map();
-	/** Names sketched in this session per chat: never twice, even if the engine still lists them. */
-	const sketched = /* @__PURE__ */ new Set();
 	let queue = Promise.resolve();
 	let pending = false;
 	let alive = true;
@@ -19849,13 +19980,13 @@ function startGenerator({ app, settings, log, own }) {
 	}
 	function mayTry(view, id, target) {
 		const last = attempts.get(attemptKey(view, id, target));
-		return !last || last.count < 3 && commits > last.commit;
+		return !last || last.count < 3 && memory.commits > last.commit;
 	}
 	function noteAttempt(view, id, target, counts) {
 		const key = attemptKey(view, id, target);
 		const last = attempts.get(key);
 		attempts.set(key, {
-			commit: commits,
+			commit: memory.commits,
 			count: (last?.count ?? 0) + (counts ? 1 : 0)
 		});
 	}
@@ -20303,7 +20434,7 @@ function startGenerator({ app, settings, log, own }) {
 			if (!saved || !before || !after) return fail("not-saved");
 			if (background) {
 				if (target === "fill" && needsFill(after)) attempts.set(attemptKey(view, id, target), {
-					commit: commits,
+					commit: memory.commits,
 					count: 3
 				});
 				else attempts.delete(attemptKey(view, id, target));
@@ -20396,7 +20527,7 @@ function startGenerator({ app, settings, log, own }) {
 		}
 	}
 	async function onCommitted(messageIndex) {
-		commits += 1;
+		memory.commits += 1;
 		const eng = engine();
 		if (!eng || !leads()) return;
 		const view = await eng.ready() ?? eng.view();
@@ -22359,12 +22490,21 @@ var DOSSIER_TEMPERATURE = .3;
 var MAX_ARCHIVE_NAMES = 300;
 /** Notes shown in the notice (all of them are in the result). */
 var NOTICE_NOTES = 3;
-/** Errors of a background request that mean «not now» (another tab leads, the daily cap, Maestro restarting). */
+/**
+* Errors of a background request that mean «not now» (another tab leads, the daily cap, Maestro restarting, a workshop
+* chat). An automatic reading stops on them without a notice; a workshop chat (Maestro 1.21+ «Мастерская», where
+* Dramatis stays silent) keeps even the user's reading quiet.
+*/
 var QUIET_ERRORS = /* @__PURE__ */ new Set([
 	"not-leader",
 	"cap",
-	"maestro-stopped"
+	"maestro-stopped",
+	"workshop"
 ]);
+/** A failed reading with this error gives no notice. */
+function quietError(error, auto) {
+	return error === "workshop" || auto && QUIET_ERRORS.has(error ?? "");
+}
 /** Fingerprint of a card's sources for re-read checks: card fields, greetings, persona and lorebook (no archives). */
 function sourcesFingerprint(card, book) {
 	return intentFingerprint(intentSources(card, { cardBook: book }));
@@ -22434,9 +22574,9 @@ function storyLanguageOf(app, log) {
 function createIntentReader(deps) {
 	const { app, log } = deps;
 	const t = (key, params) => app.i18n.t(key, params);
+	const memory = deps.memory ?? { last: null };
 	let busy = false;
 	let controller = null;
-	let last = null;
 	const engine = () => app.modules.api("engine") ?? null;
 	async function cardAndBook() {
 		if (app.host.isGroupChat() || !app.host.cardKey()) return null;
@@ -22509,6 +22649,10 @@ function createIntentReader(deps) {
 		return parts.join(", ");
 	}
 	async function run(force, auto, signal) {
+		if (app.maestro.workshop()) return {
+			...failure(llmErrorText(app.i18n, "workshop")),
+			quiet: true
+		};
 		const background = auto && app.llm.viaMaestro();
 		const gathered = await cardAndBook();
 		if (!gathered) return failure(t("intent.error.noCard"));
@@ -22584,7 +22728,7 @@ function createIntentReader(deps) {
 			if (signal.aborted) return failure(llmErrorText(app.i18n, "aborted"));
 			if (step.stop) return {
 				...failure(llmErrorText(app.i18n, step.stop)),
-				...auto ? { quiet: true } : {}
+				...quietError(step.stop, auto) ? { quiet: true } : {}
 			};
 			const dossier = step.text;
 			const response = await app.llm.request({
@@ -22621,7 +22765,7 @@ function createIntentReader(deps) {
 				const error = (response.ok || response.error === "parse") && !response.text?.trim() ? t("intent.error.emptyAnswer") : llmErrorText(app.i18n, response.ok ? "parse" : response.error);
 				if (index === 0) return {
 					...failure(error),
-					...auto && QUIET_ERRORS.has(response.error ?? "") ? { quiet: true } : {}
+					...quietError(response.error, auto) ? { quiet: true } : {}
 				};
 				notes.push(t("intent.warning.partFailed", {
 					n: index + 1,
@@ -22767,12 +22911,12 @@ function createIntentReader(deps) {
 				if (controller === abort) controller = null;
 			}
 			const { quiet, ...outcome } = result;
-			last = outcome;
+			memory.last = outcome;
 			if (!outcome.ok && !quiet) app.ui.notice(t("intent.failed", { error: outcome.error ?? "?" }), { level: "error" });
 			return outcome;
 		},
 		running: () => busy,
-		lastResult: () => last,
+		lastResult: () => memory.last,
 		async fingerprint() {
 			const gathered = await cardAndBook();
 			const cardKey = app.host.cardKey();
@@ -22805,17 +22949,23 @@ var intentModule = {
 	enabledByDefault: true,
 	defaults: () => ({ autoRead: true }),
 	i18n: INTENT_STRINGS,
-	init({ app, settings, log, own }) {
+	init({ app, settings, log, own, session }) {
 		const t = (key, params) => app.i18n.t(key, params);
+		const memory = session(() => ({
+			/** Cards read automatically in this session (never twice, even when the reading failed). */
+			autoRead: /* @__PURE__ */ new Set(),
+			/** Re-read offers made in this session: card + fingerprint. */
+			offered: /* @__PURE__ */ new Set(),
+			/** The last reading of this session (IntentApi.lastResult). */
+			last: null
+		}));
+		const { autoRead, offered } = memory;
 		const reader = createIntentReader({
 			app,
-			log
+			log,
+			memory
 		});
 		let stopped = false;
-		/** Cards read automatically in this session (never twice, even when the reading failed). */
-		const autoRead = /* @__PURE__ */ new Set();
-		/** Re-read offers made in this session: card + fingerprint. */
-		const offered = /* @__PURE__ */ new Set();
 		const maestroOffs = [];
 		const engine = () => app.modules.api("engine") ?? null;
 		/** Where the reading of the current card stands (from the profiles the engine holds). */
@@ -22958,8 +23108,25 @@ var intentModule = {
 				run: () => void read({ force: true })
 			} });
 		}
+		/** A check is running; one asked meanwhile runs again after it (not beside it: one offer, one reading). */
+		let checking = false;
+		let recheck = false;
 		const check = () => {
-			onChatOpened().catch((error) => log.error("intent check failed", error));
+			if (checking) {
+				recheck = true;
+				return;
+			}
+			checking = true;
+			(async () => {
+				try {
+					do {
+						recheck = false;
+						await onChatOpened().catch((error) => log.error("intent check failed", error));
+					} while (recheck && !stopped);
+				} finally {
+					checking = false;
+				}
+			})();
 		};
 		app.modules.expose(INTENT_API$1, {
 			read: (options) => read(options),
@@ -29064,15 +29231,19 @@ var sheetModule = {
 		tab: "core"
 	}),
 	i18n: SHEET_STRINGS,
-	init({ app, settings, log, own }) {
+	init({ app, settings, log, own, session }) {
 		if (!FILTERS.includes(settings.filter)) settings.filter = "all";
 		if (!SECTIONS.includes(settings.tab)) settings.tab = "core";
+		const { results, seen } = session(() => ({
+			results: /* @__PURE__ */ new Map(),
+			seen: /* @__PURE__ */ new Map()
+		}));
 		const deps = {
 			app,
 			settings,
 			log,
-			results: /* @__PURE__ */ new Map(),
-			seen: /* @__PURE__ */ new Map()
+			results,
+			seen
 		};
 		const engine = () => app.modules.api(ENGINE_API);
 		own(app.ui.style("sheet", sheet_default));
@@ -29257,7 +29428,8 @@ var STOP_ERRORS = /* @__PURE__ */ new Set([
 	"aborted",
 	"maestro-stopped",
 	"bad-task",
-	"bad-request"
+	"bad-request",
+	"workshop"
 ]);
 function createTranslator(deps) {
 	const { app, log } = deps;
@@ -29862,12 +30034,16 @@ var STATE_TARGET = "dramatis-state";
 function snapshotFile(app, chatId) {
 	return app.files.fileName(`chat-${stableHash(chatId)}-undo`);
 }
-/** Errors of a background request that mean «not now»: another tab leads, the daily cap, Maestro restarting. */
+/**
+* Errors of a background request that mean «not now»: another tab leads, the daily cap, Maestro restarting, a workshop
+* chat (Maestro 1.21+ «Мастерская»).
+*/
 var SILENT_ERRORS = /* @__PURE__ */ new Set([
 	"not-leader",
 	"cap",
 	"aborted",
-	"maestro-stopped"
+	"maestro-stopped",
+	"workshop"
 ]);
 /** The same reply (index, swipe, text) as the state's last committed one. */
 function sameCommit(state, messageIndex, swipeId, hash) {
@@ -31795,7 +31971,8 @@ async function startDramatis(options = {}) {
 		settings,
 		bus,
 		log: log.scope("api"),
-		i18n
+		i18n,
+		workshop: () => bridge.workshop()
 	});
 	const modules = new Modules({
 		settings,

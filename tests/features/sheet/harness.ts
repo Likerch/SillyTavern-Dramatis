@@ -18,7 +18,7 @@ import type { App, DramatisSettings, SettingsService, Unsubscribe } from '../../
 import { UI_STRINGS, createUi } from '../../../src/ui';
 import type { UiImpl } from '../../../src/ui';
 import { resetSlashSlots } from '../../../src/ui/slash';
-import { memoryLogger, mockHost } from '../../helpers/fakes';
+import { freshSession, memoryLogger, mockHost } from '../../helpers/fakes';
 import { installStMock } from '../../helpers/st-mock';
 import type { StMock } from '../../helpers/st-mock';
 import { tavern } from '../../domain/cast-fixtures';
@@ -258,7 +258,13 @@ export function harness(options: HarnessOptions = {}): Harness {
     } as unknown as App;
     const slice = settings.module('sheet', sheetModule.defaults);
     const owned: (() => void | Promise<void>)[] = [];
-    void sheetModule.init({ app, settings: slice, log, own: (dispose) => void owned.push(dispose) });
+    void sheetModule.init({
+        app,
+        settings: slice,
+        log,
+        own: (dispose) => void owned.push(dispose),
+        session: freshSession,
+    });
     return {
         app,
         ui,

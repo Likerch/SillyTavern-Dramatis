@@ -1,7 +1,9 @@
 // LLM requests of Dramatis (docs/dev-plan.md «ИИ»):
 // - with Maestro: everything goes through MAESTRO_API.llm (task profiles, cost accounting, daily cap, leader tab);
 // - without it: only interactive tasks (the user pressed a button: reading the author's intent) run on Dramatis' own
-//   client; background tasks answer `needs-maestro`.
+//   client; background tasks answer `needs-maestro`;
+// - in a workshop chat (Maestro 1.21+ «Мастерская», a helper card's chat) nothing runs: every request answers
+//   `workshop` without reaching Maestro (which would refuse it the same way) and no task is available.
 //
 // The own client is ported from Maestro src/core/llm.ts: a saved Connection Manager profile (the one chosen in the
 // settings, else the active one), past the chat — no lorebooks, interceptors or the preset (includePreset: false);
@@ -171,6 +173,7 @@ export function createLlmRouter(deps: LlmRouterDeps): LlmRouter {
 
     return {
         async request<T = unknown>(request: LlmRequest): Promise<LlmResult<T>> {
+            if (bridge.workshop()) return { ok: false, error: 'workshop' };
             const api = bridge.api();
             if (api) {
                 const wire: ApiLlmRequest = dropUndefined({
@@ -202,6 +205,7 @@ export function createLlmRouter(deps: LlmRouterDeps): LlmRouter {
         },
 
         available(task: string, background: boolean): boolean {
+            if (bridge.workshop()) return false;
             const api = bridge.api();
             if (api) {
                 try {

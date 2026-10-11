@@ -3,8 +3,14 @@
 // - enabled = the user's switch, else the module's default (settings.isModuleEnabled);
 // - modules with `needsMaestro` start only while MAESTRO_API is present, stop when it disappears and restart when
 //   Maestro restarts (a new API object forgets their registrations) — bus `maestro:changed`;
+// - «Мастерская» (Maestro 1.21+): no module runs in a workshop chat (a helper card's chat, where the story machinery
+//   stays silent). Every running module stops when such a chat opens and every module that can start starts again when
+//   it is left or the card loses the tag — bus `maestro:workshop`, whose emit Maestro awaits, so the modules are gone
+//   before the rest of CHAT_CHANGED runs. Their switches do not change;
 // - each module gets an App whose `modules.expose()` knows the module: exposing `'api'` registers a DRAMATIS_API part
-//   (src/app/api.ts), any other key an inter-module API; both are dropped when the module stops.
+//   (src/app/api.ts), any other key an inter-module API; both are dropped when the module stops;
+// - `session()` gives a module the same memory object on every start of this manager's life (the page session):
+//   «once per session» marks survive a stop and start — a workshop chat round trip must not offer or read again.
 import type {
     App,
     Bus,
@@ -45,10 +51,13 @@ export interface ModulesDeps {
 export class Modules implements ModuleManager {
     private readonly entries = new Map<string, Entry>();
     private readonly apis = new Map<string, unknown>();
+    /** Each module's session memory (ModuleContext.session), kept past its stops. */
+    private readonly memories = new Map<string, object>();
     private app: App | null = null;
     /** startAll() ran and stopAll() has not: modules may start. */
     private active = false;
     private offMaestro: Unsubscribe | null = null;
+    private offWorkshop: Unsubscribe | null = null;
     /** Serialises starts and stops (Maestro may come and go while modules start). */
     private queue: Promise<unknown> = Promise.resolve();
 
@@ -75,6 +84,7 @@ export class Modules implements ModuleManager {
         this.app = app;
         this.active = true;
         this.offMaestro ??= this.deps.bus.on('maestro:changed', () => this.followMaestro());
+        this.offWorkshop ??= this.deps.bus.on('maestro:workshop', () => this.followWorkshop());
         return this.serial(async () => {
             for (const entry of this.ordered()) if (this.canStart(entry)) await this.start(entry);
         });
@@ -92,6 +102,8 @@ export class Modules implements ModuleManager {
     async dispose(): Promise<void> {
         this.offMaestro?.();
         this.offMaestro = null;
+        this.offWorkshop?.();
+        this.offWorkshop = null;
         await this.stopAll();
     }
 
@@ -142,6 +154,7 @@ export class Modules implements ModuleManager {
 
     private canStart(entry: Entry): boolean {
         if (!this.active || !this.app || entry.running || !this.enabled(entry)) return false;
+        if (this.deps.bridge.workshop()) return false;
         return !entry.module.needsMaestro || this.deps.bridge.present();
     }
 
@@ -166,6 +179,21 @@ export class Modules implements ModuleManager {
                 if (present && this.canStart(entry)) await this.start(entry);
                 else if (!present) await this.stop(entry);
             }
+        });
+    }
+
+    /**
+     * «Мастерская» flipped: in a workshop chat every running module stops (reverse stage order, as stopAll), out of it
+     * every module that can start starts again. The bridge is read when the job runs, so flips queued behind a slow
+     * start end in the latest state.
+     */
+    private followWorkshop(): Promise<void> {
+        return this.serial(async () => {
+            if (this.deps.bridge.workshop()) {
+                for (const entry of this.ordered().reverse()) await this.stop(entry);
+                return;
+            }
+            for (const entry of this.ordered()) if (this.canStart(entry)) await this.start(entry);
         });
     }
 
@@ -220,6 +248,7 @@ export class Modules implements ModuleManager {
                 settings: this.deps.settings.module(entry.module.key, entry.module.defaults as () => object),
                 log,
                 own: (dispose) => entry.disposers.push(dispose),
+                session: <T extends object>(create: () => T): T => this.memory(entry.module.key, create),
             });
             entry.running = true;
             log.debug('started');
@@ -227,6 +256,15 @@ export class Modules implements ModuleManager {
             log.error('init failed', error);
             await this.release(entry);
         }
+    }
+
+    private memory<T extends object>(key: string, create: () => T): T {
+        let memory = this.memories.get(key) as T | undefined;
+        if (!memory) {
+            memory = create();
+            this.memories.set(key, memory);
+        }
+        return memory;
     }
 
     private async stop(entry: Entry): Promise<void> {

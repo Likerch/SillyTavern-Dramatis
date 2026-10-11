@@ -15,6 +15,7 @@ export const CORE_STRINGS: I18nParts = {
         'core.llm.badTask': 'Maestro does not know this AI task.',
         'core.llm.badRequest': 'Maestro refused the AI request as malformed.',
         'core.llm.maestroStopped': 'Maestro is stopped, so the AI request did not run.',
+        'core.llm.workshop': 'This is a workshop chat (Maestro «Мастерская»): Dramatis stays silent here.',
         'core.llm.parse': 'The model’s answer could not be read.',
         'core.llm.empty': 'The model returned an empty answer.',
         'core.llm.transport': 'Could not reach the model: {error}',
@@ -36,6 +37,7 @@ export const CORE_STRINGS: I18nParts = {
         'core.llm.badTask': 'Maestro не знает такой задачи ИИ.',
         'core.llm.badRequest': 'Maestro отклонил запрос к ИИ как неправильный.',
         'core.llm.maestroStopped': 'Maestro остановлен, поэтому запрос к ИИ не выполнен.',
+        'core.llm.workshop': 'Это чат мастерской (Maestro «Мастерская»): здесь Dramatis молчит.',
         'core.llm.parse': 'Не получилось разобрать ответ модели.',
         'core.llm.empty': 'Модель вернула пустой ответ.',
         'core.llm.transport': 'Не удалось связаться с моделью: {error}',
@@ -69,6 +71,8 @@ export function llmErrorText(i18n: I18n, error: string | undefined): string {
             return i18n.t('core.llm.badRequest');
         case 'maestro-stopped':
             return i18n.t('core.llm.maestroStopped');
+        case 'workshop':
+            return i18n.t('core.llm.workshop');
         case 'parse':
             return i18n.t('core.llm.parse');
         case 'empty':

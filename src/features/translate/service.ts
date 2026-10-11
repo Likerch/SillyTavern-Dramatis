@@ -54,6 +54,7 @@ const STOP_ERRORS = new Set([
     'maestro-stopped',
     'bad-task',
     'bad-request',
+    'workshop',
 ]);
 
 /** Where the display language comes from: the setting, Maestro's story language or the UI language. */

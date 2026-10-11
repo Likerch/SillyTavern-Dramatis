@@ -231,6 +231,11 @@ export interface DramatisEvents {
     'profiles:changed': { card: string };
     'state:changed': { chatId: string | null };
     'maestro:changed': { present: boolean };
+    /**
+     * «Мастерская» (Maestro 1.21+) flipped: the open chat belongs, or no longer belongs, to a helper card and Dramatis
+     * pauses or resumes. Maestro awaits the emit (the modules are stopped before its CHAT_CHANGED goes on).
+     */
+    'maestro:workshop': { active: boolean };
 }
 
 export interface Bus {
@@ -322,6 +327,11 @@ export interface MaestroBridge {
     /** MAESTRO_API v1 when Maestro is installed and enabled, else null. Re-checked on `maestro-api-ready`. */
     api(): MaestroApiV1 | null;
     present(): boolean;
+    /**
+     * The open chat is a workshop chat (MAESTRO_API.workshop, Maestro 1.21+): Dramatis stays silent there. False
+     * without Maestro or with an older one. Flips are announced on the bus as `maestro:workshop`.
+     */
+    workshop(): boolean;
 }
 
 /* ------------------------------------------------------------------ UI */
@@ -377,6 +387,11 @@ export interface ModuleContext<S extends object> {
     settings: S;
     log: Logger;
     own(dispose: Unsubscribe | (() => void | Promise<void>)): void;
+    /**
+     * This module's memory for the page session, for «once per session» marks: `create` makes it at the first start and
+     * every later start (after the user's switch, a Maestro restart, a workshop chat) gets the same object back.
+     */
+    session<T extends object>(create: () => T): T;
 }
 
 export interface DramatisModule<S extends object = object> {

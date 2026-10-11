@@ -14,7 +14,7 @@ import type { EngineView } from '../../src/features/engine/api';
 import type { ApiLlmRequest, ApiLlmResult } from '../../src/shared/apis';
 import type { App, DramatisSettings, GenerationInfo } from '../../src/shared/contracts';
 import { TAVERN_BANDS, TAVERN_PRESENT, tavern } from '../domain/cast-fixtures';
-import { fakeMaestro, memoryLogger, staticBridge } from '../helpers/fakes';
+import { fakeMaestro, freshSession, memoryLogger, staticBridge } from '../helpers/fakes';
 import { message } from '../helpers/st-mock';
 import { generate, startHarness, stopHarness } from './harness';
 
@@ -87,7 +87,13 @@ describe('director module', () => {
         expect(directorModule.defaults()).toEqual({ maxTokens: 400, temperature: 0.3, timeoutMs: 3500 });
         expect(Object.keys(DIRECTOR_STRINGS.ru).sort()).toEqual(Object.keys(DIRECTOR_STRINGS.en).sort());
         const s = setup();
-        await directorModule.init({ app: s.app, settings: s.settings, log: memoryLogger(), own: () => {} });
+        await directorModule.init({
+            app: s.app,
+            settings: s.settings,
+            log: memoryLogger(),
+            own: () => {},
+            session: freshSession,
+        });
         expect(s.tasks).toEqual([DIRECTOR_TASK]);
         expect(typeof (s.exposed.get(DIRECTOR_API) as DirectorApi).beat).toBe('function');
     });

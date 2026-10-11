@@ -16,7 +16,7 @@ import type { ApiJournalChange, DramatisApiV1 } from '../../src/shared/apis';
 import type { App, DramatisSettings, Rng, SettingsSection, Unsubscribe } from '../../src/shared/contracts';
 import { always, appState, appetite } from '../domain/appetites-fixtures';
 import { chat, liveState, profile, tie } from '../domain/cast-fixtures';
-import { fakeMaestro, memoryLogger, staticBridge } from '../helpers/fakes';
+import { fakeMaestro, freshSession, memoryLogger, staticBridge } from '../helpers/fakes';
 
 /* ------------------------------------------------------------------ fixtures */
 
@@ -199,7 +199,7 @@ async function setup(
     } as unknown as App;
     const settings = world.defaults();
     const owned: (Unsubscribe | (() => void | Promise<void>))[] = [];
-    await world.init({ app, settings, log, own: (d) => owned.push(d) });
+    await world.init({ app, settings, log, own: (d) => owned.push(d), session: freshSession });
     return {
         engine,
         maestro,

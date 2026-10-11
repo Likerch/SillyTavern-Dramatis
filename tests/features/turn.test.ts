@@ -18,7 +18,8 @@ import type { App, DesCharacter, DramatisSettings, Unsubscribe } from '../../src
 import { seeded } from '../domain/appetites-fixtures';
 import { TAVERN_PRESENT, tavern } from '../domain/cast-fixtures';
 import { entry, event, turnPass } from '../domain/turn-fixtures';
-import { fakeMaestro, memoryLogger, mockHost, staticBridge } from '../helpers/fakes';
+import { fakeMaestro, freshSession, memoryLogger, mockHost, staticBridge } from '../helpers/fakes';
+import type { MemoryLogger } from '../helpers/fakes';
 import { flush, installStMock, message } from '../helpers/st-mock';
 import type { StMock } from '../helpers/st-mock';
 
@@ -243,6 +244,7 @@ async function setup(
         settings: turnModule.defaults(),
         log,
         own: (dispose) => void owned.push(dispose as Unsubscribe),
+        session: freshSession,
     });
     result.dispose = async () => {
         for (const off of owned.splice(0)) await off();
@@ -397,6 +399,20 @@ describe('turn module', () => {
         expect(s.engine.box.updates).toBe(1);
         expect(s.engine.box.state.turn).toBe(1);
         expect(s.journal[0]!.changes[0]!.ref).toEqual({ chatId: 'chat-1', turn: 1 });
+    });
+
+    it('stays silent on a «workshop» refusal (Maestro 1.21 «Мастерская») and asks again at commit', async () => {
+        const s = await setup();
+        s.reply = () => ({ ok: false, error: 'workshop' });
+        await reply(s);
+        expect(s.drafts.size).toBe(0);
+        await send(s);
+        await flush();
+        // «Not now», not a failure: the commit asks once more and goes on without a pass.
+        expect(s.maestro.requests).toHaveLength(2);
+        expect(s.engine.box.state.turn).toBe(1);
+        expect(s.notices).toEqual([]);
+        expect((s.app.log as MemoryLogger).lines.filter((line) => line.level === 'warn')).toEqual([]);
     });
 
     it('does nothing outside the leader tab', async () => {
