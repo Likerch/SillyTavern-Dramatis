@@ -15,6 +15,9 @@
 //   seconds at most); with the chat unchanged (the tag removed while it is open) it is announced at once. Until then
 //   workshop() still answers true.
 // A new object (or Maestro gone: no workshop) is compared with the state announced last as well.
+//
+// The scene split (Maestro 1.23+, the optional `sceneSplit` member): read live on every call, like the API itself —
+// the motive card asks it once per generation, the turn module once per commit.
 import { MAESTRO_API_GLOBAL, MAESTRO_API_READY_EVENT } from '../../shared/apis';
 import type { ApiUnsubscribe, MaestroApiV1 } from '../../shared/apis';
 import type { Bus, Host, Logger, MaestroBridge, Unsubscribe } from '../../shared/contracts';
@@ -53,6 +56,26 @@ function workshopOf(api: MaestroApiV1 | null, log: Logger): boolean {
         log.debug('MAESTRO_API.workshop.active failed', error);
         return false;
     }
+}
+
+/** The block tag of the scene split when no usable one is given. */
+export const DEFAULT_SPLIT_TAG = 'offscreen';
+
+/**
+ * `sceneSplit` of an API object while it is active: its tag (a plain word, else 'offscreen'); null without the member
+ * (Maestro before 1.23), while inactive or when it throws.
+ */
+export function sceneSplitOf(api: MaestroApiV1 | null, log: Logger): { tag: string } | null {
+    const member = api?.sceneSplit;
+    if (!member || typeof member.active !== 'function') return null;
+    try {
+        if (member.active() !== true) return null;
+    } catch (error) {
+        log.debug('MAESTRO_API.sceneSplit.active failed', error);
+        return null;
+    }
+    const tag = typeof member.tag === 'string' ? member.tag.trim() : '';
+    return { tag: /^[A-Za-z][\w-]*$/.test(tag) ? tag : DEFAULT_SPLIT_TAG };
 }
 
 export function createMaestroBridge(host: Host, bus: Bus, log: Logger): MaestroBridgeImpl {
@@ -174,6 +197,12 @@ export function createMaestroBridge(host: Host, bus: Bus, log: Logger): MaestroB
             note(api);
             // A pause holds until its resume is announced (a resume may wait for the end of a chat switch).
             return workshopOf(api, log) || workshop;
+        },
+
+        sceneSplit(): { tag: string } | null {
+            const api = lookup();
+            note(api);
+            return sceneSplitOf(api, log);
         },
 
         check(): boolean {

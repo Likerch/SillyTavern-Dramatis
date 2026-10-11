@@ -851,6 +851,28 @@ export interface ChatState {
     lastPass?: PassSummary;
     /** Measurements (stage 5, docs/model.md §16); absent until the metrics module counts a turn. */
     metrics?: MetricsState;
+    /**
+     * Who is out of the scene (docs/model.md §6.4), by character id: they left in a committed reply and no later reply
+     * brought them back. A DES tracker that still lists them does not count; absent = nobody.
+     */
+    away?: Record<string, Departure>;
+}
+
+/** One character out of the scene (ChatState.away). */
+export interface Departure {
+    /** Committed turn after which they are out. */
+    since: number;
+    /** Why: the reply showed them leaving, or Dramatis gave them the move 'leave' and the reply did not keep them. */
+    by: 'narration' | 'move';
+    /** What they went off to do, story words (the turn pass's «doing», the leave move's text), when known. */
+    doing?: string;
+}
+
+/** One absent character named on the card's «Elsewhere» line (§6.4): the story name's id and what they are busy with. */
+export interface ElsewhereNote {
+    id: string;
+    /** Story words, English like the rest of the card. */
+    text: string;
 }
 
 /** The card-level world a chat starts from (CardProfiles' tone, rules and reputation seeds). */
@@ -889,4 +911,12 @@ export interface NextTurn {
     director?: string[];
     /** Stress breaks (stage 5): the «snaps: …» line per character id, in the card's language. */
     snaps?: Record<string, string>;
+    /**
+     * Present characters who were driving something toward the player in the committed reply (§6.5): their move was
+     * 'initiate' at him, or the reply showed them pressing an appetite or an aim on him. Their initiative holds when the
+     * player only hesitates.
+     */
+    pursuing?: string[];
+    /** Absent characters for the «Elsewhere» line of the next card (§6.4), when Maestro keeps the scene split. */
+    elsewhere?: ElsewhereNote[];
 }

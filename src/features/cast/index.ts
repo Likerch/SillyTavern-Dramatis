@@ -14,7 +14,14 @@
 // merge is switched off, the module stops or Maestro goes away.
 // In the «Кино» mode the director module (stage 5) is asked for this beat's calls once per generation (in the producer,
 // after the reply being answered is committed); they go into this generation's card only.
+//
+// Only those present get a block (the engine keeps whoever left the scene out of it, docs/model.md §6.4). The player's
+// message this generation answers decides whether a pursuer's initiative holds (§6.5: a short hesitation, no OOC).
+// While Maestro keeps the scene split (1.23+), the absent characters the last commit picked get one «Elsewhere» line
+// after the card, pointing them to the `<offscreen>` block; without the split, absent characters are simply not there.
+import { initiativeHolds } from '../../domain/hold';
 import { buildCastCard } from '../../domain/render';
+import { cleanForAnalysis } from '../../domain/text-clean';
 import { chatLevers } from '../../domain/levers';
 import type { MaestroApiV1, MaestroQuietFunction } from '../../shared/apis';
 import type { App, DramatisModule, GenerationInfo, I18nParts, Logger, Unsubscribe } from '../../shared/contracts';
@@ -80,12 +87,26 @@ function castOf(view: EngineView | null): string[] {
     return view ? view.present.filter((id) => view.byId.has(id)) : [];
 }
 
-/** The motive card text for the engine's current view ('' when nobody is present); `director`: this beat's calls. */
+/** The player's latest message in the chat ('' without one). */
+export function lastPlayerText(app: App): string {
+    const chat = app.host.ctx().chat;
+    for (let i = (Array.isArray(chat) ? chat.length : 0) - 1; i >= 0; i--) {
+        const message = chat[i];
+        if (message?.is_user && !message.is_system) return String(message.mes ?? '');
+    }
+    return '';
+}
+
+/**
+ * The motive card text for the engine's current view ('' when nobody is present); `director`: this beat's calls;
+ * `playerText`: the player's message this generation answers (the initiative holds against a hesitation).
+ */
 export function castCardText(
     app: App,
     view: EngineView | null,
     log?: Logger,
     director?: Readonly<Record<string, string>>,
+    playerText?: string,
 ): string {
     const present = castOf(view);
     if (!view || !present.length) return '';
@@ -104,6 +125,14 @@ export function castCardText(
             return null;
         }
     };
+    const hold = initiativeHolds({
+        playerMessage: cleanForAnalysis(playerText ?? lastPlayerText(app)),
+        present,
+        ...(next?.moves ? { moves: next.moves } : {}),
+        ...(next?.pursuing ? { pursuing: next.pursuing } : {}),
+        byId: view.byId,
+    });
+    const split = app.maestro.sceneSplit();
     return buildCastCard({
         profiles: view.profiles,
         state,
@@ -119,6 +148,8 @@ export function castCardText(
         appetites: next?.appetites,
         snaps: next?.snaps,
         director,
+        ...(hold ? { hold } : {}),
+        ...(split && next?.elsewhere?.length ? { elsewhere: { notes: next.elsewhere, tag: split.tag } } : {}),
     }).text;
 }
 
@@ -208,12 +239,7 @@ export const castModule: DramatisModule<CastSettings> = {
                 const input = document.getElementById('send_textarea') as HTMLTextAreaElement | null;
                 if (input?.value?.trim()) return input.value;
             }
-            const chat = app.host.ctx().chat;
-            for (let i = (Array.isArray(chat) ? chat.length : 0) - 1; i >= 0; i--) {
-                const message = chat[i];
-                if (message?.is_user && !message.is_system) return String(message.mes ?? '');
-            }
-            return '';
+            return lastPlayerText(app);
         }
 
         /** The real generation in progress (its card may still be rebuilt), null between generations. */
@@ -225,12 +251,13 @@ export const castModule: DramatisModule<CastSettings> = {
         async function inject(gen: GenerationInfo): Promise<void> {
             if (gen.dryRun || gen.quiet || stopped) return;
             generation = gen;
-            sheet = isSheetCommand(userText(gen));
+            const said = userText(gen);
+            sheet = isSheetCommand(said);
             const current = attach();
             let text = '';
             if (current && !sheet) {
                 await current.refresh();
-                text = stopped ? '' : castCardText(app, current.view(), log, directorCalls);
+                text = stopped ? '' : castCardText(app, current.view(), log, directorCalls, said);
             }
             if (!text && !app.ephemeral.isSet(CAST_INJECTION)) return;
             app.ephemeral.setInjection(CAST_INJECTION, {

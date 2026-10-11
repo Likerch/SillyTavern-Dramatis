@@ -120,8 +120,8 @@ describe('buildCastCard — the tavern (§6.2)', () => {
             moveTarget: 'bram',
         };
         const text = buildCastCard(input).text;
-        expect(text).toContain('This turn: watches Courier.');
-        expect(text).toContain('This turn: starts something with Брам.');
+        expect(text).toContain('This turn: watches Courier closely and misses nothing.');
+        expect(text).toContain('This turn: acts first toward Брам — starts it now, does not wait to be asked.');
         expect(text).not.toContain('quietly sends');
         const own = buildCastCard(tavernInput({ moves: { ilva: { move: 'own' } } })).text;
         expect(own).not.toContain('This turn:');
@@ -137,7 +137,9 @@ describe('buildCastCard — the tavern (§6.2)', () => {
             moves: { fenn: { move: 'leave' } },
         });
         expect(buildCastCard(moving).text).toContain('Фенн — asleep. Toward Courier: neutral');
-        expect(buildCastCard(moving).text).toContain('This turn: leaves.');
+        expect(buildCastCard(moving).text).toContain(
+            'This turn: leaves the scene for their own business — once gone, they stay out of it.',
+        );
     });
 
     it('falls back to the state band, then business; skips unknown ids', () => {
@@ -156,6 +158,7 @@ describe('buildCastCard — the tavern (§6.2)', () => {
         expect(buildCastCard(tavernInput({ present: ['nobody'] }))).toEqual({
             text: '',
             included: [],
+            elsewhere: [],
             trimmed: [],
             tokens: 0,
         });

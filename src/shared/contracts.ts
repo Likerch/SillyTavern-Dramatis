@@ -332,6 +332,12 @@ export interface MaestroBridge {
      * without Maestro or with an older one. Flips are announced on the bus as `maestro:workshop`.
      */
     workshop(): boolean;
+    /**
+     * Maestro keeps the scene and the world elsewhere apart (MAESTRO_API.sceneSplit, Maestro 1.23+): the tag of the
+     * block for what happens elsewhere while it is active, null without Maestro, with an older one or while inactive.
+     * Read live on every call.
+     */
+    sceneSplit(): { tag: string } | null;
 }
 
 /* ------------------------------------------------------------------ UI */

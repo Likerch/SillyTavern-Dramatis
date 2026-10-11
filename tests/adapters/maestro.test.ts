@@ -287,3 +287,34 @@ describe('Maestro bridge — «Мастерская» (Maestro 1.21+)', () => {
         }
     });
 });
+
+describe('Maestro bridge — the scene split (Maestro 1.23+)', () => {
+    it('is null without Maestro, with a Maestro that has no `sceneSplit`, and while it is inactive', async () => {
+        const { bridge } = setup();
+        bridge.install();
+        expect(bridge.sceneSplit()).toBeNull();
+        await publish(fakeMaestro());
+        expect(bridge.sceneSplit()).toBeNull();
+        const maestro = fakeMaestro({ sceneSplit: false });
+        await publish(maestro);
+        expect(bridge.sceneSplit()).toBeNull();
+        maestro.splitActive = true;
+        expect(bridge.sceneSplit()).toEqual({ tag: 'offscreen' });
+    });
+
+    it('reads the tag live, falls back to «offscreen» for an odd one and survives a throwing member', async () => {
+        const { bridge, log } = setup();
+        bridge.install();
+        const maestro = fakeMaestro({ sceneSplit: true });
+        await publish(maestro);
+        maestro.api.sceneSplit!.tag = 'around';
+        expect(bridge.sceneSplit()).toEqual({ tag: 'around' });
+        maestro.api.sceneSplit!.tag = '<b>';
+        expect(bridge.sceneSplit()).toEqual({ tag: 'offscreen' });
+        maestro.api.sceneSplit!.active = () => {
+            throw new Error('boom');
+        };
+        expect(bridge.sceneSplit()).toBeNull();
+        expect(log.lines.some((line) => String(line.args[0]).includes('sceneSplit'))).toBe(true);
+    });
+});

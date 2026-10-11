@@ -1,5 +1,5 @@
 //#region package.json
-var version$2 = "1.4.1";
+var version$2 = "1.5.0";
 //#endregion
 //#region src/adapters/card/index.ts
 function str$4(value) {
@@ -616,6 +616,24 @@ function workshopOf(api, log) {
 		return false;
 	}
 }
+/** The block tag of the scene split when no usable one is given. */
+var DEFAULT_SPLIT_TAG = "offscreen";
+/**
+* `sceneSplit` of an API object while it is active: its tag (a plain word, else 'offscreen'); null without the member
+* (Maestro before 1.23), while inactive or when it throws.
+*/
+function sceneSplitOf(api, log) {
+	const member = api?.sceneSplit;
+	if (!member || typeof member.active !== "function") return null;
+	try {
+		if (member.active() !== true) return null;
+	} catch (error) {
+		log.debug("MAESTRO_API.sceneSplit.active failed", error);
+		return null;
+	}
+	const tag = typeof member.tag === "string" ? member.tag.trim() : "";
+	return { tag: /^[A-Za-z][\w-]*$/.test(tag) ? tag : DEFAULT_SPLIT_TAG };
+}
 function createMaestroBridge(host, bus, log) {
 	/** The API object seen last (null: absent). A restarted Maestro publishes a new object. */
 	let current = null;
@@ -715,6 +733,11 @@ function createMaestroBridge(host, bus, log) {
 			const api = lookup();
 			note(api);
 			return workshopOf(api, log) || workshop;
+		},
+		sceneSplit() {
+			const api = lookup();
+			note(api);
+			return sceneSplitOf(api, log);
 		},
 		check() {
 			const api = lookup();
@@ -5003,6 +5026,56 @@ function moveLabel(move, lang, target) {
 	if (lang === "en") return MOVE_TARGET_EN[move].replace("{t}", who);
 	return `${MOVE[move].ru} (${who})`;
 }
+/** The move as the motive card says it: what the character does now, decisively (docs/model.md §6.1). */
+var MOVE_CARD = {
+	own: {
+		en: "pushes their own business forward, unasked",
+		ru: "двигает своё дело, никого не спрашивая"
+	},
+	respond: {
+		en: "answers in their own way, from their own aims",
+		ru: "отвечает по-своему, из своих целей"
+	},
+	initiate: {
+		en: "acts first — starts it now, does not wait to be asked",
+		ru: "действует первым — начинает сам, не дожидаясь приглашения"
+	},
+	obstruct: {
+		en: "gets in the way — openly or by cunning",
+		ru: "мешает — открыто или хитростью"
+	},
+	watch: {
+		en: "watches closely and misses nothing",
+		ru: "пристально наблюдает, ничего не упуская"
+	},
+	leave: {
+		en: "leaves the scene for their own business — once gone, they stay out of it",
+		ru: "уходит по своим делам — и после этого в сцене не появляется"
+	}
+};
+var MOVE_CARD_TARGET_EN = {
+	own: MOVE_CARD.own.en,
+	respond: "answers {t} in their own way, from their own aims",
+	initiate: "acts first toward {t} — starts it now, does not wait to be asked",
+	obstruct: "gets in {t}'s way — openly or by cunning",
+	watch: "watches {t} closely and misses nothing",
+	leave: MOVE_CARD.leave.en
+};
+/** Russian keeps the target in brackets after the verb, in the nominative. */
+var MOVE_CARD_TARGET_RU = {
+	own: MOVE_CARD.own.ru,
+	respond: "отвечает ({t}) по-своему, из своих целей",
+	initiate: "действует первым ({t}) — начинает сам, не дожидаясь приглашения",
+	obstruct: "мешает ({t}) — открыто или хитростью",
+	watch: "пристально наблюдает ({t}), ничего не упуская",
+	leave: MOVE_CARD.leave.ru
+};
+/** This beat's move for the motive card, in decisive words. */
+function moveCardPhrase(move, lang, target) {
+	const who = target?.trim();
+	if (!who || move === "own" || move === "leave") return pick(MOVE_CARD[move], lang);
+	return (lang === "en" ? MOVE_CARD_TARGET_EN : MOVE_CARD_TARGET_RU)[move].replace("{t}", who);
+}
 var MOOD = {
 	exuberant: {
 		en: "exuberant",
@@ -6636,6 +6709,16 @@ var W = {
 		en: "The scene ends",
 		ru: "Сцена закончилась"
 	},
+	sceneLeft: {
+		en: "{name} left the scene",
+		ru: "{name} ушёл из сцены",
+		ruF: "{name} ушла из сцены"
+	},
+	sceneBack: {
+		en: "{name} is back in the scene",
+		ru: "{name} вернулся в сцену",
+		ruF: "{name} вернулась в сцену"
+	},
 	chapterEnd: {
 		en: "The scene ends; time passes ({hours} h)",
 		ru: "Сцена закончилась; прошло времени: {hours} ч"
@@ -7275,6 +7358,123 @@ var arcsModule = {
 		controller.schedule();
 	}
 };
+/**
+* Out-of-character marks: ((…)) as a pair (a lone «))» is a Russian smile), OOC, ООС (Cyrillic), [OOC], (OOC: …),
+* a leading «//».
+*/
+var OOC_RE = /\(\([\s\S]*?\)\)|(^|[^\p{L}])(ooc|ООС|ОOC)(?![\p{L}])|^\s*\/\//iu;
+/** Short hesitations and refusals, RU and EN (lower case, ё → е). */
+var HESITATION_RE = new RegExp([
+	"нет",
+	"не надо",
+	"не нужно",
+	"не стоит",
+	"не сейчас",
+	"не здесь",
+	"не так быстро",
+	"подожди",
+	"подождите",
+	"погоди",
+	"погодите",
+	"постой",
+	"постойте",
+	"стой",
+	"стойте",
+	"стоп",
+	"хватит",
+	"перестань",
+	"прекрати",
+	"остановись",
+	"полегче",
+	"не уверен",
+	"не уверена",
+	"я не готов",
+	"я не готова",
+	"рано",
+	"ну",
+	"эм+",
+	"хм+",
+	"ой",
+	"может не",
+	"no",
+	"nope",
+	"wait",
+	"stop",
+	"not now",
+	"not here",
+	"not yet",
+	"hold on",
+	"slow down",
+	"dont",
+	"please dont",
+	"enough",
+	"not sure",
+	"im not sure",
+	"i cant",
+	"easy",
+	"h+m+",
+	"u+m+",
+	"u+h+"
+].map((item) => item.replace(/ /g, "\\s+")).map((item) => `(?:^|[^\\p{L}])${item}(?![\\p{L}])`).join("|"), "u");
+/** A clear, decisive act of the player ends what was started: leaving, pushing away, striking, running. */
+var DECISIVE_RE = /(^|[^\p{L}])(ухож|уйду|ушел|ушла|выхож|вышел|вышла|отталкив|оттолкн|ударя|ударил|бью|убега|убежал|вырыва|вырвал|даю пощечин|влепил|i leave|i walk away|i walk out|i push|i shove|i slap|i hit|i punch|i run|i storm out|i get up and leave)/u;
+function folded(text) {
+	return String(text ?? "").toLowerCase().replace(/ё/g, "е").replace(/['’]/g, "");
+}
+/** The message steps out of the story (((…)), OOC, ООС, [OOC]). */
+function isOoc(text) {
+	return !!text && OOC_RE.test(text);
+}
+/**
+* The player's message as a short hesitation or refusal (≤ 8 words: «нет», «подожди», «ну…», «not now», «I'm not
+* sure»), trimmed for quoting; null for anything else — a longer message, an OOC one, a decisive act.
+*/
+function hesitation(text) {
+	if (!text?.trim() || isOoc(text)) return null;
+	const words = text.match(/[\p{L}\p{N}]+(?:['’][\p{L}]+)?/gu) ?? [];
+	if (!words.length || words.length > 8) return null;
+	const plain = folded(text);
+	if (DECISIVE_RE.test(plain) || !HESITATION_RE.test(plain)) return null;
+	return text.replace(/[*_~`]/g, "").replace(/^[\s—–-]+/, "").replace(/\s+/g, " ").trim();
+}
+/** Acts by which a character presses something on the player (turn pass events). */
+var PURSUIT_ACTS = /* @__PURE__ */ new Set([
+	"seduce",
+	"flirt",
+	"indulge",
+	"satisfy-appetite",
+	"order",
+	"threat",
+	"capture"
+]);
+/** Who was driving something toward the player in the committed reply (see the file header). */
+function pursuingIds(input) {
+	return input.ids.filter((id) => {
+		if (input.byId.get(id)?.minor) return false;
+		const move = input.moves?.[id];
+		if (move?.move === "initiate" && (!move.target || move.target === "@player")) return true;
+		const own = input.events.filter((event) => event.actor === id && event.target === "@player");
+		if (own.some((event) => PURSUIT_ACTS.has(event.act))) return true;
+		const pass = input.pass.get(id);
+		if (pass?.playerRole === "target" && pass.advanced) return true;
+		return input.want(id) >= 2 && (own.length > 0 || pass?.refusedByPlayer === true);
+	});
+}
+/** Whose initiative holds against the player's hesitation now, and the words he said; null when nobody's does. */
+function initiativeHolds(input) {
+	const said = hesitation(input.playerMessage);
+	if (!said) return null;
+	const pursuing = new Set(input.pursuing ?? []);
+	const ids = input.present.filter((id) => {
+		if (input.byId.get(id)?.minor) return false;
+		const move = input.moves?.[id];
+		return pursuing.has(id) || move?.move === "initiate" && move.target === "@player";
+	});
+	return ids.length ? {
+		ids,
+		said
+	} : null;
+}
 //#endregion
 //#region src/domain/group-rules.ts
 /** Kinds the content boundary keeps away from minors, as holders and as targets (Maestro rule, §5.7). */
@@ -7440,7 +7640,9 @@ var EN = {
 	directed: "This beat, director's call:",
 	snaps: "snaps:",
 	arc: "Arc:",
-	choice: "Defining choice:"
+	choice: "Defining choice:",
+	hold: (name, player, said, pos) => `${name} — initiative holds: ${player}'s ${said} is a beat of the scene, not its end. ${name} keeps pursuing it, as ${pos} nature and goal demand — insists, persuades, teases or takes control, and stops only if stopping is truly in ${pos} nature. Only a clear, decisive act of ${player} or an out-of-character request ends it.`,
+	elsewhere: (tag, list) => `[Elsewhere — not in this scene. Never bring them into it; at most one line about them in the <${tag}> block at the end, if something happens: ${list}.]`
 };
 var RU = {
 	header: (player, named) => `[Мотивы персонажей — что движет каждым из присутствующих сейчас. Они действуют из этих мотивов; мир не вращается вокруг игрока${named ? ` (${player})` : ""}. Позиции держать как заданы; внимание к игроку — только как указано.]`,
@@ -7471,7 +7673,9 @@ var RU = {
 	directed: "В этот такт, решение режиссёра:",
 	snaps: "срыв:",
 	arc: "Дуга:",
-	choice: "Главный выбор:"
+	choice: "Главный выбор:",
+	hold: (name, _player, said) => `${name} — держит инициативу: ${said} игрока — часть сцены, а не её конец. Добивается своего, как велят природа и цель, — настаивает, уговаривает, дразнит или берёт верх; отступает, только если это и правда в характере. Закончить это может лишь ясный решительный поступок игрока или просьба вне роли.`,
+	elsewhere: (tag, list) => `[В других местах — не в этой сцене. Не вводить их в сцену; самое большее одна строка о них в блоке <${tag}> в конце, если что-то происходит: ${list}.]`
 };
 /** Default stance toward the player when no tie exists yet, by world tone. */
 var TONE_STANCE$1 = {
@@ -7481,7 +7685,7 @@ var TONE_STANCE$1 = {
 	welcoming: 1
 };
 /** A clause inside a sentence: no trailing full stop or semicolon. */
-function clause(text) {
+function clause$1(text) {
 	return (text ?? "").replace(/\s+/g, " ").trim().replace(/[\s.;,]+$/u, "");
 }
 /** A whole sentence: ends with . ! ? … or a closing quote. */
@@ -7512,7 +7716,7 @@ function strongestReasons(reasons, max) {
 		reason,
 		index,
 		weight: Math.abs(reason.delta) * Math.max(1, reason.stacks)
-	})).sort((a, b) => b.weight - a.weight || Number(a.reason.scenesLeft !== null) - Number(b.reason.scenesLeft !== null) || a.index - b.index).slice(0, Math.max(0, max)).map((item) => clause(item.reason.text)).filter(Boolean);
+	})).sort((a, b) => b.weight - a.weight || Number(a.reason.scenesLeft !== null) - Number(b.reason.scenesLeft !== null) || a.index - b.index).slice(0, Math.max(0, max)).map((item) => clause$1(item.reason.text)).filter(Boolean);
 }
 function startOf$1(profile, greeting) {
 	return profile.starts.find((start) => start.greeting === greeting) ?? profile.starts.find((start) => start.greeting === -1);
@@ -7553,15 +7757,15 @@ function appetiteLine(ctx, profile, live, appetite, now) {
 		const regard = regardTie ? ` — ${words.regard(regardTie.stance, want)}` : "";
 		parts.push(sentence(`${words.wants(targetName)}${gaze}${regard}`));
 	}
-	const brakes = (now?.brakes?.length ? now.brakes : appetite.restraints ?? []).map(clause).filter(Boolean);
+	const brakes = (now?.brakes?.length ? now.brakes : appetite.restraints ?? []).map(clause$1).filter(Boolean);
 	if (appetite.vow === "abstinent") brakes.push(words.vowAbstinent);
 	else if (appetite.vow === "moderate") brakes.push(words.vowModerate);
 	if (brakes.length) parts.push(sentence(`${words.heldBack} ${brakes.join("; ")}`));
 	const scheme = schemeFor(input.state, profile.id, appetite.id);
-	const doing = clause(now?.methodText) || clause(scheme?.text);
+	const doing = clause$1(now?.methodText) || clause$1(scheme?.text);
 	const how = scheme ? schemingLabel(lang) : now?.method !== void 0 ? methodNow(now.method, lang) : "";
 	if (how || doing) parts.push(sentence(`${words.now} ${[how, doing].filter(Boolean).join(" — ")}`));
-	const excuse = clause(now?.justification) || clause(appetite.excuse) || (profile.core.justifications[0] ? justificationLabel(profile.core.justifications[0], lang) : "");
+	const excuse = clause$1(now?.justification) || clause$1(appetite.excuse) || (profile.core.justifications[0] ? justificationLabel(profile.core.justifications[0], lang) : "");
 	if (excuse) parts.push(`${words.justifies} ${words.quote(excuse)}.`);
 	return { text: `${profile.name} — ${parts.join(" ")}` };
 }
@@ -7573,8 +7777,8 @@ function buildView(ctx, id) {
 	const live = state.characters[id];
 	const start = startOf$1(profile, state.greeting);
 	const agenda = live?.agenda ?? profile.agenda;
-	const doing = clause(live?.scene.doing ?? start?.doing);
-	const goal = clause(live?.scene.goal ?? start?.goal ?? wantOf(agenda));
+	const doing = clause$1(live?.scene.doing ?? start?.doing);
+	const goal = clause$1(live?.scene.goal ?? start?.goal ?? wantOf(agenda));
 	const band = input.bands[id] ?? live?.scene.attention ?? "business";
 	const toPlayer = tieOf(profile, live, PLAYER_ID);
 	const stance = toPlayer?.stance ?? TONE_STANCE$1[state.worldTone] ?? 0;
@@ -7584,48 +7788,51 @@ function buildView(ctx, id) {
 		target: live.scene.moveTarget,
 		text: live.scene.moveText
 	} : void 0);
-	const call = clause(input.director?.[id]);
-	const snap = clause(input.snaps?.[id]);
-	const planned = moveSpec ? clause(moveSpec.text) || (moveSpec.move !== "own" ? moveLabel(moveSpec.move, lang, nameOf$3(ctx, moveSpec.target)) : "") : "";
+	const call = clause$1(input.director?.[id]);
+	const snap = clause$1(input.snaps?.[id]);
+	const planned = moveSpec ? clause$1(moveSpec.text) || (moveSpec.move !== "own" ? moveCardPhrase(moveSpec.move, lang, nameOf$3(ctx, moveSpec.target)) : "") : "";
 	const move = call || (snap ? "" : planned);
 	const identity = live?.corruption?.identity;
-	const habits = [...profile.core.signatures.map((text) => `${words.pattern} ${clause(text)}`), ...profile.core.tactics.map((text) => `${words.tactic} ${clause(text)}`)];
+	const habits = [...profile.core.signatures.map((text) => `${words.pattern} ${clause$1(text)}`), ...profile.core.tactics.map((text) => `${words.tactic} ${clause$1(text)}`)];
 	const habit = habits.length ? habits[Math.abs(state.turn) % habits.length] : "";
 	const presentSet = new Set(input.present);
 	const npc = allTies(profile, live).filter((tie) => tie.target !== "@player" && tie.target !== id && presentSet.has(tie.target)).filter((tie) => Math.abs(tie.stance) >= 2 || tie.intent !== "none").sort((a, b) => Math.abs(b.stance) - Math.abs(a.stance))[0];
 	const other = npc ? `${words.withTie(nameOf$3(ctx, npc.target))} ${stanceNoun(npc.stance, lang)}${strongestReasons(npc.reasons, 1)[0] ? ` (${strongestReasons(npc.reasons, 1)[0]})` : ""}` : "";
 	const mood = live?.mood ?? profile.core.baselineMood;
 	const moodWord = mood.label?.trim() || moodLabel(mood.octant, lang);
-	const emotion = live?.emotion && live.emotion.until >= state.turn ? `${words.emotionAt(clause(live.emotion.type), nameOf$3(ctx, live.emotion.target))}${clause(live.emotion.cause) ? ` (${clause(live.emotion.cause)})` : ""}` : "";
+	const emotion = live?.emotion && live.emotion.until >= state.turn ? `${words.emotionAt(clause$1(live.emotion.type), nameOf$3(ctx, live.emotion.target))}${clause$1(live.emotion.cause) ? ` (${clause$1(live.emotion.cause)})` : ""}` : "";
 	const nows = input.appetites?.[id] ?? [];
 	const appetites = profile.appetites.map((appetite) => appetiteLine(ctx, profile, live, appetite, nows.find((now) => now.appetite === appetite.id))).filter((line) => !!line);
-	const speech = input.mergeVoices ? clause(input.speech?.(id) ?? "") : "";
+	const speech = input.mergeVoices ? clause$1(input.speech?.(id) ?? "") : "";
 	const busyBits = [doing, stance <= -1 ? `${words.ignores(ctx.player)}, ${stanceNoun(stance, lang)}` : ""];
+	const possessive = profile.gender === "female" ? "her" : profile.gender === "male" ? "his" : "their";
+	const hold = input.hold?.ids.includes(id) && input.hold.said.trim() ? words.hold(profile.name, ctx.player, words.quote(input.hold.said.trim()), possessive) : "";
 	return {
 		id,
 		name: profile.name,
 		band,
-		active: !!move || !!snap || appetites.length > 0,
+		active: !!move || !!snap || !!hold || appetites.length > 0,
 		head: [doing, goal].filter(Boolean).join("; "),
 		toward,
 		reasons: strongestReasons(toPlayer?.reasons ?? [], 2),
-		behaviour: clause(toPlayer?.behaviour) || stanceBehaviour(stance, lang),
+		behaviour: clause$1(toPlayer?.behaviour) || stanceBehaviour(stance, lang),
 		stance,
 		move,
 		habit,
-		secret: clause(agenda.secrets[0]),
+		secret: clause$1(agenda.secrets[0]),
 		other,
 		mood: [moodWord, emotion].filter(Boolean).join("; "),
 		voice: speech,
 		sample: (profile.core.voice ?? "").replace(/\s+/g, " ").trim(),
 		appetites,
-		corrections: (input.corrections?.[id] ?? []).map(clause).filter(Boolean),
+		corrections: (input.corrections?.[id] ?? []).map(clause$1).filter(Boolean),
 		busy: busyBits.filter(Boolean).join("; "),
 		directed: !!call,
+		hold,
 		snap,
-		arc: clause(arcCardLine(profile, live, lang)),
-		identity: identity ? clause(identityPhrase(identity, lang, profile.gender)) : "",
-		choice: clause(choiceCardLine(live, lang))
+		arc: clause$1(arcCardLine(profile, live, lang)),
+		identity: identity ? clause$1(identityPhrase(identity, lang, profile.gender)) : "",
+		choice: clause$1(choiceCardLine(live, lang))
 	};
 }
 function capital(text) {
@@ -7635,22 +7842,32 @@ var LEVELS = [
 	{
 		maxReasons: 2,
 		extras: true,
-		busyDetails: true
+		busyDetails: true,
+		sideLines: true
 	},
 	{
 		maxReasons: 1,
 		extras: true,
-		busyDetails: true
+		busyDetails: true,
+		sideLines: true
 	},
 	{
 		maxReasons: 1,
 		extras: false,
-		busyDetails: true
+		busyDetails: true,
+		sideLines: true
 	},
 	{
 		maxReasons: 1,
 		extras: false,
-		busyDetails: false
+		busyDetails: false,
+		sideLines: true
+	},
+	{
+		maxReasons: 1,
+		extras: false,
+		busyDetails: false,
+		sideLines: false
 	}
 ];
 function renderBlock(ctx, view, level) {
@@ -7669,14 +7886,17 @@ function renderBlock(ctx, view, level) {
 		if (view.mood) main.push(sentence(`${words.mood} ${view.mood}`));
 	}
 	const lines = [`${view.name} — ${main.filter(Boolean).join(" ")}`];
-	const voice = [view.voice, level.extras && view.sample ? `${words.says} ${words.quote(view.sample)}` : ""].filter(Boolean).join("; ");
+	if (view.hold) lines.push(view.hold);
+	const side = level.sideLines || view.band === "focus";
+	const voice = [side ? view.voice : "", level.extras && view.sample ? `${words.says} ${words.quote(view.sample)}` : ""].filter(Boolean).join("; ");
 	if (voice) lines.push(`${view.name} — ${words.voice} ${sentence(voice)}`);
 	if (view.snap) lines.push(`${view.name} — ${words.snaps} ${sentence(view.snap)}`);
-	for (const line of view.appetites) lines.push(line.text);
+	const appetites = side ? view.appetites : [];
+	for (const line of appetites) lines.push(line.text);
 	for (const correction of view.corrections) lines.push(`${view.name} — ${words.correction} ${sentence(correction)}`);
 	return {
 		lines,
-		appetite: view.appetites.length > 0
+		appetite: appetites.length > 0
 	};
 }
 function renderCard(ctx, views, level, dropped) {
@@ -7697,11 +7917,31 @@ var BAND_RANK = {
 	business: 1,
 	focus: 2
 };
+/** Names of absent characters on the «Elsewhere» line, as many as fit (most important first). */
+function withElsewhere(ctx, text, fits) {
+	const spec = ctx.input.elsewhere;
+	const notes = (spec?.notes ?? []).filter((note) => ctx.byId.has(note.id) && !ctx.input.present.includes(note.id) && clause$1(note.text));
+	for (let count = notes.length; count > 0; count--) {
+		const chosen = notes.slice(0, count);
+		const list = chosen.map((note) => `${nameOf$3(ctx, note.id)} (${clause$1(note.text)})`).join("; ");
+		const full = `${text}\n${ctx.words.elsewhere(spec.tag.trim() || "offscreen", list)}`;
+		if (fits(full)) return {
+			text: full,
+			ids: chosen.map((note) => note.id)
+		};
+	}
+	return {
+		text,
+		ids: []
+	};
+}
 /**
 * The motive card for this generation. Trims in order until it fits `budgetTokens`: reasons beyond the first, the
 * extras (signature or tactic, secret, tie to another present character, mood, voice sample), the details of the busy
-* line, then whole blocks of the lowest band (background, business, focus last; without a move first; later ones
-* first) — their names move to the busy line. One block always stays.
+* line, the speech digests and appetite lines of those not in focus, then whole blocks of the lowest band (background,
+* business, focus last; without a move first; later ones first; one whose initiative holds after them all) — their
+* names move to the busy line. One block always stays; the move, the appetite lines of the focus and the «initiative
+* holds» line go only with their block. The «Elsewhere» line comes last and only in what the budget leaves.
 */
 function buildCastCard(input) {
 	const byId = new Map(input.profiles.map((profile) => [profile.id, profile]));
@@ -7713,19 +7953,24 @@ function buildCastCard(input) {
 		byId
 	};
 	const views = [...new Set(input.present)].map((id) => buildView(ctx, id)).filter((view) => !!view);
-	const finish = (text, dropped) => ({
-		text,
-		included: views.map((view) => view.id),
-		trimmed: views.filter((view) => dropped.has(view.id)).map((view) => view.id),
-		tokens: estimateTokens(text)
-	});
+	const fits = (text) => input.budgetTokens <= 0 || estimateTokens(text) <= input.budgetTokens;
+	const finish = (card, dropped) => {
+		const { text, ids } = withElsewhere(ctx, card, fits);
+		return {
+			text,
+			included: views.map((view) => view.id),
+			elsewhere: ids,
+			trimmed: views.filter((view) => dropped.has(view.id)).map((view) => view.id),
+			tokens: estimateTokens(text)
+		};
+	};
 	if (!views.length) return {
 		text: "",
 		included: [],
+		elsewhere: [],
 		trimmed: [],
 		tokens: 0
 	};
-	const fits = (text) => input.budgetTokens <= 0 || estimateTokens(text) <= input.budgetTokens;
 	const none = /* @__PURE__ */ new Set();
 	for (const level of LEVELS) {
 		const text = renderCard(ctx, views, level, none);
@@ -7735,7 +7980,7 @@ function buildCastCard(input) {
 	const order = views.map((view, index) => ({
 		view,
 		index
-	})).filter(({ view }) => view.band !== "background" || view.active).sort((a, b) => BAND_RANK[a.view.band] - BAND_RANK[b.view.band] || Number(a.view.active) - Number(b.view.active) || b.index - a.index).map(({ view }) => view.id);
+	})).filter(({ view }) => view.band !== "background" || view.active).sort((a, b) => Number(!!a.view.hold) - Number(!!b.view.hold) || BAND_RANK[a.view.band] - BAND_RANK[b.view.band] || Number(a.view.active) - Number(b.view.active) || b.index - a.index).map(({ view }) => view.id);
 	const dropped = /* @__PURE__ */ new Set();
 	let text = renderCard(ctx, views, last, dropped);
 	for (const id of order.slice(0, Math.max(0, order.length - 1))) {
@@ -7774,7 +8019,7 @@ function buildCorrectionLines(notes, ctx) {
 		const stance = tie?.stance ?? 0;
 		const reason = strongestReasons(tie?.reasons ?? [], 1)[0];
 		const why = reason ? ` (${reason})` : "";
-		const behaviour = clause(tie?.behaviour) || stanceBehaviour(stance, lang);
+		const behaviour = clause$1(tie?.behaviour) || stanceBehaviour(stance, lang);
 		for (const emphasis of note.emphasise) if (emphasis === "stance") {
 			const colder = note.drift === "colder";
 			add(note.character, ru ? `по-прежнему ${stanceNoun(stance, lang)} ${toTarget}${why} — ${colder ? "причины для холода нет" : "тепла без причины нет"}; ${behaviour}` : `still ${stanceLabel(stance, lang)} ${toTarget}${why} — ${colder ? "nothing has turned them cold" : "nothing has earned warmth"}; ${behaviour}`);
@@ -7791,11 +8036,361 @@ function buildCorrectionLines(notes, ctx) {
 			const withdrawal = now?.withdrawal ? `, ${words.withdrawal}` : "";
 			add(note.character, ru ? `тяга (${what}) по-прежнему: ${pressure}${withdrawal} — сама не проходит, без опоры и причины не отказаться` : `the craving for ${what} is still ${pressure}${withdrawal} — it does not vanish without help or a reason`);
 		} else {
-			const anchor = [profile.core.values.top.map((value) => valueLabel(value, lang)).join(", "), clause(live?.scene.goal ?? wantOf(live?.agenda ?? profile.agenda))].filter(Boolean).join("; ");
+			const anchor = [profile.core.values.top.map((value) => valueLabel(value, lang)).join(", "), clause$1(live?.scene.goal ?? wantOf(live?.agenda ?? profile.agenda))].filter(Boolean).join("; ");
 			add(note.character, ru ? `действует из своего${anchor ? ` (${anchor})` : ""} — против себя без причины не идёт` : `acts from what they value${anchor ? ` (${anchor})` : ""} — never against themselves without a cause`);
 		}
 	}
 	return out;
+}
+//#endregion
+//#region src/domain/text-clean.ts
+function isDict$5(value) {
+	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+/** Names of real HTML elements (lower case). BunnyMo tags (`<SPECIES:ELF>`, `<PHYSICAL>`) are not among them. */
+var HTML_ELEMENTS = /* @__PURE__ */ new Set([
+	"a",
+	"abbr",
+	"address",
+	"area",
+	"article",
+	"aside",
+	"audio",
+	"b",
+	"base",
+	"bdi",
+	"bdo",
+	"big",
+	"blink",
+	"blockquote",
+	"body",
+	"br",
+	"button",
+	"canvas",
+	"caption",
+	"center",
+	"cite",
+	"code",
+	"col",
+	"colgroup",
+	"data",
+	"datalist",
+	"dd",
+	"del",
+	"details",
+	"dfn",
+	"dialog",
+	"dir",
+	"div",
+	"dl",
+	"dt",
+	"em",
+	"embed",
+	"fieldset",
+	"figcaption",
+	"figure",
+	"font",
+	"footer",
+	"form",
+	"h1",
+	"h2",
+	"h3",
+	"h4",
+	"h5",
+	"h6",
+	"head",
+	"header",
+	"hgroup",
+	"hr",
+	"html",
+	"i",
+	"iframe",
+	"img",
+	"input",
+	"ins",
+	"kbd",
+	"label",
+	"legend",
+	"li",
+	"link",
+	"main",
+	"map",
+	"mark",
+	"marquee",
+	"math",
+	"menu",
+	"meta",
+	"meter",
+	"nav",
+	"nobr",
+	"noscript",
+	"object",
+	"ol",
+	"optgroup",
+	"option",
+	"output",
+	"p",
+	"param",
+	"picture",
+	"pre",
+	"progress",
+	"q",
+	"rp",
+	"rt",
+	"ruby",
+	"s",
+	"samp",
+	"script",
+	"search",
+	"section",
+	"select",
+	"slot",
+	"small",
+	"source",
+	"span",
+	"strike",
+	"strong",
+	"style",
+	"sub",
+	"summary",
+	"sup",
+	"svg",
+	"table",
+	"tbody",
+	"td",
+	"template",
+	"textarea",
+	"tfoot",
+	"th",
+	"thead",
+	"time",
+	"title",
+	"tr",
+	"track",
+	"tt",
+	"u",
+	"ul",
+	"var",
+	"video",
+	"wbr"
+]);
+/** Elements whose tags separate lines of text. */
+var BLOCK_ELEMENTS = /* @__PURE__ */ new Set([
+	"address",
+	"article",
+	"aside",
+	"blockquote",
+	"br",
+	"center",
+	"dd",
+	"details",
+	"div",
+	"dl",
+	"dt",
+	"figcaption",
+	"figure",
+	"footer",
+	"h1",
+	"h2",
+	"h3",
+	"h4",
+	"h5",
+	"h6",
+	"header",
+	"hr",
+	"li",
+	"main",
+	"nav",
+	"ol",
+	"p",
+	"pre",
+	"section",
+	"summary",
+	"table",
+	"tr",
+	"ul"
+]);
+/** A real HTML element name (any case), or a custom element (lower case with a hyphen; `<INTJ-U>` is a BunnyMo tag). */
+function isHtmlElementName(name) {
+	return HTML_ELEMENTS.has(name.toLowerCase()) || /^[a-z][a-z0-9]*-[a-z0-9-]+$/.test(name);
+}
+var TRACKER_KEYS = [
+	"quests",
+	"infoBox",
+	"infobox",
+	"characterThoughts",
+	"characters"
+];
+var TRACKER_KEY_RE = /"(?:quests|infoBox|infobox|characterThoughts|characters)"\s*:/;
+/** A fence at the very start: ```json, ```markdown, ```md or a bare ```; the body runs to the closing fence. */
+var LEADING_FENCE_RE = /^\s*```(?:json|markdown|md)?[ \t]*\r?\n([\s\S]*?)\r?\n?[ \t]*```[ \t]*(?:\r?\n|$)/i;
+/** End index (exclusive) of the balanced `{…}` starting at `start`, strings respected; -1 when unbalanced. */
+function balancedObjectEnd(text, start) {
+	let depth = 0;
+	let inString = false;
+	let escaped = false;
+	for (let i = start; i < text.length; i++) {
+		const char = text[i];
+		if (escaped) escaped = false;
+		else if (char === "\\") escaped = inString;
+		else if (char === "\"") inString = !inString;
+		else if (!inString) {
+			if (char === "{") depth++;
+			else if (char === "}") {
+				depth--;
+				if (depth === 0) return i + 1;
+			}
+		}
+	}
+	return -1;
+}
+/** The JSON text is DES tracker data: an object with one of DES's sections (parsed or, if broken, by its keys). */
+function looksLikeTracker(json) {
+	const body = json.trim();
+	if (!body.startsWith("{")) return false;
+	try {
+		const parsed = JSON.parse(body);
+		return isDict$5(parsed) && TRACKER_KEYS.some((key) => key in parsed);
+	} catch {
+		return TRACKER_KEY_RE.test(body);
+	}
+}
+/**
+* Removes the DES tracker JSON that opens a reply in together mode: a leading ```json fence (or ```markdown / a bare
+* fence) whose body is tracker JSON, or an unfenced leading JSON object with tracker sections. Other JSON is kept.
+*/
+function stripDesTrackerJson(text) {
+	if (typeof text !== "string" || !text) return typeof text === "string" ? text : "";
+	const fence = LEADING_FENCE_RE.exec(text);
+	if (fence) return looksLikeTracker(fence[1] ?? "") ? text.slice(fence[0].length).replace(/^\s+/, "") : text;
+	const start = text.search(/\S/);
+	if (start < 0 || text[start] !== "{") return text;
+	const end = balancedObjectEnd(text, start);
+	if (end < 0 || !looksLikeTracker(text.slice(start, end))) return text;
+	return text.slice(end).replace(/^\s+/, "");
+}
+var NAMED_ENTITIES = {
+	lt: "<",
+	gt: ">",
+	quot: "\"",
+	apos: "'",
+	nbsp: " ",
+	amp: "&"
+};
+function decodeEntities(text) {
+	if (!text.includes("&")) return text;
+	return text.replace(/&(#x[0-9a-f]{1,6}|#[0-9]{1,7}|[a-z]+);/gi, (whole, body) => {
+		if (body[0] === "#") {
+			const code = body[1] === "x" || body[1] === "X" ? parseInt(body.slice(2), 16) : parseInt(body.slice(1), 10);
+			return Number.isFinite(code) && code > 0 && code <= 1114111 ? String.fromCodePoint(code) : whole;
+		}
+		return NAMED_ENTITIES[body.toLowerCase()] ?? whole;
+	});
+}
+/**
+* Removes HTML: comments, `<style>`/`<script>` blocks with their content, and tags of real HTML elements (block tags
+* become line breaks); entities are decoded. Tags that are not HTML (`<SPECIES:ELF>`, `<PHYSICAL>`) stay.
+*/
+function stripHtml(text) {
+	if (typeof text !== "string") return "";
+	if (!text.includes("<") && !text.includes("&")) return text;
+	return decodeEntities(text.replace(/<!--[\s\S]*?-->/g, "").replace(/<(style|script)(?=[\s>])[^>]*>[\s\S]*?<\/\1\s*>/gi, "").replace(/<\/?([A-Za-z][A-Za-z0-9-]*)(?=[\s/>])[^<>]*>/g, (whole, name) => {
+		if (!isHtmlElementName(name)) return whole;
+		return BLOCK_ELEMENTS.has(name.toLowerCase()) ? "\n" : "";
+	}));
+}
+/** The block CK appends in "thinking" display mode: `<BunnyMoTags>`, then "Name:" and "• CATEGORY: values" lines. */
+var DUMP_BLOCK_RE = /(\n[ \t]*)*<BunnyMoTags>\n?([\s\S]*?)<\/BunnyMoTags>/g;
+/** The body is a CK dump: only "Name:" and "• CATEGORY: values" lines, no `<KEY:VALUE>` tags (a sheet is kept). */
+function isCkDumpBody(body) {
+	const lines = String(body ?? "").split("\n").map((line) => line.trim()).filter(Boolean);
+	if (!lines.length || /<[A-Za-z][A-Za-z0-9_]*:/.test(body)) return false;
+	return lines.every((line) => line.startsWith("•") || line.endsWith(":"));
+}
+/** Removes CarrotKernel's `<BunnyMoTags>` dumps (with the blank lines before them); sheets are kept. */
+function stripCkDumps(text) {
+	if (typeof text !== "string" || !text.includes("<BunnyMoTags>")) return typeof text === "string" ? text : "";
+	return text.replace(DUMP_BLOCK_RE, (whole, _spacing, body) => isCkDumpBody(body) ? "" : whole);
+}
+var NAI_PLACEHOLDER_RE = /[ \t]*\[nai:img:[^\]\s]{1,80}\][ \t]*/g;
+/** Removes NAI Studio's inline image placeholders `[nai:img:<id>]`; inside a line one space keeps the words apart. */
+function stripNaiPlaceholders(text) {
+	if (typeof text !== "string") return "";
+	if (!text.includes("[nai:img:")) return text;
+	return text.replace(NAI_PLACEHOLDER_RE, (match, offset, whole) => {
+		const before = whole[offset - 1];
+		const after = whole[offset + match.length];
+		return before === void 0 || before === "\n" || after === void 0 || after === "\n" ? "" : " ";
+	});
+}
+/**
+* A picture post (NAI Studio `postToChat`): `extra.nai_studio` on the message, or a gallery whose every item carries
+* NAI metadata while the text is empty or just the image prompt.
+*/
+function isImagePost(message) {
+	if (!isDict$5(message) || !isDict$5(message.extra)) return false;
+	const extra = message.extra;
+	if (isDict$5(extra.nai_studio)) return true;
+	const media = extra.media;
+	if (!Array.isArray(media) || !media.length || !media.every((item) => isDict$5(item) && isDict$5(item.nai_studio))) return false;
+	const text = typeof message.mes === "string" ? message.mes.trim() : "";
+	if (!text) return true;
+	return media.some((item) => {
+		const meta = item.nai_studio;
+		const title = item.title;
+		return typeof title === "string" && title.trim() === text || meta.prompt === text;
+	});
+}
+var MECHANICS_BLOCK_RE = /(?:<|&lt;|\[)[ \t]*mechanics(?![\w-])[^>\]\n]*?(?:>|&gt;|\])[\s\S]*?(?:<|&lt;|\[)[ \t]*\/[ \t]*mechanics[ \t]*(?:>|&gt;|\])/gi;
+var MECHANICS_FENCE_RE = /```[ \t]*mechanics[ \t]*\r?\n[\s\S]*?(?:\r?\n[ \t]*```[ \t]*(?=\r?\n|$)|$)/gi;
+/** Removes Maestro's mechanics service block (`<mechanics>…</mechanics>`, escaped or bracketed, or a fence). */
+function stripMechanicsBlock(text) {
+	if (typeof text !== "string" || !/mechanics/i.test(text)) return typeof text === "string" ? text : "";
+	return text.replace(MECHANICS_BLOCK_RE, "").replace(MECHANICS_FENCE_RE, "");
+}
+/** The block Maestro's scene split asks for at the end of a reply (MAESTRO_API.sceneSplit.tag). */
+var OFFSCREEN_TAG = "offscreen";
+function escapeRe(text) {
+	return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+/**
+* Removes the `<offscreen>…</offscreen>` block (escaped or bracketed too) of Maestro's scene split: it tells what
+* happens elsewhere, so it is never the scene. A block left open at the end of a cut reply goes to the end. Other
+* tags than the default can be named (`tags`); names that are not plain words are ignored.
+*/
+function stripOffscreenBlock(text, tags = [OFFSCREEN_TAG]) {
+	if (typeof text !== "string") return "";
+	let out = text;
+	for (const raw of new Set(tags)) {
+		const tag = raw.trim();
+		if (!/^[A-Za-z][\w-]*$/.test(tag) || !out.toLowerCase().includes(tag.toLowerCase())) continue;
+		const name = escapeRe(tag);
+		const open = `(?:<|&lt;|\\[)[ \\t]*${name}(?![\\w-])[^>\\]\\n]*?(?:>|&gt;|\\])`;
+		const close = `(?:<|&lt;|\\[)[ \\t]*\\/[ \\t]*${name}[ \\t]*(?:>|&gt;|\\])`;
+		out = out.replace(new RegExp(`${open}[\\s\\S]*?${close}`, "gi"), "");
+		out = out.replace(new RegExp(`${open}[\\s\\S]*$`, "i"), "");
+	}
+	return out;
+}
+function normalizeWhitespace(text) {
+	return text.replace(/\r\n?/g, "\n").replace(/[ \t]+$/gm, "").replace(/\n{3,}/g, "\n\n").trim();
+}
+/**
+* Story text of a message (or of a raw string) for analysis: picture posts give '', otherwise the text without the DES
+* tracker JSON, CK dumps, NAI placeholders, the mechanics block, the `<offscreen>` block of what happens elsewhere
+* (plus any other tag `offscreenTags` names) and HTML, with tidy whitespace.
+*/
+function cleanForAnalysis(message, options = {}) {
+	if (typeof message !== "string" && isImagePost(message)) return "";
+	const raw = typeof message === "string" ? message : isDict$5(message) ? message.mes : void 0;
+	if (typeof raw !== "string" || !raw) return "";
+	let text = stripDesTrackerJson(raw);
+	text = stripCkDumps(text);
+	text = stripNaiPlaceholders(text);
+	text = stripMechanicsBlock(text);
+	text = stripOffscreenBlock(text, [OFFSCREEN_TAG, ...options.offscreenTags ?? []]);
+	text = stripHtml(text);
+	return normalizeWhitespace(text);
 }
 //#endregion
 //#region src/domain/levers.ts
@@ -7973,8 +8568,20 @@ var CAST_STRINGS = {
 function castOf(view) {
 	return view ? view.present.filter((id) => view.byId.has(id)) : [];
 }
-/** The motive card text for the engine's current view ('' when nobody is present); `director`: this beat's calls. */
-function castCardText(app, view, log, director) {
+/** The player's latest message in the chat ('' without one). */
+function lastPlayerText(app) {
+	const chat = app.host.ctx().chat;
+	for (let i = (Array.isArray(chat) ? chat.length : 0) - 1; i >= 0; i--) {
+		const message = chat[i];
+		if (message?.is_user && !message.is_system) return String(message.mes ?? "");
+	}
+	return "";
+}
+/**
+* The motive card text for the engine's current view ('' when nobody is present); `director`: this beat's calls;
+* `playerText`: the player's message this generation answers (the initiative holds against a hesitation).
+*/
+function castCardText(app, view, log, director, playerText) {
 	const present = castOf(view);
 	if (!view || !present.length) return "";
 	const settings = chatLevers(app.settings.get(), view.state.overrides);
@@ -7992,6 +8599,14 @@ function castCardText(app, view, log, director) {
 			return null;
 		}
 	};
+	const hold = initiativeHolds({
+		playerMessage: cleanForAnalysis(playerText ?? lastPlayerText(app)),
+		present,
+		...next?.moves ? { moves: next.moves } : {},
+		...next?.pursuing ? { pursuing: next.pursuing } : {},
+		byId: view.byId
+	});
+	const split = app.maestro.sceneSplit();
 	return buildCastCard({
 		profiles: view.profiles,
 		state,
@@ -8006,7 +8621,12 @@ function castCardText(app, view, log, director) {
 		mergeVoices: merge,
 		appetites: next?.appetites,
 		snaps: next?.snaps,
-		director
+		director,
+		...hold ? { hold } : {},
+		...split && next?.elsewhere?.length ? { elsewhere: {
+			notes: next.elsewhere,
+			tag: split.tag
+		} } : {}
 	}).text;
 }
 var castModule = {
@@ -8083,12 +8703,7 @@ var castModule = {
 				const input = document.getElementById("send_textarea");
 				if (input?.value?.trim()) return input.value;
 			}
-			const chat = app.host.ctx().chat;
-			for (let i = (Array.isArray(chat) ? chat.length : 0) - 1; i >= 0; i--) {
-				const message = chat[i];
-				if (message?.is_user && !message.is_system) return String(message.mes ?? "");
-			}
-			return "";
+			return lastPlayerText(app);
 		}
 		/** The real generation in progress (its card may still be rebuilt), null between generations. */
 		let generation = null;
@@ -8098,12 +8713,13 @@ var castModule = {
 		async function inject(gen) {
 			if (gen.dryRun || gen.quiet || stopped) return;
 			generation = gen;
-			sheet = isSheetCommand(userText(gen));
+			const said = userText(gen);
+			sheet = isSheetCommand(said);
 			const current = attach();
 			let text = "";
 			if (current && !sheet) {
 				await current.refresh();
-				text = stopped ? "" : castCardText(app, current.view(), log, directorCalls);
+				text = stopped ? "" : castCardText(app, current.view(), log, directorCalls, said);
 			}
 			if (!text && !app.ephemeral.isSet("cast")) return;
 			app.ephemeral.setInjection(CAST_INJECTION, {
@@ -8979,16 +9595,16 @@ function directorSchema(ids) {
 		}
 	};
 }
-function isDict$5(value) {
+function isDict$4(value) {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 /** Validates the answer: known ids only, one entry per actor, at most DIRECTOR_MAX_ACTORS; null when not an object. */
 function parseDirector(raw, ids) {
-	if (!isDict$5(raw)) return null;
+	if (!isDict$4(raw)) return null;
 	const allowed = new Set(ids);
 	const actors = [];
 	for (const item of Array.isArray(raw.actors) ? raw.actors : []) {
-		if (!isDict$5(item) || typeof item.id !== "string") continue;
+		if (!isDict$4(item) || typeof item.id !== "string") continue;
 		const id = item.id.trim();
 		const intent = typeof item.intent === "string" ? clipText(line$3(item.intent), DIRECTOR_CLIP.intent) : "";
 		if (!allowed.has(id) || !intent || actors.some((actor) => actor.id === id)) continue;
@@ -9019,330 +9635,6 @@ function directorCalls(beat, ctx) {
 		out[actor.id] = `${actor.intent.replace(/[\s.;,]+$/u, "")}${toward}`;
 	}
 	return out;
-}
-//#endregion
-//#region src/domain/text-clean.ts
-function isDict$4(value) {
-	return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-/** Names of real HTML elements (lower case). BunnyMo tags (`<SPECIES:ELF>`, `<PHYSICAL>`) are not among them. */
-var HTML_ELEMENTS = /* @__PURE__ */ new Set([
-	"a",
-	"abbr",
-	"address",
-	"area",
-	"article",
-	"aside",
-	"audio",
-	"b",
-	"base",
-	"bdi",
-	"bdo",
-	"big",
-	"blink",
-	"blockquote",
-	"body",
-	"br",
-	"button",
-	"canvas",
-	"caption",
-	"center",
-	"cite",
-	"code",
-	"col",
-	"colgroup",
-	"data",
-	"datalist",
-	"dd",
-	"del",
-	"details",
-	"dfn",
-	"dialog",
-	"dir",
-	"div",
-	"dl",
-	"dt",
-	"em",
-	"embed",
-	"fieldset",
-	"figcaption",
-	"figure",
-	"font",
-	"footer",
-	"form",
-	"h1",
-	"h2",
-	"h3",
-	"h4",
-	"h5",
-	"h6",
-	"head",
-	"header",
-	"hgroup",
-	"hr",
-	"html",
-	"i",
-	"iframe",
-	"img",
-	"input",
-	"ins",
-	"kbd",
-	"label",
-	"legend",
-	"li",
-	"link",
-	"main",
-	"map",
-	"mark",
-	"marquee",
-	"math",
-	"menu",
-	"meta",
-	"meter",
-	"nav",
-	"nobr",
-	"noscript",
-	"object",
-	"ol",
-	"optgroup",
-	"option",
-	"output",
-	"p",
-	"param",
-	"picture",
-	"pre",
-	"progress",
-	"q",
-	"rp",
-	"rt",
-	"ruby",
-	"s",
-	"samp",
-	"script",
-	"search",
-	"section",
-	"select",
-	"slot",
-	"small",
-	"source",
-	"span",
-	"strike",
-	"strong",
-	"style",
-	"sub",
-	"summary",
-	"sup",
-	"svg",
-	"table",
-	"tbody",
-	"td",
-	"template",
-	"textarea",
-	"tfoot",
-	"th",
-	"thead",
-	"time",
-	"title",
-	"tr",
-	"track",
-	"tt",
-	"u",
-	"ul",
-	"var",
-	"video",
-	"wbr"
-]);
-/** Elements whose tags separate lines of text. */
-var BLOCK_ELEMENTS = /* @__PURE__ */ new Set([
-	"address",
-	"article",
-	"aside",
-	"blockquote",
-	"br",
-	"center",
-	"dd",
-	"details",
-	"div",
-	"dl",
-	"dt",
-	"figcaption",
-	"figure",
-	"footer",
-	"h1",
-	"h2",
-	"h3",
-	"h4",
-	"h5",
-	"h6",
-	"header",
-	"hr",
-	"li",
-	"main",
-	"nav",
-	"ol",
-	"p",
-	"pre",
-	"section",
-	"summary",
-	"table",
-	"tr",
-	"ul"
-]);
-/** A real HTML element name (any case), or a custom element (lower case with a hyphen; `<INTJ-U>` is a BunnyMo tag). */
-function isHtmlElementName(name) {
-	return HTML_ELEMENTS.has(name.toLowerCase()) || /^[a-z][a-z0-9]*-[a-z0-9-]+$/.test(name);
-}
-var TRACKER_KEYS = [
-	"quests",
-	"infoBox",
-	"infobox",
-	"characterThoughts",
-	"characters"
-];
-var TRACKER_KEY_RE = /"(?:quests|infoBox|infobox|characterThoughts|characters)"\s*:/;
-/** A fence at the very start: ```json, ```markdown, ```md or a bare ```; the body runs to the closing fence. */
-var LEADING_FENCE_RE = /^\s*```(?:json|markdown|md)?[ \t]*\r?\n([\s\S]*?)\r?\n?[ \t]*```[ \t]*(?:\r?\n|$)/i;
-/** End index (exclusive) of the balanced `{…}` starting at `start`, strings respected; -1 when unbalanced. */
-function balancedObjectEnd(text, start) {
-	let depth = 0;
-	let inString = false;
-	let escaped = false;
-	for (let i = start; i < text.length; i++) {
-		const char = text[i];
-		if (escaped) escaped = false;
-		else if (char === "\\") escaped = inString;
-		else if (char === "\"") inString = !inString;
-		else if (!inString) {
-			if (char === "{") depth++;
-			else if (char === "}") {
-				depth--;
-				if (depth === 0) return i + 1;
-			}
-		}
-	}
-	return -1;
-}
-/** The JSON text is DES tracker data: an object with one of DES's sections (parsed or, if broken, by its keys). */
-function looksLikeTracker(json) {
-	const body = json.trim();
-	if (!body.startsWith("{")) return false;
-	try {
-		const parsed = JSON.parse(body);
-		return isDict$4(parsed) && TRACKER_KEYS.some((key) => key in parsed);
-	} catch {
-		return TRACKER_KEY_RE.test(body);
-	}
-}
-/**
-* Removes the DES tracker JSON that opens a reply in together mode: a leading ```json fence (or ```markdown / a bare
-* fence) whose body is tracker JSON, or an unfenced leading JSON object with tracker sections. Other JSON is kept.
-*/
-function stripDesTrackerJson(text) {
-	if (typeof text !== "string" || !text) return typeof text === "string" ? text : "";
-	const fence = LEADING_FENCE_RE.exec(text);
-	if (fence) return looksLikeTracker(fence[1] ?? "") ? text.slice(fence[0].length).replace(/^\s+/, "") : text;
-	const start = text.search(/\S/);
-	if (start < 0 || text[start] !== "{") return text;
-	const end = balancedObjectEnd(text, start);
-	if (end < 0 || !looksLikeTracker(text.slice(start, end))) return text;
-	return text.slice(end).replace(/^\s+/, "");
-}
-var NAMED_ENTITIES = {
-	lt: "<",
-	gt: ">",
-	quot: "\"",
-	apos: "'",
-	nbsp: " ",
-	amp: "&"
-};
-function decodeEntities(text) {
-	if (!text.includes("&")) return text;
-	return text.replace(/&(#x[0-9a-f]{1,6}|#[0-9]{1,7}|[a-z]+);/gi, (whole, body) => {
-		if (body[0] === "#") {
-			const code = body[1] === "x" || body[1] === "X" ? parseInt(body.slice(2), 16) : parseInt(body.slice(1), 10);
-			return Number.isFinite(code) && code > 0 && code <= 1114111 ? String.fromCodePoint(code) : whole;
-		}
-		return NAMED_ENTITIES[body.toLowerCase()] ?? whole;
-	});
-}
-/**
-* Removes HTML: comments, `<style>`/`<script>` blocks with their content, and tags of real HTML elements (block tags
-* become line breaks); entities are decoded. Tags that are not HTML (`<SPECIES:ELF>`, `<PHYSICAL>`) stay.
-*/
-function stripHtml(text) {
-	if (typeof text !== "string") return "";
-	if (!text.includes("<") && !text.includes("&")) return text;
-	return decodeEntities(text.replace(/<!--[\s\S]*?-->/g, "").replace(/<(style|script)(?=[\s>])[^>]*>[\s\S]*?<\/\1\s*>/gi, "").replace(/<\/?([A-Za-z][A-Za-z0-9-]*)(?=[\s/>])[^<>]*>/g, (whole, name) => {
-		if (!isHtmlElementName(name)) return whole;
-		return BLOCK_ELEMENTS.has(name.toLowerCase()) ? "\n" : "";
-	}));
-}
-/** The block CK appends in "thinking" display mode: `<BunnyMoTags>`, then "Name:" and "• CATEGORY: values" lines. */
-var DUMP_BLOCK_RE = /(\n[ \t]*)*<BunnyMoTags>\n?([\s\S]*?)<\/BunnyMoTags>/g;
-/** The body is a CK dump: only "Name:" and "• CATEGORY: values" lines, no `<KEY:VALUE>` tags (a sheet is kept). */
-function isCkDumpBody(body) {
-	const lines = String(body ?? "").split("\n").map((line) => line.trim()).filter(Boolean);
-	if (!lines.length || /<[A-Za-z][A-Za-z0-9_]*:/.test(body)) return false;
-	return lines.every((line) => line.startsWith("•") || line.endsWith(":"));
-}
-/** Removes CarrotKernel's `<BunnyMoTags>` dumps (with the blank lines before them); sheets are kept. */
-function stripCkDumps(text) {
-	if (typeof text !== "string" || !text.includes("<BunnyMoTags>")) return typeof text === "string" ? text : "";
-	return text.replace(DUMP_BLOCK_RE, (whole, _spacing, body) => isCkDumpBody(body) ? "" : whole);
-}
-var NAI_PLACEHOLDER_RE = /[ \t]*\[nai:img:[^\]\s]{1,80}\][ \t]*/g;
-/** Removes NAI Studio's inline image placeholders `[nai:img:<id>]`; inside a line one space keeps the words apart. */
-function stripNaiPlaceholders(text) {
-	if (typeof text !== "string") return "";
-	if (!text.includes("[nai:img:")) return text;
-	return text.replace(NAI_PLACEHOLDER_RE, (match, offset, whole) => {
-		const before = whole[offset - 1];
-		const after = whole[offset + match.length];
-		return before === void 0 || before === "\n" || after === void 0 || after === "\n" ? "" : " ";
-	});
-}
-/**
-* A picture post (NAI Studio `postToChat`): `extra.nai_studio` on the message, or a gallery whose every item carries
-* NAI metadata while the text is empty or just the image prompt.
-*/
-function isImagePost(message) {
-	if (!isDict$4(message) || !isDict$4(message.extra)) return false;
-	const extra = message.extra;
-	if (isDict$4(extra.nai_studio)) return true;
-	const media = extra.media;
-	if (!Array.isArray(media) || !media.length || !media.every((item) => isDict$4(item) && isDict$4(item.nai_studio))) return false;
-	const text = typeof message.mes === "string" ? message.mes.trim() : "";
-	if (!text) return true;
-	return media.some((item) => {
-		const meta = item.nai_studio;
-		const title = item.title;
-		return typeof title === "string" && title.trim() === text || meta.prompt === text;
-	});
-}
-var MECHANICS_BLOCK_RE = /(?:<|&lt;|\[)[ \t]*mechanics(?![\w-])[^>\]\n]*?(?:>|&gt;|\])[\s\S]*?(?:<|&lt;|\[)[ \t]*\/[ \t]*mechanics[ \t]*(?:>|&gt;|\])/gi;
-var MECHANICS_FENCE_RE = /```[ \t]*mechanics[ \t]*\r?\n[\s\S]*?(?:\r?\n[ \t]*```[ \t]*(?=\r?\n|$)|$)/gi;
-/** Removes Maestro's mechanics service block (`<mechanics>…</mechanics>`, escaped or bracketed, or a fence). */
-function stripMechanicsBlock(text) {
-	if (typeof text !== "string" || !/mechanics/i.test(text)) return typeof text === "string" ? text : "";
-	return text.replace(MECHANICS_BLOCK_RE, "").replace(MECHANICS_FENCE_RE, "");
-}
-function normalizeWhitespace(text) {
-	return text.replace(/\r\n?/g, "\n").replace(/[ \t]+$/gm, "").replace(/\n{3,}/g, "\n\n").trim();
-}
-/**
-* Story text of a message (or of a raw string) for analysis: picture posts give '', otherwise the text without the DES
-* tracker JSON, CK dumps, NAI placeholders, the mechanics block and HTML, with tidy whitespace.
-*/
-function cleanForAnalysis(message) {
-	if (typeof message !== "string" && isImagePost(message)) return "";
-	const raw = typeof message === "string" ? message : isDict$4(message) ? message.mes : void 0;
-	if (typeof raw !== "string" || !raw) return "";
-	let text = stripDesTrackerJson(raw);
-	text = stripCkDumps(text);
-	text = stripNaiPlaceholders(text);
-	text = stripMechanicsBlock(text);
-	text = stripHtml(text);
-	return normalizeWhitespace(text);
 }
 //#endregion
 //#region src/domain/attention.ts
@@ -9600,6 +9892,1416 @@ function ceilingDetail(input) {
 		step,
 		cap
 	};
+}
+//#endregion
+//#region src/domain/presence.ts
+var CYRILLIC_RE$1 = /\p{Script=Cyrillic}/u;
+/** Final letters dropped to get a Russian stem. */
+var STEM_END_RE = /[аяоеыиуюйь]$/;
+/** Case endings after the stem of a name in -а/-я (Ильва, Мария, Илья): Ильвы, Ильве, Ильву, Ильвой… */
+var FEMININE_ENDINGS = /* @__PURE__ */ new Set([
+	"ы",
+	"и",
+	"е",
+	"у",
+	"ю",
+	"ой",
+	"ей",
+	"ою",
+	"ею",
+	"ам",
+	"ям",
+	"ами",
+	"ями",
+	"ах",
+	"ях"
+]);
+/** Case endings after the stem of a name in a consonant, -й or -ь (Брам, Дмитрий, Игорь): Брама, Браму, Брамом… */
+var MASCULINE_ENDINGS = /* @__PURE__ */ new Set([
+	"а",
+	"я",
+	"у",
+	"ю",
+	"е",
+	"ом",
+	"ем",
+	"и",
+	"ы",
+	"ов",
+	"ев",
+	"ам",
+	"ям",
+	"ами",
+	"ями",
+	"ах",
+	"ях"
+]);
+/** Possessive adjectives («Ильвин трактир», «Брамов нож»); not in the strict mode. */
+var POSSESSIVE_ENDINGS = /* @__PURE__ */ new Set([
+	"ин",
+	"ина",
+	"ину",
+	"иной",
+	"ины",
+	"ино",
+	"иных",
+	"ов",
+	"ова",
+	"ову",
+	"овой",
+	"овы"
+]);
+/** Small words that never identify anyone on their own. */
+var STOP_WORDS$1 = /* @__PURE__ */ new Set([
+	"the",
+	"old",
+	"young",
+	"lady",
+	"sir",
+	"and",
+	"of",
+	"старый",
+	"старая",
+	"молодой",
+	"юная"
+]);
+var MIN_STEM = 4;
+/** Lower case, ё → е, possessive 's dropped, punctuation folded into spaces. */
+function normalizeName(text) {
+	return text.toLowerCase().replace(/ё/g, "е").replace(/['’]s\b/g, "").replace(/[^\p{L}\p{N}\s-]+/gu, " ").replace(/\s+/g, " ").trim();
+}
+function words$1(text) {
+	return normalizeName(text).split(/[\s-]+/).filter(Boolean);
+}
+/** «Ильва» → 'ильв', «Дмитрий» → 'дмитри', «Брам» → 'брам' (normalised input). */
+function russianStem(word) {
+	return word.replace(STEM_END_RE, "");
+}
+function isCapitalized$2(original) {
+	if (!original) return false;
+	const first = original.trim().charAt(0);
+	return first !== "" && first === first.toUpperCase() && first !== first.toLowerCase();
+}
+/**
+* Is `form` (one normalised word) an inflected form of `base` (one normalised word)? Cyrillic only.
+* `capitalized`: the form was written with a capital letter (a 3-letter stem is accepted then).
+*/
+function isInflectionOf(form, base, strict = false, capitalized = false) {
+	if (!form || !base || form === base) return false;
+	if (!CYRILLIC_RE$1.test(base) || !CYRILLIC_RE$1.test(form)) return false;
+	const stem = russianStem(base);
+	const minStem = capitalized && base.length >= MIN_STEM ? 3 : MIN_STEM;
+	if (stem.length < minStem || !form.startsWith(stem)) return false;
+	const ending = form.slice(stem.length);
+	if (!ending) return false;
+	const masculine = !/[ая]$/.test(base);
+	const endings = masculine ? MASCULINE_ENDINGS : FEMININE_ENDINGS;
+	if (strict) {
+		if (masculine && (ending === "а" || ending === "я")) return false;
+		return endings.has(ending);
+	}
+	return endings.has(ending) || POSSESSIVE_ENDINGS.has(ending);
+}
+/** How well a name matches one of a profile's names: 3 exact, 2 same words, 1 inflected, 0 none. */
+function nameScore(query, candidate, options = {}, capitalized = false) {
+	const q = normalizeName(query);
+	const c = normalizeName(candidate);
+	if (!q || !c) return 0;
+	if (q === c) return 3;
+	const qWords = words$1(q);
+	const cWords = words$1(c);
+	const useful = (word) => word.length >= 3 && !STOP_WORDS$1.has(word);
+	const [short, long] = qWords.length <= cWords.length ? [qWords, cWords] : [cWords, qWords];
+	const shortUseful = short.filter(useful);
+	if (shortUseful.length && shortUseful.every((word) => long.includes(word))) return 2;
+	const qUseful = qWords.filter(useful);
+	if (!qUseful.length) return 0;
+	return qUseful.every((word) => cWords.some((base) => base === word || isInflectionOf(word, base, options.strict, capitalized))) ? 1 : 0;
+}
+/** Every name a profile answers to: the story name, the aliases, the English name. */
+function nameVariants(profile) {
+	return [
+		profile.name,
+		...profile.aliases ?? [],
+		profile.english ?? ""
+	].filter((item) => item && item.trim());
+}
+/** Best score of a name against every name of a profile. */
+function profileScore(name, profile, options) {
+	const capitalized = isCapitalized$2(name);
+	return Math.max(0, ...nameVariants(profile).map((variant) => nameScore(name, variant, options, capitalized)));
+}
+/**
+* The profile id a story name refers to, or null. Exact beats same-words beats inflected; two profiles with the
+* same best score are ambiguous (null).
+*/
+function matchName(name, profiles, options = {}) {
+	if (!name.trim()) return null;
+	let best = 0;
+	let found = [];
+	for (const profile of profiles) {
+		const score = profileScore(name, profile, options);
+		if (score === 0 || score < best) continue;
+		if (score > best) {
+			best = score;
+			found = [profile.id];
+		} else if (!found.includes(profile.id)) found.push(profile.id);
+	}
+	return found.length === 1 ? found[0] : null;
+}
+/** Present cast of a DES tracker → profile ids, plus the names nobody has a profile for. */
+function presentFromDes(cast, profiles) {
+	const present = [];
+	const unknown = [];
+	const seenUnknown = /* @__PURE__ */ new Set();
+	for (const member of cast) {
+		if (!member.present || !member.name?.trim()) continue;
+		const id = matchName(member.name, profiles, { strict: true });
+		if (id) {
+			if (!present.includes(id)) present.push(id);
+			continue;
+		}
+		const key = normalizeName(member.name);
+		if (key && !seenUnknown.has(key)) {
+			seenUnknown.add(key);
+			unknown.push(member.name.trim());
+		}
+	}
+	return {
+		present,
+		unknown
+	};
+}
+function tokenize(text) {
+	const out = [];
+	for (const match of text.matchAll(/[\p{L}\p{N}]+(?:[-'’][\p{L}\p{N}]+)*/gu)) {
+		const raw = match[0];
+		const norm = normalizeName(raw);
+		for (const part of norm.split(/[\s-]+/).filter(Boolean)) out.push({
+			norm: part,
+			capitalized: isCapitalized$2(raw)
+		});
+	}
+	return out;
+}
+/** Words of a profile's names that identify it in prose: capitalised ones (or all, when none is), normalised. */
+function nameWords(profile) {
+	return nameVariants(profile).map((variant) => {
+		const raw = variant.split(/[\s-]+/).filter(Boolean);
+		const capital = raw.filter((word) => isCapitalized$2(word));
+		return (capital.length ? capital : raw).map(normalizeName).filter((word) => word.length >= 2);
+	});
+}
+/** Does the phrase (all words of a name, in order) occur in the tokens? */
+function phraseAt$1(tokens, phrase, exactOnly) {
+	if (!phrase.length) return false;
+	for (let i = 0; i + phrase.length <= tokens.length; i++) if (phrase.every((word, j) => {
+		const token = tokens[i + j];
+		return token.norm === word || !exactOnly && isInflectionOf(token.norm, word, false, token.capitalized);
+	})) return true;
+	return false;
+}
+/**
+* Who is present without DES: the card's main character plus everyone mentioned in the last 3 messages (by any of
+* their names, inflected forms included). A word that exactly names someone is never read as another's inflection.
+* Groups need their whole name. Main character first, then profile order.
+*/
+function presentFromText(lastMessages, profiles, mainCharacterId) {
+	const tokens = lastMessages.slice(-3).flatMap((message) => tokenize(message ?? ""));
+	const exactWords = /* @__PURE__ */ new Set();
+	for (const profile of profiles) for (const phrase of nameWords(profile)) for (const word of phrase) exactWords.add(word);
+	const found = /* @__PURE__ */ new Set();
+	for (const profile of profiles) {
+		if (profile.kind === "group") {
+			if (nameVariants(profile).map(words$1).some((phrase) => phraseAt$1(tokens, phrase, false))) found.add(profile.id);
+			continue;
+		}
+		if (nameWords(profile).some((phrase) => {
+			if (phraseAt$1(tokens, phrase, true)) return true;
+			return phrase.some((word) => tokens.some((token) => token.norm === word || !exactWords.has(token.norm) && isInflectionOf(token.norm, word, false, token.capitalized)));
+		})) found.add(profile.id);
+	}
+	const out = [];
+	if (mainCharacterId && profiles.some((profile) => profile.id === mainCharacterId)) out.push(mainCharacterId);
+	for (const profile of profiles) if (found.has(profile.id) && !out.includes(profile.id)) out.push(profile.id);
+	return out;
+}
+//#endregion
+//#region src/domain/scene-reading.ts
+/** Quoted spans, innermost first (nested quotes): «…», “…”, „…“, "…" on one line. */
+var QUOTE_RES = [
+	/«[^«»]*»/g,
+	/„[^„“”]*[“”]/g,
+	/“[^“”]*”/g,
+	/"[^"\n]*"/g
+];
+/** A placeholder for a line of speech: a sentence end when the line ended one, else a clause break. */
+function placeholder(speech) {
+	return /[.!?…][\s»"”“]*$/u.test(speech) ? " . " : " , ";
+}
+/** A dialogue line opened by a dash: speech and the author's words alternate between « — ». */
+function dashLine(line) {
+	if (!/^\s*[—–-]\s*\S/.test(line)) return line;
+	return line.replace(/^\s*[—–-]\s*/, "").split(/\s+[—–]\s+|\s+-\s+/).map((part, index) => index % 2 === 0 ? placeholder(part) : part).join(" ");
+}
+/** The narration of a text: speech replaced by punctuation, so that «"Bye," she said» keeps «she said». */
+function narrationOnly(text) {
+	let out = String(text ?? "").replace(/\r\n?/g, "\n").split("\n").map(dashLine).join("\n");
+	for (const re of QUOTE_RES) for (let guard = 0; guard < 5; guard++) {
+		const next = out.replace(re, (speech) => placeholder(speech.slice(0, -1)));
+		if (next === out) break;
+		out = next;
+	}
+	return out;
+}
+var CYRILLIC_RE = /\p{Script=Cyrillic}/u;
+function isCapitalized$1(raw) {
+	const first = raw.charAt(0);
+	return first !== "" && first === first.toUpperCase() && first !== first.toLowerCase();
+}
+function lowOf(raw) {
+	return raw.toLowerCase().replace(/ё/g, "е").replace(/['’]/g, "");
+}
+/** Words with their sentence and clause numbers; `questions`: sentences that end in «?». */
+function wordsOf(text) {
+	const words = [];
+	const questions = /* @__PURE__ */ new Set();
+	let sentence = 0;
+	let clause = 0;
+	let last = 0;
+	const close = (gap) => {
+		if (gap.includes("?")) questions.add(sentence);
+	};
+	for (const match of text.matchAll(/[\p{L}\p{N}]+(?:['’][\p{L}]+)?/gu)) {
+		const raw = match[0];
+		const start = match.index ?? 0;
+		const between = text.slice(last, start);
+		last = start + raw.length;
+		if (words.length) {
+			if (/[.!?…\n]/.test(between)) {
+				close(between);
+				sentence++;
+				clause++;
+			} else if (/[,;:—–()[\]«»"“”„]|\s-\s/.test(between)) clause++;
+		}
+		const possessive = /['’]s$/i.test(raw);
+		const bare = possessive ? raw.slice(0, -2) : raw;
+		words.push({
+			low: lowOf(raw),
+			norm: normalizeName(bare),
+			capitalized: isCapitalized$1(raw),
+			possessive,
+			sentence,
+			clause,
+			gap: between.trim(),
+			cyrillic: CYRILLIC_RE.test(raw)
+		});
+	}
+	close(text.slice(last));
+	return {
+		words,
+		questions
+	};
+}
+/** Small words that never identify anyone on their own (as presence.ts). */
+var STOP_WORDS = /* @__PURE__ */ new Set([
+	"the",
+	"old",
+	"young",
+	"lady",
+	"sir",
+	"and",
+	"of",
+	"старый",
+	"старая",
+	"молодой",
+	"юная"
+]);
+function entriesOf(profile) {
+	const group = profile.kind === "group";
+	const out = [];
+	for (const variant of nameVariants(profile)) {
+		const raw = variant.split(/[\s-]+/).filter(Boolean);
+		const capital = raw.filter(isCapitalized$1);
+		const chosen = (group ? raw : capital.length ? capital : raw).map(normalizeName).filter((word) => word.length >= 2 && !STOP_WORDS.has(word));
+		if (chosen.length) out.push({
+			id: profile.id,
+			words: chosen,
+			capital: !group && capital.length > 0,
+			whole: group
+		});
+	}
+	return out;
+}
+function wordMatches(word, base, exactWords) {
+	if (word.norm === base) return word.possessive ? 1 : 2;
+	if (exactWords.has(word.norm)) return 0;
+	return isInflectionOf(word.norm, base, false, word.capitalized) ? 1 : 0;
+}
+/** Every mention of a profile (or of the player, as PLAYER_ID) in the words; two equally good matches give none. */
+function mentionsOf$1(words, entries) {
+	const exactWords = new Set(entries.flatMap((entry) => entry.words));
+	const out = [];
+	for (let i = 0; i < words.length; i++) {
+		let best = 0;
+		let ids = [];
+		let span = 1;
+		for (const entry of entries) {
+			let score = 0;
+			let length = 1;
+			if (entry.whole) {
+				if (i + entry.words.length > words.length) continue;
+				const scores = entry.words.map((base, j) => wordMatches(words[i + j], base, exactWords));
+				if (scores.some((item) => item === 0)) continue;
+				score = scores.every((item) => item === 2) ? 2 : 1;
+				length = entry.words.length;
+			} else {
+				const word = words[i];
+				if (entry.capital && !word.capitalized) continue;
+				for (const base of entry.words) score = Math.max(score, wordMatches(word, base, exactWords));
+			}
+			if (score === 0 || score < best) continue;
+			if (score > best) {
+				best = score;
+				ids = [entry.id];
+				span = length;
+			} else if (!ids.includes(entry.id)) ids.push(entry.id);
+		}
+		if (ids.length !== 1) continue;
+		const id = ids[0];
+		const previous = out[out.length - 1];
+		if (previous && previous.id === id && previous.end === i - 1 && !words[i].gap) {
+			previous.end = i + span - 1;
+			previous.exact &&= best === 2;
+			i += span - 1;
+			continue;
+		}
+		out.push({
+			id,
+			at: i,
+			end: i + span - 1,
+			exact: best === 2
+		});
+		i += span - 1;
+	}
+	return out;
+}
+var RU_EXIT = {
+	ушел: "m",
+	ушла: "f",
+	ушли: "pl",
+	уходит: null,
+	уходят: "pl",
+	покинул: "m",
+	покинула: "f",
+	покинули: "pl",
+	покидает: null,
+	удалился: "m",
+	удалилась: "f",
+	удалились: "pl",
+	удаляется: null,
+	скрылся: "m",
+	скрылась: "f",
+	скрылись: "pl",
+	исчез: "m",
+	исчезла: "f",
+	исчезли: "pl",
+	исчезает: null,
+	отправился: "m",
+	отправилась: "f",
+	отправились: "pl",
+	уехал: "m",
+	уехала: "f",
+	уехали: "pl",
+	уезжает: null,
+	ускакал: "m",
+	ускакала: "f",
+	ускакали: "pl",
+	убежал: "m",
+	убежала: "f",
+	убежали: "pl",
+	умчался: "m",
+	умчалась: "f",
+	умчались: "pl",
+	удрал: "m",
+	удрала: "f",
+	удрали: "pl"
+};
+/** Exit verbs that need an «away» after them (вышла из комнаты, направился прочь) or nothing after them in the clause. */
+var RU_EXIT_AIMED = {
+	вышел: "m",
+	вышла: "f",
+	вышли: "pl",
+	направился: "m",
+	направилась: "f",
+	направились: "pl"
+};
+var RU_ENTER = {
+	вернулся: "m",
+	вернулась: "f",
+	вернулись: "pl",
+	возвращается: null,
+	возвратился: "m",
+	возвратилась: "f",
+	вошел: "m",
+	вошла: "f",
+	вошли: "pl",
+	входит: null,
+	пришел: "m",
+	пришла: "f",
+	пришли: "pl",
+	приходит: null,
+	появился: "m",
+	появилась: "f",
+	появились: "pl",
+	появляется: null,
+	ворвался: "m",
+	ворвалась: "f",
+	ворвались: "pl",
+	вбежал: "m",
+	вбежала: "f",
+	вбежали: "pl",
+	заглянул: "m",
+	заглянула: "f",
+	зашел: "m",
+	зашла: "f",
+	зашли: "pl",
+	заходит: null
+};
+/** Words right after an aimed exit verb that make it a way out (вышла прочь / вон / наружу). */
+var RU_AWAY_WORDS = /* @__PURE__ */ new Set([
+	"прочь",
+	"вон",
+	"наружу",
+	"восвояси",
+	"домой"
+]);
+/** «из …» after «вышла»: a room, a house, an inn. */
+var RU_ROOM_STEMS = [
+	"комнат",
+	"зал",
+	"дом",
+	"изб",
+	"таверн",
+	"трактир",
+	"кабинет",
+	"кухн",
+	"спальн",
+	"помещени",
+	"палатк",
+	"шатр",
+	"здани",
+	"лавк",
+	"хижин",
+	"поко",
+	"кают",
+	"библиотек",
+	"корчм",
+	"бар",
+	"гостин",
+	"кабак",
+	"харчевн",
+	"мастерск",
+	"кузниц",
+	"сара",
+	"подвал",
+	"башн"
+];
+/** What makes «ушла / пришла …» something else: «ушла в себя», «вышла замуж», «пришла в ярость», «зашла за угол». */
+var RU_NOT_AFTER = [
+	["в", "себ"],
+	["в", "мысл"],
+	["в", "воспомин"],
+	["в", "работ"],
+	["в", "сторон"],
+	["в", "ярост"],
+	["в", "ужас"],
+	["в", "восторг"],
+	["в", "голов"],
+	["с", "голов"],
+	["от", "ответ"],
+	["от", "тем"],
+	["от", "разговор"],
+	["от", "вопрос"],
+	["под", "вод"],
+	["к", "вывод"],
+	["за", "угол"],
+	["из", "себ"],
+	["из", "тен"],
+	["из", "за"]
+];
+var RU_NOT_AFTER_WORDS = /* @__PURE__ */ new Set([
+	"замуж",
+	"вперед",
+	"навстречу"
+]);
+/** The word right before a verb that makes it not happen («не ушла», «почти ушла»). */
+var RU_NOT = /* @__PURE__ */ new Set([
+	"не",
+	"почти",
+	"едва"
+]);
+/** Words a little before a verb (same clause) that make it unreal («ушла бы», «чтобы ушла», «будто ушла»). */
+var RU_UNREAL = /* @__PURE__ */ new Set([
+	"бы",
+	"б",
+	"чтобы",
+	"чтоб",
+	"если",
+	"будто",
+	"словно"
+]);
+var RU_PREPOSITIONS = /* @__PURE__ */ new Set([
+	"в",
+	"во",
+	"на",
+	"о",
+	"об",
+	"обо",
+	"с",
+	"со",
+	"к",
+	"ко",
+	"у",
+	"для",
+	"без",
+	"про",
+	"за",
+	"от",
+	"ото",
+	"до",
+	"из",
+	"над",
+	"под",
+	"перед",
+	"при",
+	"через",
+	"по",
+	"между",
+	"возле",
+	"около",
+	"мимо",
+	"вокруг",
+	"кроме",
+	"среди"
+]);
+var RU_PRONOUNS = {
+	она: "female",
+	он: "male"
+};
+/** «за ней / ним / ними» after a closed door. */
+var RU_BEHIND = {
+	ней: "female",
+	нею: "female",
+	ним: "male",
+	ними: "pl"
+};
+/** English verb phrases (lower case, apostrophes dropped). */
+var EN_EXIT = [
+	...[
+		"walked",
+		"walks",
+		"stormed",
+		"storms",
+		"slipped",
+		"slips",
+		"headed",
+		"heads",
+		"hurried",
+		"hurries"
+	].flatMap((verb) => [
+		"out",
+		"away",
+		"off"
+	].map((away) => [verb, away])),
+	...[
+		"strode",
+		"strides",
+		"marched",
+		"marches",
+		"ran",
+		"runs",
+		"rode",
+		"rides",
+		"drove",
+		"drives"
+	].flatMap((verb) => [
+		"out",
+		"away",
+		"off"
+	].map((away) => [verb, away])),
+	...["went", "goes"].flatMap((verb) => [
+		"away",
+		"off",
+		"out",
+		"home"
+	].map((away) => [verb, away])),
+	...[
+		"headed",
+		"heads",
+		"made",
+		"makes"
+	].map((verb) => [
+		verb,
+		"for",
+		"the",
+		"door"
+	]),
+	...["excused", "excuses"].flatMap((verb) => [
+		"herself",
+		"himself",
+		"themselves"
+	].map((self) => [verb, self])),
+	["stepped", "out"],
+	["steps", "out"],
+	["backed", "out"],
+	["ducked", "out"],
+	["departed"],
+	["departs"],
+	["disappeared"],
+	["disappears"],
+	["vanished"],
+	["vanishes"],
+	["exited"],
+	["exits"],
+	[
+		"took",
+		"her",
+		"leave"
+	],
+	[
+		"took",
+		"his",
+		"leave"
+	],
+	[
+		"took",
+		"their",
+		"leave"
+	],
+	[
+		"takes",
+		"her",
+		"leave"
+	],
+	[
+		"takes",
+		"his",
+		"leave"
+	],
+	["was", "gone"],
+	["is", "gone"]
+];
+var EN_ENTER = [
+	["came", "back"],
+	["comes", "back"],
+	["came", "in"],
+	["comes", "in"],
+	["walked", "in"],
+	["walks", "in"],
+	["walked", "back"],
+	["walks", "back"],
+	["stepped", "in"],
+	["steps", "in"],
+	["burst", "in"],
+	["bursts", "in"],
+	["showed", "up"],
+	["shows", "up"],
+	["entered"],
+	["enters"],
+	["arrived"],
+	["arrives"],
+	["rejoined"],
+	["rejoins"],
+	["reappeared"],
+	["reappears"]
+];
+/** «returned» / «appeared» only as an entry: not «returned his gaze», not «appeared tired». */
+var EN_RETURN = /* @__PURE__ */ new Set(["returned", "returns"]);
+var EN_APPEAR = /* @__PURE__ */ new Set(["appeared", "appears"]);
+var EN_DETERMINERS = /* @__PURE__ */ new Set([
+	"his",
+	"her",
+	"their",
+	"the",
+	"a",
+	"an",
+	"my",
+	"your",
+	"its",
+	"our",
+	"that",
+	"this"
+]);
+var EN_APPEAR_NEXT = /* @__PURE__ */ new Set([
+	"in",
+	"at",
+	"from",
+	"behind",
+	"beside",
+	"through",
+	"out",
+	"again",
+	"on",
+	"by",
+	"near"
+]);
+/** «left» / «leaves» as leaving: «left.», «left the room», «left without a word» — not «left the cup on the table». */
+var EN_LEFT = /* @__PURE__ */ new Set(["left", "leaves"]);
+var EN_LEFT_NEXT = /* @__PURE__ */ new Set([
+	"without",
+	"for",
+	"through",
+	"via",
+	"quickly",
+	"silently",
+	"quietly",
+	"abruptly",
+	"hastily",
+	"immediately",
+	"then",
+	"and",
+	"with",
+	"after",
+	"before",
+	"too",
+	"again",
+	"soon",
+	"early",
+	"alone",
+	"together",
+	"at"
+]);
+var EN_PLACES = /* @__PURE__ */ new Set([
+	"room",
+	"house",
+	"hall",
+	"tavern",
+	"inn",
+	"kitchen",
+	"building",
+	"bar",
+	"camp",
+	"chamber",
+	"chambers",
+	"office",
+	"scene",
+	"table",
+	"shop",
+	"store",
+	"library",
+	"study",
+	"cabin",
+	"tent",
+	"courtyard",
+	"garden",
+	"party",
+	"clearing",
+	"square",
+	"village",
+	"town",
+	"city",
+	"bedroom",
+	"hut",
+	"church",
+	"temple",
+	"stable",
+	"yard",
+	"castle",
+	"palace",
+	"cell",
+	"ship",
+	"deck"
+]);
+var EN_NOT_BEFORE_LEFT = /* @__PURE__ */ new Set([
+	"the",
+	"her",
+	"his",
+	"their",
+	"my",
+	"your",
+	"its",
+	"our",
+	"on",
+	"to",
+	"was",
+	"were",
+	"is",
+	"are",
+	"be",
+	"been",
+	"being",
+	"get",
+	"got",
+	"nothing",
+	"something",
+	"anything",
+	"one",
+	"far"
+]);
+var EN_UNREAL = /* @__PURE__ */ new Set([
+	"not",
+	"never",
+	"didnt",
+	"doesnt",
+	"dont",
+	"wont",
+	"cant",
+	"couldnt",
+	"wouldnt",
+	"hasnt",
+	"hadnt",
+	"would",
+	"will",
+	"could",
+	"might",
+	"should",
+	"must",
+	"can",
+	"may",
+	"to",
+	"almost",
+	"nearly"
+]);
+var EN_PRONOUNS = {
+	she: "female",
+	he: "male"
+};
+var EN_BEHIND = {
+	her: "female",
+	him: "male",
+	them: "pl"
+};
+/** Words after which an English name is a subject. */
+var EN_STARTERS = /* @__PURE__ */ new Set([
+	"and",
+	"but",
+	"then",
+	"so",
+	"as",
+	"while",
+	"when",
+	"before",
+	"after",
+	"until",
+	"once",
+	"finally",
+	"suddenly",
+	"quietly",
+	"slowly",
+	"now",
+	"soon",
+	"that",
+	"who",
+	"because",
+	"though",
+	"although",
+	"yet",
+	"instead",
+	"only",
+	"still"
+]);
+var SPEECH_VERBS = /* @__PURE__ */ new Set([
+	"said",
+	"says",
+	"asked",
+	"asks",
+	"replied",
+	"replies",
+	"answered",
+	"answers",
+	"whispered",
+	"whispers",
+	"murmured",
+	"murmurs",
+	"added",
+	"adds",
+	"called",
+	"calls",
+	"shouted",
+	"shouts",
+	"snapped",
+	"snaps",
+	"muttered",
+	"mutters",
+	"сказал",
+	"сказала",
+	"сказали",
+	"спросил",
+	"спросила",
+	"ответил",
+	"ответила",
+	"прошептал",
+	"прошептала",
+	"бросил",
+	"бросила",
+	"добавил",
+	"добавила",
+	"крикнул",
+	"крикнула",
+	"пробормотал",
+	"пробормотала",
+	"усмехнулся",
+	"усмехнулась"
+]);
+var DOOR_WORDS = /* @__PURE__ */ new Set([
+	"дверь",
+	"двери",
+	"door"
+]);
+var DOOR_CLOSED = /^(закрыл|захлопнул|затворил|закрывает|захлопывает|closed|shut|slammed|closes|shuts|slams)/;
+/** Sentences of memories, thoughts and wishes: nothing in them happens now — neither an exit nor an act. */
+var THOUGHT_RE = /(вспомина|вспомн|подума|дума[лвея]|мечта|надея|представил|remember|thought|thinking|imagined|wished|wishing|hoped|hoping|dreamed|dreamt)/;
+/** Sentences that speak of elsewhere, of the future or of absence: no one acts in the scene there. */
+var NOT_HERE_RE = /(где то|тем временем|в это время|далеко отсюда|не было|нигде|нет рядом|интересно|скоро|завтра|будет|вернется|придет|уйдет|meanwhile|elsewhere|somewhere|far away|wondered|wonders|will |would |soon|later|tomorrow|wasnt there|was not there|no sign of|nowhere)/;
+function startsWithAny(word, stems) {
+	return !!word && stems.some((stem) => word.startsWith(stem));
+}
+function sameClauseNext(words, at, ahead) {
+	const word = words[at + ahead];
+	return word && word.clause === words[at].clause ? word : void 0;
+}
+function unrealRu(words, at) {
+	const previous = words[at - 1];
+	if (previous && previous.clause === words[at].clause && RU_NOT.has(previous.low)) return true;
+	for (let j = at - 1; j >= Math.max(0, at - 4); j--) {
+		if (words[j].clause !== words[at].clause) break;
+		if (RU_UNREAL.has(words[j].low)) return true;
+	}
+	const next = sameClauseNext(words, at, 1);
+	return next?.low === "бы" || next?.low === "б";
+}
+function unrealEn(words, at) {
+	for (let j = at - 1; j >= Math.max(0, at - 2); j--) {
+		if (words[j].clause !== words[at].clause) break;
+		if (EN_UNREAL.has(words[j].low)) return true;
+	}
+	return false;
+}
+function ruNotAfter(words, at) {
+	const next = sameClauseNext(words, at, 1);
+	if (!next) return false;
+	if (RU_NOT_AFTER_WORDS.has(next.low)) return true;
+	const then = sameClauseNext(words, at, 2)?.low;
+	return RU_NOT_AFTER.some(([word, stem]) => next.low === word && !!then && then.startsWith(stem));
+}
+/** An aimed exit verb leads away: «прочь», «из комнаты», «на улицу», «за дверь», «к выходу», or ends its clause. */
+function ruAimedAway(words, at) {
+	const next = sameClauseNext(words, at, 1);
+	if (!next) return true;
+	const then = sameClauseNext(words, at, 2)?.low;
+	if (RU_AWAY_WORDS.has(next.low)) return true;
+	if (next.low === "из") return startsWithAny(then, RU_ROOM_STEMS);
+	if (next.low === "на") return startsWithAny(then, [
+		"улиц",
+		"двор",
+		"воздух",
+		"выход",
+		"крыльц"
+	]);
+	if (next.low === "за") return startsWithAny(then, [
+		"двер",
+		"порог",
+		"ворот"
+	]);
+	if (next.low === "к") return startsWithAny(then, [
+		"выход",
+		"двер",
+		"себе"
+	]);
+	return false;
+}
+function phraseAt(words, at, phrase) {
+	for (let j = 0; j < phrase.length; j++) {
+		const word = words[at + j];
+		if (!word || word.low !== phrase[j] || j > 0 && word.sentence !== words[at].sentence) return false;
+	}
+	return true;
+}
+function enLeftIsLeaving(words, at) {
+	const before = words[at - 1];
+	if (before && before.sentence === words[at].sentence && EN_NOT_BEFORE_LEFT.has(before.low)) return false;
+	const next = sameClauseNext(words, at, 1);
+	if (!next) return true;
+	if (EN_LEFT_NEXT.has(next.low)) return true;
+	const then = sameClauseNext(words, at, 2)?.low;
+	return EN_DETERMINERS.has(next.low) && !!then && EN_PLACES.has(then);
+}
+/** Exit and entry verbs of the words, in order. */
+function verbsOf(words) {
+	const out = [];
+	for (let i = 0; i < words.length; i++) {
+		const word = words[i];
+		if (word.cyrillic) {
+			const exit = RU_EXIT[word.low];
+			const aimed = RU_EXIT_AIMED[word.low];
+			const enter = RU_ENTER[word.low];
+			if (exit === void 0 && aimed === void 0 && enter === void 0) continue;
+			if (unrealRu(words, i) || ruNotAfter(words, i)) continue;
+			if (exit !== void 0) out.push({
+				kind: "exit",
+				at: i,
+				end: i,
+				gender: exit
+			});
+			else if (aimed !== void 0 && ruAimedAway(words, i)) out.push({
+				kind: "exit",
+				at: i,
+				end: i,
+				gender: aimed
+			});
+			else if (enter !== void 0) out.push({
+				kind: "enter",
+				at: i,
+				end: i,
+				gender: enter
+			});
+			continue;
+		}
+		let hit = null;
+		for (const phrase of EN_EXIT) if (phraseAt(words, i, phrase)) {
+			hit = {
+				kind: "exit",
+				at: i,
+				end: i + phrase.length - 1,
+				gender: null
+			};
+			break;
+		}
+		if (!hit && EN_LEFT.has(word.low) && enLeftIsLeaving(words, i)) hit = {
+			kind: "exit",
+			at: i,
+			end: i,
+			gender: null
+		};
+		if (!hit) {
+			for (const phrase of EN_ENTER) if (phraseAt(words, i, phrase)) {
+				hit = {
+					kind: "enter",
+					at: i,
+					end: i + phrase.length - 1,
+					gender: null
+				};
+				break;
+			}
+		}
+		if (!hit && (EN_RETURN.has(word.low) || EN_APPEAR.has(word.low))) {
+			const next = sameClauseNext(words, i, 1);
+			if (EN_RETURN.has(word.low) ? !next || !EN_DETERMINERS.has(next.low) : !next || EN_APPEAR_NEXT.has(next.low)) hit = {
+				kind: "enter",
+				at: i,
+				end: i,
+				gender: null
+			};
+		}
+		if (!hit || unrealEn(words, i)) continue;
+		out.push(hit);
+		i = hit.end;
+	}
+	return out;
+}
+/** Index of the verb that ends a phrase «the door closed behind her» / «дверь за ней закрылась», or -1. */
+function doorClosedAt(words, sentence) {
+	const indexes = words.map((word, index) => index).filter((index) => words[index].sentence === sentence);
+	if (!indexes.some((index) => DOOR_WORDS.has(words[index].low))) return -1;
+	return indexes.find((index) => DOOR_CLOSED.test(words[index].low)) ?? -1;
+}
+/**
+* The one character a pronoun of this gender at `at` clearly means, or null: looking back from it — its own sentence,
+* then up to 3 earlier ones — the first character of that gender, unless another of that gender stands as near or one
+* of unknown gender stands nearer. Characters of the other gender are passed over; the player never counts.
+*/
+function resolvePronoun(r, at, gender) {
+	const sentence = r.words[at].sentence;
+	const unknown = /* @__PURE__ */ new Set();
+	for (let s = sentence; s >= Math.max(0, sentence - 3); s--) {
+		const ids = [...new Set(r.mentions.filter((mention) => mention.id !== "@player" && r.words[mention.at].sentence === s).filter((mention) => s !== sentence || mention.at < at).map((mention) => mention.id))];
+		const gendered = ids.filter((id) => r.genders.get(id) === gender);
+		if (gendered.length) return gendered.length === 1 && !unknown.size ? gendered[0] : null;
+		for (const id of ids) if (r.genders.get(id) === void 0) unknown.add(id);
+	}
+	return unknown.size === 1 ? [...unknown][0] : null;
+}
+/** Is a mention in a subject's place (see the file header)? */
+function subjectPlace(r, mention) {
+	const word = r.words[mention.at];
+	if (word.possessive || !mention.exact) return false;
+	const before = r.words[mention.at - 1];
+	if (!before || before.sentence !== word.sentence || word.gap) return true;
+	if (word.cyrillic) return !RU_PREPOSITIONS.has(before.low);
+	return EN_STARTERS.has(before.low) || SPEECH_VERBS.has(before.low);
+}
+/** Subjects of a sentence: named ones in a subject's place and resolved pronouns, in order. */
+function subjectsOf(r, sentence) {
+	const out = [];
+	for (const mention of r.mentions) {
+		if (mention.id === "@player" || r.words[mention.at].sentence !== sentence) continue;
+		if (subjectPlace(r, mention)) out.push({
+			id: mention.id,
+			at: mention.at,
+			named: true
+		});
+	}
+	r.words.forEach((word, index) => {
+		if (word.sentence !== sentence) return;
+		const gender = RU_PRONOUNS[word.low] ?? EN_PRONOUNS[word.low];
+		if (!gender) return;
+		const id = resolvePronoun(r, index, gender);
+		if (id) out.push({
+			id,
+			at: index,
+			named: false
+		});
+	});
+	return out.sort((a, b) => a.at - b.at);
+}
+function genderFits(r, id, gender) {
+	if (gender === null || gender === "pl") return true;
+	const own = r.genders.get(id);
+	return own === void 0 || own === (gender === "f" ? "female" : "male");
+}
+/** Who a verb is about: see the file header. */
+function subjectsOfVerb(r, verb, subjects) {
+	const word = r.words[verb.at];
+	const fitting = subjects.filter((subject) => genderFits(r, subject.id, verb.gender));
+	const sameClause = fitting.filter((subject) => r.words[subject.at].clause === word.clause);
+	const before = sameClause.filter((subject) => subject.at < verb.at);
+	const after = sameClause.filter((subject) => subject.at > verb.end && subject.at - verb.end <= 4);
+	if (verb.gender === "pl") return before.length ? before : after;
+	if (before.length) return [before[before.length - 1]];
+	if (after.length) return [after[0]];
+	const earlier = fitting.filter((subject) => subject.at < verb.at);
+	return earlier.length ? [earlier[earlier.length - 1]] : [];
+}
+/** «The door closed behind her / Liza», «дверь за ней / за Лизой закрылась»: who it closed behind. */
+function doorSubjects(r, sentence) {
+	const verb = doorClosedAt(r.words, sentence);
+	if (verb < 0) return [];
+	const out = [];
+	r.words.forEach((word, index) => {
+		if (word.sentence !== sentence || index === 0) return;
+		const before = r.words[index - 1].low;
+		if (before !== "за" && before !== "behind") return;
+		const pronoun = RU_BEHIND[word.low] ?? EN_BEHIND[word.low];
+		if (pronoun === "female" || pronoun === "male") {
+			const id = resolvePronoun(r, index, pronoun);
+			if (id) out.push({
+				id,
+				at: verb,
+				named: false
+			});
+			return;
+		}
+		const mention = r.mentions.find((item) => item.at === index && item.id !== "@player");
+		if (mention) out.push({
+			id: mention.id,
+			at: verb,
+			named: true
+		});
+	});
+	return out;
+}
+function readText(text, profiles, playerName = "") {
+	const { words, questions } = wordsOf(text);
+	const entries = profiles.flatMap((profile) => entriesOf(profile));
+	if (playerName.trim()) entries.push(...entriesOf({
+		id: PLAYER_ID,
+		name: playerName,
+		aliases: []
+	}));
+	return {
+		words,
+		questions,
+		mentions: mentionsOf$1(words, entries),
+		genders: new Map(profiles.map((profile) => [profile.id, profile.gender]))
+	};
+}
+/**
+* What a reply's narration shows of each character: the last exit, entry or act in it (see the file header), by
+* profile id. Characters it shows nothing of are missing.
+*/
+function readScene(narration, profiles, playerName = "") {
+	const r = readText(narrationOnly(narration), profiles, playerName);
+	const out = {};
+	const note = (id, kind, at, named) => {
+		const previous = out[id];
+		if (previous && previous.at > at) return;
+		out[id] = {
+			kind,
+			named,
+			at
+		};
+	};
+	const sentences = r.words.length ? r.words[r.words.length - 1].sentence + 1 : 0;
+	const verbs = verbsOf(r.words);
+	for (let s = 0; s < sentences; s++) {
+		const text = r.words.filter((word) => word.sentence === s).map((word) => word.low).join(" ");
+		if (r.questions.has(s) || THOUGHT_RE.test(text)) continue;
+		const subjects = subjectsOf(r, s);
+		const moved = /* @__PURE__ */ new Set();
+		for (const verb of verbs) {
+			if (r.words[verb.at].sentence !== s) continue;
+			for (const subject of subjectsOfVerb(r, verb, subjects)) {
+				note(subject.id, verb.kind, verb.at, subject.named);
+				moved.add(subject.id);
+			}
+		}
+		for (const subject of doorSubjects(r, s)) {
+			note(subject.id, "exit", subject.at, subject.named);
+			moved.add(subject.id);
+		}
+		if (NOT_HERE_RE.test(`${text} `)) continue;
+		for (const subject of subjects) if (!moved.has(subject.id)) note(subject.id, "act", subject.at, subject.named);
+	}
+	const result = {};
+	for (const [id, item] of Object.entries(out)) result[id] = {
+		kind: item.kind,
+		named: item.named
+	};
+	return result;
+}
+/** Verbs of calling or bringing someone (зову, позвал, окликнул, привёл; call, summon, bring, beckon). */
+var SUMMON_RE = /^(зов|позв|подзыв|подозв|оклика|окликн|клич|приглаша|приглас|привож|привел|привед|приведу|возвраща|call|summon|beckon|invite|bring|brought|fetch|wave)/;
+/**
+* Of `ids` (characters out of the scene), those the player's message brings or calls in: addressed by name at the
+* start or end of a clause («Лиза, иди сюда», «Иди сюда, Лиза!», «Liza?»), named with a verb of calling or bringing
+* in the same sentence («зову Лизу», «I call Liza over»), or written coming back («Лиза возвращается»).
+*/
+function summonedBy(text, profiles, ids, playerName = "") {
+	if (!ids.length || !text?.trim()) return [];
+	const wanted = new Set(ids);
+	const r = readText(text, profiles, playerName);
+	const found = /* @__PURE__ */ new Set();
+	for (const mention of r.mentions) {
+		if (!wanted.has(mention.id)) continue;
+		const word = r.words[mention.at];
+		const before = r.words[mention.at - 1];
+		const after = r.words[mention.end + 1];
+		const opens = !before || before.clause !== word.clause;
+		const closes = !after || after.clause !== word.clause;
+		if (mention.exact && opens && closes) {
+			found.add(mention.id);
+			continue;
+		}
+		if (r.words.some((other, index) => other.clause === word.clause && SUMMON_RE.test(other.low) && !(index > 0 && (RU_NOT.has(r.words[index - 1].low) || EN_UNREAL.has(r.words[index - 1].low))))) found.add(mention.id);
+	}
+	const scene = readScene(text, profiles, playerName);
+	for (const [id, evidence] of Object.entries(scene)) if (wanted.has(id) && evidence.kind === "enter" && evidence.named) found.add(id);
+	return ids.filter((id) => found.has(id) && scene[id]?.kind !== "exit");
+}
+/** Who leaves the scene with a committed reply and who comes back (see the file header). */
+function sceneDepartures(input) {
+	const evidence = readScene(input.narration ?? "", input.profiles, input.playerName ?? "");
+	const away = { ...input.away };
+	const awayIds = Object.keys(away);
+	const called = new Set(input.playerMessage ? summonedBy(input.playerMessage, input.profiles, awayIds, input.playerName ?? "") : []);
+	const returned = [];
+	for (const id of awayIds) {
+		const seen = evidence[id];
+		const back = seen?.named === true && (seen.kind === "act" || seen.kind === "enter");
+		if (called.has(id) || back) {
+			delete away[id];
+			returned.push(id);
+		}
+	}
+	const leaving = new Set(input.leaving ?? []);
+	const left = [];
+	for (const id of /* @__PURE__ */ new Set([
+		...input.inScene,
+		...leaving,
+		...returned
+	])) {
+		if (away[id]) continue;
+		const seen = evidence[id];
+		const stays = seen?.kind === "act" || seen?.kind === "enter";
+		let by = null;
+		if (seen?.kind === "exit") by = "narration";
+		else if (leaving.has(id) && !stays && !returned.includes(id)) by = "move";
+		if (!by) continue;
+		const departure = {
+			since: input.turn,
+			by
+		};
+		const doing = input.doing?.[id]?.trim();
+		if (doing) departure.doing = doing;
+		away[id] = departure;
+		const back = returned.indexOf(id);
+		if (back >= 0) returned.splice(back, 1);
+		else left.push(id);
+	}
+	return {
+		away,
+		left,
+		returned
+	};
+}
+/** Out of the scene now: the chat's departures less those the player's messages since the last commit call back. */
+function outOfScene(state, profiles, playerMessages = [], playerName = "") {
+	const ids = Object.keys(state.away ?? {});
+	if (!ids.length) return /* @__PURE__ */ new Set();
+	const called = new Set(playerMessages.flatMap((text) => summonedBy(text, profiles, ids, playerName)));
+	return new Set(ids.filter((id) => !called.has(id)));
+}
+function clockShare(clock) {
+	return clock && clock.segments > 0 ? Math.min(1, Math.max(0, clock.filled) / clock.segments) : 0;
+}
+function clause(text) {
+	return (text ?? "").replace(/\s+/g, " ").trim().replace(/[\s.;,]+$/u, "");
+}
+/** What an absent character is busy with, and how much it matters now (0: not a live agenda). */
+function busyWith(state, profile, turn) {
+	const live = state.characters[profile.id];
+	if (!live || profile.kind === "group") return {
+		text: "",
+		weight: 0
+	};
+	const departure = state.away?.[profile.id];
+	const attempts = (live.offscreen ?? []).filter((attempt) => attempt.turn > (departure?.since ?? -Infinity) || attempt.turn >= turn - 3);
+	const attempt = attempts[attempts.length - 1];
+	const front = live.agenda.front && !live.agenda.front.done ? live.agenda.front : void 0;
+	const moving = live.agenda.intentions.find((intention) => (intention.clock?.filled ?? 0) > 0);
+	const urgency = Math.max(clockShare(front?.clock), ...live.agenda.intentions.map((item) => clockShare(item.clock)));
+	let weight = 0;
+	if (departure && departure.since >= turn - 3) weight += 3;
+	else if (departure) weight += 1;
+	if (attempt && attempt.turn >= turn - 3) weight += 1.5;
+	weight += 2 * urgency;
+	if (!(!!departure || !!attempt || !!front && clockShare(front.clock) >= .5 || !!moving)) return {
+		text: "",
+		weight: 0
+	};
+	const tie = live.ties[PLAYER_ID];
+	if (tie && (Math.abs(tie.stance) >= 2 || (tie.want ?? 0) >= 3 || tie.intent !== "none")) weight += 1;
+	if (profile.lod === "portrait") weight += .5;
+	else if (profile.lod === "draft") weight += .25;
+	const text = clause(attempt?.attempt) || clause(departure?.doing) || clause(moving?.nextStep || moving?.text) || clause(live.agenda.intentions[0]?.nextStep || live.agenda.intentions[0]?.text) || clause(front?.impulse);
+	return text ? {
+		text,
+		weight
+	} : {
+		text: "",
+		weight: 0
+	};
+}
+/** Absent characters for the «Elsewhere» line (see the file header), most important first. */
+function pickElsewhere(input) {
+	const previous = new Map((input.previous ?? []).map((note) => [note.id, note.text]));
+	const candidates = [];
+	input.profiles.forEach((profile, index) => {
+		if (input.here.has(profile.id)) return;
+		const busy = busyWith(input.state, profile, input.turn);
+		if (!busy.weight || !busy.text) return;
+		if (previous.get(profile.id) === busy.text) return;
+		candidates.push({
+			note: {
+				id: profile.id,
+				text: busy.text
+			},
+			weight: busy.weight,
+			index
+		});
+	});
+	return candidates.sort((a, b) => b.weight - a.weight || a.index - b.index).slice(0, Math.max(0, input.max ?? 3)).map((item) => item.note);
 }
 //#endregion
 //#region src/domain/drift.ts
@@ -10212,238 +11914,6 @@ function relaxMood(mood, baseline, turnsCalm, options = {}) {
 	const calmTurns = options.calmTurns ?? 3;
 	if (options.sceneEnd || turnsCalm >= calmTurns) return mood.octant === baseline.octant && mood.label === baseline.label ? mood : { ...baseline };
 	return mood;
-}
-//#endregion
-//#region src/domain/presence.ts
-var CYRILLIC_RE = /\p{Script=Cyrillic}/u;
-/** Final letters dropped to get a Russian stem. */
-var STEM_END_RE = /[аяоеыиуюйь]$/;
-/** Case endings after the stem of a name in -а/-я (Ильва, Мария, Илья): Ильвы, Ильве, Ильву, Ильвой… */
-var FEMININE_ENDINGS = /* @__PURE__ */ new Set([
-	"ы",
-	"и",
-	"е",
-	"у",
-	"ю",
-	"ой",
-	"ей",
-	"ою",
-	"ею",
-	"ам",
-	"ям",
-	"ами",
-	"ями",
-	"ах",
-	"ях"
-]);
-/** Case endings after the stem of a name in a consonant, -й or -ь (Брам, Дмитрий, Игорь): Брама, Браму, Брамом… */
-var MASCULINE_ENDINGS = /* @__PURE__ */ new Set([
-	"а",
-	"я",
-	"у",
-	"ю",
-	"е",
-	"ом",
-	"ем",
-	"и",
-	"ы",
-	"ов",
-	"ев",
-	"ам",
-	"ям",
-	"ами",
-	"ями",
-	"ах",
-	"ях"
-]);
-/** Possessive adjectives («Ильвин трактир», «Брамов нож»); not in the strict mode. */
-var POSSESSIVE_ENDINGS = /* @__PURE__ */ new Set([
-	"ин",
-	"ина",
-	"ину",
-	"иной",
-	"ины",
-	"ино",
-	"иных",
-	"ов",
-	"ова",
-	"ову",
-	"овой",
-	"овы"
-]);
-/** Small words that never identify anyone on their own. */
-var STOP_WORDS = /* @__PURE__ */ new Set([
-	"the",
-	"old",
-	"young",
-	"lady",
-	"sir",
-	"and",
-	"of",
-	"старый",
-	"старая",
-	"молодой",
-	"юная"
-]);
-var MIN_STEM = 4;
-/** Lower case, ё → е, possessive 's dropped, punctuation folded into spaces. */
-function normalizeName(text) {
-	return text.toLowerCase().replace(/ё/g, "е").replace(/['’]s\b/g, "").replace(/[^\p{L}\p{N}\s-]+/gu, " ").replace(/\s+/g, " ").trim();
-}
-function words$1(text) {
-	return normalizeName(text).split(/[\s-]+/).filter(Boolean);
-}
-/** «Ильва» → 'ильв', «Дмитрий» → 'дмитри', «Брам» → 'брам' (normalised input). */
-function russianStem(word) {
-	return word.replace(STEM_END_RE, "");
-}
-function isCapitalized$1(original) {
-	if (!original) return false;
-	const first = original.trim().charAt(0);
-	return first !== "" && first === first.toUpperCase() && first !== first.toLowerCase();
-}
-/**
-* Is `form` (one normalised word) an inflected form of `base` (one normalised word)? Cyrillic only.
-* `capitalized`: the form was written with a capital letter (a 3-letter stem is accepted then).
-*/
-function isInflectionOf(form, base, strict = false, capitalized = false) {
-	if (!form || !base || form === base) return false;
-	if (!CYRILLIC_RE.test(base) || !CYRILLIC_RE.test(form)) return false;
-	const stem = russianStem(base);
-	const minStem = capitalized && base.length >= MIN_STEM ? 3 : MIN_STEM;
-	if (stem.length < minStem || !form.startsWith(stem)) return false;
-	const ending = form.slice(stem.length);
-	if (!ending) return false;
-	const masculine = !/[ая]$/.test(base);
-	const endings = masculine ? MASCULINE_ENDINGS : FEMININE_ENDINGS;
-	if (strict) {
-		if (masculine && (ending === "а" || ending === "я")) return false;
-		return endings.has(ending);
-	}
-	return endings.has(ending) || POSSESSIVE_ENDINGS.has(ending);
-}
-/** How well a name matches one of a profile's names: 3 exact, 2 same words, 1 inflected, 0 none. */
-function nameScore(query, candidate, options = {}, capitalized = false) {
-	const q = normalizeName(query);
-	const c = normalizeName(candidate);
-	if (!q || !c) return 0;
-	if (q === c) return 3;
-	const qWords = words$1(q);
-	const cWords = words$1(c);
-	const useful = (word) => word.length >= 3 && !STOP_WORDS.has(word);
-	const [short, long] = qWords.length <= cWords.length ? [qWords, cWords] : [cWords, qWords];
-	const shortUseful = short.filter(useful);
-	if (shortUseful.length && shortUseful.every((word) => long.includes(word))) return 2;
-	const qUseful = qWords.filter(useful);
-	if (!qUseful.length) return 0;
-	return qUseful.every((word) => cWords.some((base) => base === word || isInflectionOf(word, base, options.strict, capitalized))) ? 1 : 0;
-}
-function variants(profile) {
-	return [
-		profile.name,
-		...profile.aliases ?? [],
-		profile.english ?? ""
-	].filter((item) => item && item.trim());
-}
-/** Best score of a name against every name of a profile. */
-function profileScore(name, profile, options) {
-	const capitalized = isCapitalized$1(name);
-	return Math.max(0, ...variants(profile).map((variant) => nameScore(name, variant, options, capitalized)));
-}
-/**
-* The profile id a story name refers to, or null. Exact beats same-words beats inflected; two profiles with the
-* same best score are ambiguous (null).
-*/
-function matchName(name, profiles, options = {}) {
-	if (!name.trim()) return null;
-	let best = 0;
-	let found = [];
-	for (const profile of profiles) {
-		const score = profileScore(name, profile, options);
-		if (score === 0 || score < best) continue;
-		if (score > best) {
-			best = score;
-			found = [profile.id];
-		} else if (!found.includes(profile.id)) found.push(profile.id);
-	}
-	return found.length === 1 ? found[0] : null;
-}
-/** Present cast of a DES tracker → profile ids, plus the names nobody has a profile for. */
-function presentFromDes(cast, profiles) {
-	const present = [];
-	const unknown = [];
-	const seenUnknown = /* @__PURE__ */ new Set();
-	for (const member of cast) {
-		if (!member.present || !member.name?.trim()) continue;
-		const id = matchName(member.name, profiles, { strict: true });
-		if (id) {
-			if (!present.includes(id)) present.push(id);
-			continue;
-		}
-		const key = normalizeName(member.name);
-		if (key && !seenUnknown.has(key)) {
-			seenUnknown.add(key);
-			unknown.push(member.name.trim());
-		}
-	}
-	return {
-		present,
-		unknown
-	};
-}
-function tokenize(text) {
-	const out = [];
-	for (const match of text.matchAll(/[\p{L}\p{N}]+(?:[-'’][\p{L}\p{N}]+)*/gu)) {
-		const raw = match[0];
-		const norm = normalizeName(raw);
-		for (const part of norm.split(/[\s-]+/).filter(Boolean)) out.push({
-			norm: part,
-			capitalized: isCapitalized$1(raw)
-		});
-	}
-	return out;
-}
-/** Words of a profile's names that identify it in prose: capitalised ones (or all, when none is). */
-function nameWords(profile) {
-	return variants(profile).map((variant) => {
-		const raw = variant.split(/[\s-]+/).filter(Boolean);
-		const capital = raw.filter((word) => isCapitalized$1(word));
-		return (capital.length ? capital : raw).map(normalizeName).filter((word) => word.length >= 2);
-	});
-}
-/** Does the phrase (all words of a name, in order) occur in the tokens? */
-function phraseAt(tokens, phrase, exactOnly) {
-	if (!phrase.length) return false;
-	for (let i = 0; i + phrase.length <= tokens.length; i++) if (phrase.every((word, j) => {
-		const token = tokens[i + j];
-		return token.norm === word || !exactOnly && isInflectionOf(token.norm, word, false, token.capitalized);
-	})) return true;
-	return false;
-}
-/**
-* Who is present without DES: the card's main character plus everyone mentioned in the last 3 messages (by any of
-* their names, inflected forms included). A word that exactly names someone is never read as another's inflection.
-* Groups need their whole name. Main character first, then profile order.
-*/
-function presentFromText(lastMessages, profiles, mainCharacterId) {
-	const tokens = lastMessages.slice(-3).flatMap((message) => tokenize(message ?? ""));
-	const exactWords = /* @__PURE__ */ new Set();
-	for (const profile of profiles) for (const phrase of nameWords(profile)) for (const word of phrase) exactWords.add(word);
-	const found = /* @__PURE__ */ new Set();
-	for (const profile of profiles) {
-		if (profile.kind === "group") {
-			if (variants(profile).map(words$1).some((phrase) => phraseAt(tokens, phrase, false))) found.add(profile.id);
-			continue;
-		}
-		if (nameWords(profile).some((phrase) => {
-			if (phraseAt(tokens, phrase, true)) return true;
-			return phrase.some((word) => tokens.some((token) => token.norm === word || !exactWords.has(token.norm) && isInflectionOf(token.norm, word, false, token.capitalized)));
-		})) found.add(profile.id);
-	}
-	const out = [];
-	if (mainCharacterId && profiles.some((profile) => profile.id === mainCharacterId)) out.push(mainCharacterId);
-	for (const profile of profiles) if (found.has(profile.id) && !out.includes(profile.id)) out.push(profile.id);
-	return out;
 }
 /** Caps of the lists of a profile (docs/model.md §4: ≤ 3 values, ≤ 6 signatures, ≤ 2 intentions…). */
 var LIMITS = {
@@ -13406,6 +14876,22 @@ function resolveEvents(pass, resolve) {
 		intensity: event.intensity
 	}));
 }
+/**
+* Runs `plan` with the work's present set narrowed to those still in the scene after the reply: what is planned for
+* the next generation (appetites, bands, initiative) is never planned for whoever left it (§6.4).
+*/
+function afterReply(w, staying, plan) {
+	const present = w.present;
+	const presentSet = w.presentSet;
+	w.present = [...staying];
+	w.presentSet = new Set(staying);
+	try {
+		return plan();
+	} finally {
+		w.present = present;
+		w.presentSet = presentSet;
+	}
+}
 function pairKey(a, b) {
 	return `${a}\u0000${b}`;
 }
@@ -14563,6 +16049,25 @@ function applyTurnPass(input, pass, ctx) {
 	const resolve = makeResolver([...byId.values()], input.playerName, input.resolve);
 	const passById = /* @__PURE__ */ new Map();
 	for (const entry of turnPass.characters) if (byId.has(entry.id) && !passById.has(entry.id)) passById.set(entry.id, entry);
+	const beat = input.state.next && input.state.next.turn === input.state.turn ? input.state.next : void 0;
+	const beatMoves = beat?.moves ?? {};
+	const departures = input.reply === void 0 ? null : sceneDepartures({
+		narration: input.reply,
+		profiles: [...byId.values()],
+		playerName: input.playerName,
+		inScene: present,
+		away: state.away ?? {},
+		leaving: Object.entries(beatMoves).filter(([, move]) => move.move === "leave").map(([id]) => id),
+		...input.playerMessage ? { playerMessage: input.playerMessage } : {},
+		turn,
+		doing: Object.fromEntries(present.map((id) => {
+			const entry = passById.get(id);
+			const move = beatMoves[id];
+			return [id, entry?.sceneGoal || entry?.doing || (move?.move === "leave" ? move.text ?? "" : "")];
+		}))
+	});
+	const staying = departures ? [.../* @__PURE__ */ new Set([...present.filter((id) => !departures.away[id]), ...departures.returned.filter((id) => byId.has(id) && !departures.away[id])])] : present;
+	for (const id of staying) ensureCharacterState(state, byId.get(id));
 	const w = {
 		state,
 		turn,
@@ -14596,20 +16101,62 @@ function applyTurnPass(input, pass, ctx) {
 	applyGaze(w);
 	const rivals = applyRivalry(w);
 	tickSchemes(w, rivals);
-	planAppetites(w, rivals);
+	afterReply(w, staying, () => planAppetites(w, rivals));
 	const corrections = applyDrift(w, input);
 	applyReputationStep(w);
-	const { bands, moves } = planNext(w);
-	for (const id of present) characterOf(w, id).lastSeenTurn = turn;
-	for (const [id, live] of Object.entries(state.characters)) live.present = w.presentSet.has(id);
+	const planned = afterReply(w, staying, () => planNext(w));
+	const stayingSet = new Set(staying);
+	const bands = planned.bands;
+	const moves = Object.fromEntries(Object.entries(planned.moves ?? {}).filter(([id]) => stayingSet.has(id)));
+	if (departures) {
+		state.away = departures.away;
+		for (const id of departures.left) {
+			w.log.add("scene", "sceneLeft", { name: w.log.name(id) }, id);
+			const scene = characterOf(w, id)?.scene;
+			if (scene) {
+				delete scene.move;
+				delete scene.moveTarget;
+				delete scene.moveText;
+			}
+		}
+		for (const id of departures.returned) w.log.add("scene", "sceneBack", { name: w.log.name(id) }, id);
+	}
+	for (const id of /* @__PURE__ */ new Set([...present, ...staying])) characterOf(w, id).lastSeenTurn = turn;
+	for (const [id, live] of Object.entries(state.characters)) live.present = stayingSet.has(id);
 	state.turn = turn;
 	const next = {
 		turn,
 		bands
 	};
-	if (moves && Object.keys(moves).length) next.moves = moves;
+	if (Object.keys(moves).length) next.moves = moves;
 	if (Object.keys(w.nows).length) next.appetites = w.nows;
 	if (Object.keys(corrections).length) next.corrections = corrections;
+	const pursuing = pursuingIds({
+		ids: staying,
+		byId,
+		moves: beatMoves,
+		events: w.events,
+		pass: new Map(staying.map((id) => {
+			const entry = passById.get(id);
+			return [id, entry ? {
+				playerRole: entry.playerRole,
+				advanced: entry.intentions.some((item) => item.status === "advanced"),
+				refusedByPlayer: entry.appetites.some((item) => w.resolve(item.refusedBy) === PLAYER_ID)
+			} : void 0];
+		})),
+		want: (id) => characterOf(w, id)?.ties["@player"]?.want ?? 0
+	});
+	if (pursuing.length) next.pursuing = pursuing;
+	if (ctx.elsewhere) {
+		const notes = pickElsewhere({
+			state,
+			profiles: [...byId.values()],
+			here: stayingSet,
+			turn,
+			...beat?.elsewhere ? { previous: beat.elsewhere } : {}
+		});
+		if (notes.length) next.elsewhere = notes;
+	}
 	state.next = next;
 	state.schemes = pruneSchemes(state.schemes);
 	finishBreaks({
@@ -14694,6 +16241,10 @@ function commitTurn(input, pass, ctx) {
 		chapterEnd = scene.chapterEnd;
 		when = "before";
 	}
+	if (desBreak?.reason === "place" && state.away && Object.keys(state.away).length) state = {
+		...state,
+		away: {}
+	};
 	const applied = applyTurnPass({
 		...input,
 		state
@@ -15834,13 +17385,43 @@ function createEngine(deps) {
 			log.debug("card name unavailable", error);
 		}
 		const main = cardName ? matchName(cardName, named) ?? void 0 : void 0;
-		const present = presentFromText(messages.slice(-3).map((message) => String(message.mes ?? "")), named, main);
+		const present = presentFromText(messages.slice(-3).map((message) => cleanForAnalysis(message)), named, main);
 		if (!messages.some((message) => message.is_user)) {
 			for (const id of flagged) if (!present.includes(id)) present.push(id);
 		}
 		return {
 			present,
 			unknown: []
+		};
+	}
+	/**
+	* The player's messages since the last committed reply (the one the next generation answers, a swipe's too); the
+	* last one only before any commit.
+	*/
+	function playerMessagesSinceCommit(state) {
+		const chat = app.host.ctx().chat;
+		const list = Array.isArray(chat) ? chat : [];
+		const from = state.lastCommit ? state.lastCommit.messageIndex + 1 : 0;
+		const texts = [];
+		for (let i = Math.max(0, from); i < list.length; i++) {
+			const message = list[i];
+			if (message?.is_user && !message.is_system) texts.push(cleanForAnalysis(message));
+		}
+		return state.lastCommit ? texts : texts.slice(-1);
+	}
+	/**
+	* Who is in the scene: the tracker's or the text's cast without those who left it (§6.4); one the player calls back
+	* is in it again, tracker or not.
+	*/
+	function scenePresence(profiles, state) {
+		const found = presence(profiles, state);
+		const away = Object.keys(state.away ?? {}).filter((id) => profiles.some((profile) => profile.id === id));
+		if (!away.length) return found;
+		const out = outOfScene(state, profiles, playerMessagesSinceCommit(state), playerName());
+		const called = away.filter((id) => !out.has(id) && !found.present.includes(id));
+		return {
+			present: [...found.present.filter((id) => !out.has(id)), ...called],
+			unknown: found.unknown
 		};
 	}
 	/** Ids the player's last message names. */
@@ -15870,7 +17451,7 @@ function createEngine(deps) {
 		const profiles = effectiveProfiles(card, state);
 		for (const profile of profiles) ensureCharacterState(state, profile);
 		const byId = new Map(profiles.map((profile) => [profile.id, profile]));
-		const scene = presence(profiles, state);
+		const scene = scenePresence(profiles, state);
 		const bands = sceneBands(scene.present, byId, state, {
 			gravity: leversFor(app.settings.get(), state.overrides).playerGravity,
 			addressed: addressed(profiles)
@@ -30078,6 +31659,11 @@ function createTurnController(app, settings, log) {
 		return Array.isArray(list) ? list : [];
 	};
 	const fingerprint = (message) => hashText(cleanForAnalysis(message));
+	/** The story text of a reply for the pass and the departures: also without a scene split block of another tag. */
+	const narration = (message) => {
+		const split = app.maestro.sceneSplit();
+		return cleanForAnalysis(message, split ? { offscreenTags: [split.tag] } : {});
+	};
 	function leader(api) {
 		try {
 			return api.leader.isLeader();
@@ -30131,19 +31717,45 @@ function createTurnController(app, settings, log) {
 		}
 		return labels;
 	}
-	function presentAt(index, view) {
-		const fromDes = presentFromDes(app.readers.des.castAt(index), view.profiles);
-		return [.../* @__PURE__ */ new Set([...view.present, ...fromDes.present])].filter((id) => view.byId.has(id));
+	/** The reply moved the scene to another place (DES): the old scene's departures no longer hold. */
+	function newPlace(index, state) {
+		const prev = {};
+		if (state.place) prev.place = state.place;
+		return sceneBreak(prev, markAt(index))?.reason === "place";
+	}
+	/**
+	* Who was in the scene while the reply was written: the engine's present, the reply's DES tracker less those who
+	* left before it (a stale tracker), and whoever the reply or the player's message brings back.
+	*/
+	function presentAt(index, view, state = view.state) {
+		const away = newPlace(index, state) ? {} : state.away ?? {};
+		const fromDes = presentFromDes(app.readers.des.castAt(index), view.profiles).present.filter((id) => !away[id]);
+		const back = Object.keys(away).length ? sceneDepartures({
+			narration: narration(chat()[index]),
+			profiles: view.profiles,
+			playerName: view.playerName,
+			inScene: [],
+			away,
+			playerMessage: lastPlayerMessage(index),
+			turn: state.turn
+		}).returned : [];
+		return [.../* @__PURE__ */ new Set([
+			...view.present,
+			...fromDes,
+			...back
+		])].filter((id) => view.byId.has(id));
 	}
 	function inputFor(view, state, index) {
 		return {
 			state,
 			profiles: view.profiles,
-			present: presentAt(index, view),
+			present: presentAt(index, view, state),
 			playerName: view.playerName,
 			desLabels: desLabels(index, view),
 			mark: markAt(index),
-			resolve: resolver(view)
+			resolve: resolver(view),
+			reply: narration(chat()[index]),
+			playerMessage: lastPlayerMessage(index)
 		};
 	}
 	/** The reply is still the committed one: same swipe and text, and the player has written after it. */
@@ -30166,7 +31778,7 @@ function createTurnController(app, settings, log) {
 		if (!waiting.has(id) && drafted.get(id) === hash) return;
 		let ids = presentAt(index, view);
 		if (levers(view).mode === "economy") ids = ids.filter((item) => (view.bands[item] ?? "background") !== "background");
-		const reply = cleanForAnalysis(message);
+		const reply = narration(message);
 		if (!ids.length || !reply) {
 			if (waiting.delete(id)) apply(chatId, index, swipe, hash, null);
 			return;
@@ -30299,7 +31911,8 @@ function createTurnController(app, settings, log) {
 				levers: levers(current),
 				messageIndex: index,
 				uiLang: app.i18n.locale(),
-				cardLang: chatLevers(app.settings.get(), current.state.overrides).cardLanguage
+				cardLang: chatLevers(app.settings.get(), current.state.overrides).cardLanguage,
+				elsewhere: app.maestro.sceneSplit() !== null
 			});
 			out.result.state.lastCommit = {
 				messageIndex: index,

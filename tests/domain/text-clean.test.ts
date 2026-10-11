@@ -9,6 +9,7 @@ import {
     stripHtml,
     stripMechanicsBlock,
     stripNaiPlaceholders,
+    stripOffscreenBlock,
 } from '../../src/domain/text-clean';
 
 describe('text-clean', () => {
@@ -53,5 +54,29 @@ describe('text-clean', () => {
         expect(isImagePost({ mes: 'story', extra: { media: [{ nai_studio: { prompt: 'tags' } }] } })).toBe(false);
         expect(cleanForAnalysis('plain')).toBe('plain');
         expect(cleanForAnalysis(42)).toBe('');
+    });
+});
+
+describe('text-clean — Maestro’s scene split block', () => {
+    it('drops the <offscreen> block of what happens elsewhere, escaped, bracketed or left open', () => {
+        const reply = 'Ильва молчит.\n<offscreen>Лиза торгуется с контрабандистами в порту.</offscreen>';
+        expect(stripOffscreenBlock(reply).trim()).toBe('Ильва молчит.');
+        expect(stripOffscreenBlock('А. &lt;offscreen&gt;Б.&lt;/offscreen&gt; В.')).toBe('А.  В.');
+        expect(stripOffscreenBlock('А. [offscreen]Б.[/offscreen]')).toBe('А. ');
+        expect(stripOffscreenBlock('А. <OFFSCREEN class="x">Б. обрыв')).toBe('А. ');
+        expect(stripOffscreenBlock('Off-screen talk, offscreenish words.')).toBe(
+            'Off-screen talk, offscreenish words.',
+        );
+    });
+
+    it('takes another tag when asked, and only plain words for tags', () => {
+        expect(stripOffscreenBlock('А. <around>Б.</around>', ['around'])).toBe('А. ');
+        expect(stripOffscreenBlock('А. <around>Б.</around>', ['a(b'])).toBe('А. <around>Б.</around>');
+    });
+
+    it('leaves the block out of the story text for analysis', () => {
+        const message = { mes: 'Лиза ушла.\n\n<offscreen>Лиза вернулась домой и легла спать.</offscreen>' };
+        expect(cleanForAnalysis(message)).toBe('Лиза ушла.');
+        expect(cleanForAnalysis('А.<around>Б.</around>', { offscreenTags: ['around'] })).toBe('А.');
     });
 });

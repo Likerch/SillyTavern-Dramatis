@@ -11,8 +11,12 @@
 // - corruption stains for coarse acts and broken vows (corruption.ts, per the lever);
 // - drift (§8): findings → corrections for the next card, stress and breaks, or a «redo» note for the feature;
 // - reputation (§11): witnessed deeds move it per group and place, weaknesses become known, rumours start;
-// - the next turn: attention bands and the initiative roll (§5.4–5.5) into `state.next`.
-// commitTurn wraps it with the scene breaks (scene-pass.ts). Every meaningful change leaves a story log line. Pure.
+// - who left the scene with the reply and who came back (§6.4, departures.ts) — with the reply's narration given;
+// - the next turn, for those still in the scene: appetite plans, attention bands and the initiative roll (§5.4–5.5)
+//   into `state.next`, with who was pursuing something toward the player (§6.5) and, with Maestro's scene split, the
+//   absent characters of the «Elsewhere» line (§6.4).
+// commitTurn wraps it with the scene breaks (scene-pass.ts); a change of place ends every departure of the old scene.
+// Every meaningful change leaves a story log line. Pure.
 import { CUE_CAP, tickAppetite } from './appetites';
 import type { AppetiteEvents } from './appetites';
 import { BUSINESS_FLOOR, allocateBands, playerRelevance, tacticIgnores } from './attention';
@@ -21,11 +25,13 @@ import { ceilingDetail } from './brakes';
 import type { BrakeBreakdown, GroupNorm, RestraintInput } from './brakes';
 import { addStain, applyRemorse, coarseProfile } from './corruption';
 import type { CorruptionLever, StainAct } from './corruption';
+import { pickElsewhere, sceneDepartures } from './departures';
 import { correctionFor, driftFindings, addStress, stressBreak } from './drift';
 import type { BreakKind, DriftFinding } from './drift';
 import { hotGaze, shiftGaze } from './gaze';
 import type { GazeEvents } from './gaze';
 import { HUNT_WANT, huntersBudget, huntLimit, sexualBarred } from './group-rules';
+import { pursuingIds } from './hold';
 import { rollInitiative } from './initiative';
 import { MAX_INTENTIONS, advanceIntention, clockFull, reconsider } from './intentions';
 import type { IntentionSignal } from './intentions';
@@ -135,6 +141,13 @@ export interface TurnInput {
     mark?: SceneMark;
     /** Story name → profile id (the engine's resolver); profiles are matched by name otherwise. */
     resolve?: (name: string) => string | null;
+    /**
+     * The committed reply's narration, cleaned (cleanForAnalysis): who left the scene and who came back (§6.4).
+     * Absent: departures are not read and `state.away` stays as it is.
+     */
+    reply?: string;
+    /** The player's message the reply answered, cleaned: whom it calls back into the scene. */
+    playerMessage?: string;
 }
 
 export interface TurnContext {
@@ -148,6 +161,8 @@ export interface TurnContext {
     uiLang?: Lang;
     /** Language of the lines meant for the motive card (corrections, brakes, break moves). */
     cardLang?: Lang;
+    /** Maestro keeps the scene and the world apart: pick the absent characters of the «Elsewhere» line (§6.4). */
+    elsewhere?: boolean;
 }
 
 /** A stance step across an author bound, held for the Inbox (§5.2.5, §9). */
@@ -329,6 +344,23 @@ interface Work {
     strong: Set<string>;
     nows: Record<string, AppetiteNowState[]>;
     moves: Record<string, { move: Move; target?: string; text?: string }>;
+}
+
+/**
+ * Runs `plan` with the work's present set narrowed to those still in the scene after the reply: what is planned for
+ * the next generation (appetites, bands, initiative) is never planned for whoever left it (§6.4).
+ */
+function afterReply<T>(w: Work, staying: readonly string[], plan: () => T): T {
+    const present = w.present;
+    const presentSet = w.presentSet;
+    w.present = [...staying];
+    w.presentSet = new Set(staying);
+    try {
+        return plan();
+    } finally {
+        w.present = present;
+        w.presentSet = presentSet;
+    }
 }
 
 function pairKey(a: string, b: string): string {
@@ -1582,6 +1614,44 @@ export function applyTurnPass(input: TurnInput, pass: TurnPass | null, ctx: Turn
     const passById = new Map<string, TurnCharacterOut>();
     for (const entry of turnPass.characters)
         if (byId.has(entry.id) && !passById.has(entry.id)) passById.set(entry.id, entry);
+
+    // The beat that produced this reply: its moves (a 'leave' among them) and its «Elsewhere» line.
+    const beat = input.state.next && input.state.next.turn === input.state.turn ? input.state.next : undefined;
+    const beatMoves = beat?.moves ?? {};
+    const departures =
+        input.reply === undefined
+            ? null
+            : sceneDepartures({
+                  narration: input.reply,
+                  profiles: [...byId.values()],
+                  playerName: input.playerName,
+                  inScene: present,
+                  away: state.away ?? {},
+                  leaving: Object.entries(beatMoves)
+                      .filter(([, move]) => move.move === 'leave')
+                      .map(([id]) => id),
+                  ...(input.playerMessage ? { playerMessage: input.playerMessage } : {}),
+                  turn,
+                  doing: Object.fromEntries(
+                      present.map((id) => {
+                          const entry = passById.get(id);
+                          const move = beatMoves[id];
+                          return [
+                              id,
+                              entry?.sceneGoal || entry?.doing || (move?.move === 'leave' ? (move.text ?? '') : ''),
+                          ];
+                      }),
+                  ),
+              });
+    const staying = departures
+        ? [
+              ...new Set([
+                  ...present.filter((id) => !departures.away[id]),
+                  ...departures.returned.filter((id) => byId.has(id) && !departures.away[id]),
+              ]),
+          ]
+        : present;
+    for (const id of staying) ensureCharacterState(state, byId.get(id)!);
     const w: Work = {
         state,
         turn,
@@ -1616,19 +1686,66 @@ export function applyTurnPass(input: TurnInput, pass: TurnPass | null, ctx: Turn
     applyGaze(w);
     const rivals = applyRivalry(w);
     tickSchemes(w, rivals);
-    planAppetites(w, rivals);
+    afterReply(w, staying, () => planAppetites(w, rivals));
     const corrections = applyDrift(w, input);
     applyReputationStep(w);
-    const { bands, moves } = planNext(w);
+    const planned = afterReply(w, staying, () => planNext(w));
+    const stayingSet = new Set(staying);
+    const bands = planned.bands;
+    const moves = Object.fromEntries(Object.entries(planned.moves ?? {}).filter(([id]) => stayingSet.has(id)));
 
-    for (const id of present) characterOf(w, id)!.lastSeenTurn = turn;
+    if (departures) {
+        state.away = departures.away;
+        for (const id of departures.left) {
+            w.log.add('scene', 'sceneLeft', { name: w.log.name(id) }, id);
+            const scene = characterOf(w, id)?.scene;
+            if (scene) {
+                delete scene.move;
+                delete scene.moveTarget;
+                delete scene.moveText;
+            }
+        }
+        for (const id of departures.returned) w.log.add('scene', 'sceneBack', { name: w.log.name(id) }, id);
+    }
+    for (const id of new Set([...present, ...staying])) characterOf(w, id)!.lastSeenTurn = turn;
     // CharacterState.present is «in the scene after the last committed turn»: whoever this turn did not see is away.
-    for (const [id, live] of Object.entries(state.characters)) live.present = w.presentSet.has(id);
+    for (const [id, live] of Object.entries(state.characters)) live.present = stayingSet.has(id);
     state.turn = turn;
     const next: NextTurn = { turn, bands };
-    if (moves && Object.keys(moves).length) next.moves = moves;
+    if (Object.keys(moves).length) next.moves = moves;
     if (Object.keys(w.nows).length) next.appetites = w.nows;
     if (Object.keys(corrections).length) next.corrections = corrections;
+    const pursuing = pursuingIds({
+        ids: staying,
+        byId,
+        moves: beatMoves,
+        events: w.events,
+        pass: new Map(
+            staying.map((id) => {
+                const entry = passById.get(id);
+                const note = entry
+                    ? {
+                          playerRole: entry.playerRole,
+                          advanced: entry.intentions.some((item) => item.status === 'advanced'),
+                          refusedByPlayer: entry.appetites.some((item) => w.resolve(item.refusedBy) === PLAYER_ID),
+                      }
+                    : undefined;
+                return [id, note] as const;
+            }),
+        ),
+        want: (id) => characterOf(w, id)?.ties[PLAYER_ID]?.want ?? 0,
+    });
+    if (pursuing.length) next.pursuing = pursuing;
+    if (ctx.elsewhere) {
+        const notes = pickElsewhere({
+            state,
+            profiles: [...byId.values()],
+            here: stayingSet,
+            turn,
+            ...(beat?.elsewhere ? { previous: beat.elsewhere } : {}),
+        });
+        if (notes.length) next.elsewhere = notes;
+    }
     state.next = next;
     state.schemes = pruneSchemes(state.schemes);
     // Stage 5: breaks from any stress (not only drift) with their «snaps» line, and the summary later passes read.
@@ -1704,6 +1821,8 @@ export function commitTurn(input: TurnInput, pass: TurnPass | null, ctx: TurnCon
         chapterEnd = scene.chapterEnd;
         when = 'before';
     }
+    // A new place is a new scene: whoever was out of the old one is no longer «out» — the tracker says who is here.
+    if (desBreak?.reason === 'place' && state.away && Object.keys(state.away).length) state = { ...state, away: {} };
     const applied = applyTurnPass({ ...input, state }, turnPass, { ...ctx, turn });
     state = applied.state;
     if (!when && turnPass.sceneEnded) {

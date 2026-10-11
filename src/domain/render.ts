@@ -1,9 +1,12 @@
 // The motive card (docs/model.md §6): one short block per present character — what they are doing, what they want
-// and from whom, their stance toward the player with the strongest reasons and how it shows, this beat's move, one
-// signature or tactic — an appetite line when an appetite matters now, then «Busy with their own: …» for the
-// background, and the «desire is not affection» rule when an appetite line is there. Third person, words not
-// numbers, secrets and hidden appetites included (spoilers are a UI concern). Built from the stored state only: no AI
-// on the send path (П10). Trimmed to a budget of ≈ chars / 4 tokens in a fixed order. Pure.
+// and from whom, their stance toward the player with the strongest reasons and how it shows, this beat's move in
+// decisive words, one signature or tactic — an appetite line when an appetite matters now, the «initiative holds»
+// line when the player only hesitated before what they started (§6.5), then «Busy with their own: …» for the
+// background, and the «desire is not affection» rule when an appetite line is there. Only those present: whoever left
+// the scene has no block, no move and no place in the busy line. With Maestro's scene split one separate line after
+// the card names a few absent characters and what they are busy with, for the `<offscreen>` block only (§6.4). Third
+// person, words not numbers, secrets and hidden appetites included (spoilers are a UI concern). Built from the stored
+// state only: no AI on the send path (П10). Trimmed to a budget of ≈ chars / 4 tokens in a fixed order. Pure.
 import { arcCardLine, choiceCardLine } from './arcs';
 import {
     appetiteKindLabel,
@@ -13,7 +16,7 @@ import {
     justificationLabel,
     methodNow,
     moodLabel,
-    moveLabel,
+    moveCardPhrase,
     pressureLabel,
     schemingLabel,
     stanceBehaviour,
@@ -33,6 +36,7 @@ import type {
     CharacterProfile,
     CharacterState,
     ChatState,
+    ElsewhereNote,
     Move,
     Reason,
     Scheme,
@@ -91,12 +95,18 @@ export interface CastCardInput {
     director?: Readonly<Record<string, string>>;
     /** Stage 5: stress breaks of the last turn, the «snaps: …» text per character id (`state.next.snaps`). */
     snaps?: Readonly<Record<string, string>>;
+    /** §6.5: present characters whose initiative holds against the player's hesitation, and what he said. */
+    hold?: { ids: readonly string[]; said: string };
+    /** §6.4, with Maestro's scene split: absent characters for the «Elsewhere» line and the block's tag. */
+    elsewhere?: { notes: readonly ElsewhereNote[]; tag: string };
 }
 
 export interface CastCard {
     text: string;
     /** Ids that appear in the card (a block or the busy line). */
     included: string[];
+    /** Absent ids named on the «Elsewhere» line. */
+    elsewhere: string[];
     /** Ids whose block was cut by the budget (they stay named in the busy line). */
     trimmed: string[];
     /** ≈ chars / 4. */
@@ -140,6 +150,10 @@ interface Words {
     snaps: string;
     arc: string;
     choice: string;
+    /** §6.5. `pos`: the character's possessive (her / his / their). */
+    hold: (name: string, player: string, said: string, pos: string) => string;
+    /** §6.4. */
+    elsewhere: (tag: string, list: string) => string;
 }
 
 const EN: Words = {
@@ -182,6 +196,10 @@ const EN: Words = {
     snaps: 'snaps:',
     arc: 'Arc:',
     choice: 'Defining choice:',
+    hold: (name, player, said, pos) =>
+        `${name} — initiative holds: ${player}'s ${said} is a beat of the scene, not its end. ${name} keeps pursuing it, as ${pos} nature and goal demand — insists, persuades, teases or takes control, and stops only if stopping is truly in ${pos} nature. Only a clear, decisive act of ${player} or an out-of-character request ends it.`,
+    elsewhere: (tag, list) =>
+        `[Elsewhere — not in this scene. Never bring them into it; at most one line about them in the <${tag}> block at the end, if something happens: ${list}.]`,
 };
 
 const RU: Words = {
@@ -224,6 +242,10 @@ const RU: Words = {
     snaps: 'срыв:',
     arc: 'Дуга:',
     choice: 'Главный выбор:',
+    hold: (name, _player, said) =>
+        `${name} — держит инициативу: ${said} игрока — часть сцены, а не её конец. Добивается своего, как велят природа и цель, — настаивает, уговаривает, дразнит или берёт верх; отступает, только если это и правда в характере. Закончить это может лишь ясный решительный поступок игрока или просьба вне роли.`,
+    elsewhere: (tag, list) =>
+        `[В других местах — не в этой сцене. Не вводить их в сцену; самое большее одна строка о них в блоке <${tag}> в конце, если что-то происходит: ${list}.]`,
 };
 
 /** Default stance toward the player when no tie exists yet, by world tone. */
@@ -275,6 +297,8 @@ interface View {
     busy: string;
     /** The move is the director's call. */
     directed: boolean;
+    /** The «initiative holds» line (§6.5), or ''. */
+    hold: string;
     snap: string;
     arc: string;
     identity: string;
@@ -444,7 +468,7 @@ function buildView(ctx: Context, id: string): View | null {
     const snap = clause(input.snaps?.[id]);
     const planned = moveSpec
         ? clause(moveSpec.text) ||
-          (moveSpec.move !== 'own' ? moveLabel(moveSpec.move, lang, nameOf(ctx, moveSpec.target)) : '')
+          (moveSpec.move !== 'own' ? moveCardPhrase(moveSpec.move, lang, nameOf(ctx, moveSpec.target)) : '')
         : '';
     // The director's call wins over the engine's move; a break's «snaps» line stands for its move.
     const move = call || (snap ? '' : planned);
@@ -492,11 +516,16 @@ function buildView(ctx: Context, id: string): View | null {
 
     const speech = input.mergeVoices ? clause(input.speech?.(id) ?? '') : '';
     const busyBits = [doing, stance <= -1 ? `${words.ignores(ctx.player)}, ${stanceNoun(stance, lang)}` : ''];
+    const possessive = profile.gender === 'female' ? 'her' : profile.gender === 'male' ? 'his' : 'their';
+    const hold =
+        input.hold?.ids.includes(id) && input.hold.said.trim()
+            ? words.hold(profile.name, ctx.player, words.quote(input.hold.said.trim()), possessive)
+            : '';
     return {
         id,
         name: profile.name,
         band,
-        active: !!move || !!snap || appetites.length > 0,
+        active: !!move || !!snap || !!hold || appetites.length > 0,
         head: [doing, goal].filter(Boolean).join('; '),
         toward,
         reasons: strongestReasons(toPlayer?.reasons ?? [], 2),
@@ -513,6 +542,7 @@ function buildView(ctx: Context, id: string): View | null {
         corrections: (input.corrections?.[id] ?? []).map(clause).filter(Boolean),
         busy: busyBits.filter(Boolean).join('; '),
         directed: !!call,
+        hold,
         snap,
         arc: clause(arcCardLine(profile, live, lang)),
         identity: identity ? clause(identityPhrase(identity, lang, profile.gender)) : '',
@@ -531,13 +561,16 @@ interface Level {
     /** Signature/tactic, secret, a tie to another present character, mood, voice sample. */
     extras: boolean;
     busyDetails: boolean;
+    /** Speech digests and appetite lines of those not in focus (the focus character's always stay). */
+    sideLines: boolean;
 }
 
 const LEVELS: Level[] = [
-    { maxReasons: 2, extras: true, busyDetails: true },
-    { maxReasons: 1, extras: true, busyDetails: true },
-    { maxReasons: 1, extras: false, busyDetails: true },
-    { maxReasons: 1, extras: false, busyDetails: false },
+    { maxReasons: 2, extras: true, busyDetails: true, sideLines: true },
+    { maxReasons: 1, extras: true, busyDetails: true, sideLines: true },
+    { maxReasons: 1, extras: false, busyDetails: true, sideLines: true },
+    { maxReasons: 1, extras: false, busyDetails: false, sideLines: true },
+    { maxReasons: 1, extras: false, busyDetails: false, sideLines: false },
 ];
 
 function renderBlock(ctx: Context, view: View, level: Level): { lines: string[]; appetite: boolean } {
@@ -556,14 +589,20 @@ function renderBlock(ctx: Context, view: View, level: Level): { lines: string[];
         if (view.mood) main.push(sentence(`${words.mood} ${view.mood}`));
     }
     const lines = [`${view.name} — ${main.filter(Boolean).join(' ')}`];
-    const voice = [view.voice, level.extras && view.sample ? `${words.says} ${words.quote(view.sample)}` : '']
+    if (view.hold) lines.push(view.hold);
+    const side = level.sideLines || view.band === 'focus';
+    const voice = [
+        side ? view.voice : '',
+        level.extras && view.sample ? `${words.says} ${words.quote(view.sample)}` : '',
+    ]
         .filter(Boolean)
         .join('; ');
     if (voice) lines.push(`${view.name} — ${words.voice} ${sentence(voice)}`);
     if (view.snap) lines.push(`${view.name} — ${words.snaps} ${sentence(view.snap)}`);
-    for (const line of view.appetites) lines.push(line.text);
+    const appetites = side ? view.appetites : [];
+    for (const line of appetites) lines.push(line.text);
     for (const correction of view.corrections) lines.push(`${view.name} — ${words.correction} ${sentence(correction)}`);
-    return { lines, appetite: view.appetites.length > 0 };
+    return { lines, appetite: appetites.length > 0 };
 }
 
 function renderCard(ctx: Context, views: View[], level: Level, dropped: ReadonlySet<string>): string {
@@ -589,11 +628,28 @@ function renderCard(ctx: Context, views: View[], level: Level, dropped: Readonly
 
 const BAND_RANK: Record<AttentionBand, number> = { background: 0, business: 1, focus: 2 };
 
+/** Names of absent characters on the «Elsewhere» line, as many as fit (most important first). */
+function withElsewhere(ctx: Context, text: string, fits: (text: string) => boolean): { text: string; ids: string[] } {
+    const spec = ctx.input.elsewhere;
+    const notes = (spec?.notes ?? []).filter(
+        (note) => ctx.byId.has(note.id) && !ctx.input.present.includes(note.id) && clause(note.text),
+    );
+    for (let count = notes.length; count > 0; count--) {
+        const chosen = notes.slice(0, count);
+        const list = chosen.map((note) => `${nameOf(ctx, note.id)} (${clause(note.text)})`).join('; ');
+        const full = `${text}\n${ctx.words.elsewhere(spec!.tag.trim() || 'offscreen', list)}`;
+        if (fits(full)) return { text: full, ids: chosen.map((note) => note.id) };
+    }
+    return { text, ids: [] };
+}
+
 /**
  * The motive card for this generation. Trims in order until it fits `budgetTokens`: reasons beyond the first, the
  * extras (signature or tactic, secret, tie to another present character, mood, voice sample), the details of the busy
- * line, then whole blocks of the lowest band (background, business, focus last; without a move first; later ones
- * first) — their names move to the busy line. One block always stays.
+ * line, the speech digests and appetite lines of those not in focus, then whole blocks of the lowest band (background,
+ * business, focus last; without a move first; later ones first; one whose initiative holds after them all) — their
+ * names move to the busy line. One block always stays; the move, the appetite lines of the focus and the «initiative
+ * holds» line go only with their block. The «Elsewhere» line comes last and only in what the budget leaves.
  */
 export function buildCastCard(input: CastCardInput): CastCard {
     const byId = new Map(input.profiles.map((profile) => [profile.id, profile] as const));
@@ -606,14 +662,18 @@ export function buildCastCard(input: CastCardInput): CastCard {
     };
     const ids = [...new Set(input.present)];
     const views = ids.map((id) => buildView(ctx, id)).filter((view): view is View => !!view);
-    const finish = (text: string, dropped: ReadonlySet<string>): CastCard => ({
-        text,
-        included: views.map((view) => view.id),
-        trimmed: views.filter((view) => dropped.has(view.id)).map((view) => view.id),
-        tokens: estimateTokens(text),
-    });
-    if (!views.length) return { text: '', included: [], trimmed: [], tokens: 0 };
     const fits = (text: string) => input.budgetTokens <= 0 || estimateTokens(text) <= input.budgetTokens;
+    const finish = (card: string, dropped: ReadonlySet<string>): CastCard => {
+        const { text, ids } = withElsewhere(ctx, card, fits);
+        return {
+            text,
+            included: views.map((view) => view.id),
+            elsewhere: ids,
+            trimmed: views.filter((view) => dropped.has(view.id)).map((view) => view.id),
+            tokens: estimateTokens(text),
+        };
+    };
+    if (!views.length) return { text: '', included: [], elsewhere: [], trimmed: [], tokens: 0 };
     const none = new Set<string>();
     for (const level of LEVELS) {
         const text = renderCard(ctx, views, level, none);
@@ -625,6 +685,7 @@ export function buildCastCard(input: CastCardInput): CastCard {
         .filter(({ view }) => view.band !== 'background' || view.active)
         .sort(
             (a, b) =>
+                Number(!!a.view.hold) - Number(!!b.view.hold) ||
                 BAND_RANK[a.view.band] - BAND_RANK[b.view.band] ||
                 Number(a.view.active) - Number(b.view.active) ||
                 b.index - a.index,

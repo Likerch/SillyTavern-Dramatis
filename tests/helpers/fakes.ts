@@ -2,6 +2,7 @@
 import { createHost } from '../../src/host';
 import type { HostImpl } from '../../src/host';
 import type { ApiLlmRequest, ApiLlmResult, ApiTurnEvent, MaestroApiV1 } from '../../src/shared/apis';
+import { sceneSplitOf } from '../../src/adapters/maestro';
 import type { Logger, MaestroBridge, ModuleContext } from '../../src/shared/contracts';
 
 export interface MemoryLogger extends Logger {
@@ -38,13 +39,16 @@ export interface FakeMaestro {
     workshopListeners: Set<(active: boolean) => void | Promise<void>>;
     /** Flips the workshop state and awaits every listener, as Maestro does in its first CHAT_CHANGED listener. */
     setWorkshop(active: boolean): Promise<void>;
+    /** The scene split (with `{ sceneSplit }`): what `sceneSplit.active()` answers. */
+    splitActive: boolean;
 }
 
 /**
  * A MAESTRO_API v1 double: records LLM requests and lets the test fire turn events. With `workshop` it is a Maestro
- * 1.21+ with «Мастерская» (the optional `workshop` member), starting in that state.
+ * 1.21+ with «Мастерская» (the optional `workshop` member), starting in that state; with `sceneSplit` a Maestro 1.23+
+ * whose scene split starts in that state (tag 'offscreen').
  */
-export function fakeMaestro(options: { workshop?: boolean } = {}): FakeMaestro {
+export function fakeMaestro(options: { workshop?: boolean; sceneSplit?: boolean } = {}): FakeMaestro {
     const fake: FakeMaestro = {
         requests: [],
         reply: () => ({ ok: true, text: 'ok', data: 'ok', costUsd: 0.001 }),
@@ -60,6 +64,7 @@ export function fakeMaestro(options: { workshop?: boolean } = {}): FakeMaestro {
             fake.workshopActive = active;
             for (const listener of [...fake.workshopListeners]) await listener(active);
         },
+        splitActive: options.sceneSplit === true,
         api: undefined as unknown as MaestroApiV1,
     };
     fake.api = {
@@ -87,6 +92,9 @@ export function fakeMaestro(options: { workshop?: boolean } = {}): FakeMaestro {
         speech: () => null,
         quiet: () => () => {},
     };
+    if (options.sceneSplit !== undefined) {
+        fake.api.sceneSplit = { active: () => fake.splitActive, tag: 'offscreen' };
+    }
     if (options.workshop !== undefined) {
         fake.api.workshop = {
             active: () => fake.workshopActive,
@@ -110,6 +118,7 @@ export function staticBridge(api: MaestroApiV1 | null = null): MaestroBridge & {
         api: () => current,
         present: () => current !== null,
         workshop: () => current !== null && workshop,
+        sceneSplit: () => sceneSplitOf(current, memoryLogger()),
         set(next) {
             current = next;
         },

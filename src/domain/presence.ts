@@ -147,14 +147,15 @@ export function nameScore(query: string, candidate: string, options: MatchOption
     return inflected ? 1 : 0;
 }
 
-function variants(profile: NamedProfile): string[] {
+/** Every name a profile answers to: the story name, the aliases, the English name. */
+export function nameVariants(profile: NamedProfile): string[] {
     return [profile.name, ...(profile.aliases ?? []), profile.english ?? ''].filter((item) => item && item.trim());
 }
 
 /** Best score of a name against every name of a profile. */
 function profileScore(name: string, profile: NamedProfile, options: MatchOptions): number {
     const capitalized = isCapitalized(name);
-    return Math.max(0, ...variants(profile).map((variant) => nameScore(name, variant, options, capitalized)));
+    return Math.max(0, ...nameVariants(profile).map((variant) => nameScore(name, variant, options, capitalized)));
 }
 
 /**
@@ -222,9 +223,9 @@ function tokenize(text: string): Token[] {
     return out;
 }
 
-/** Words of a profile's names that identify it in prose: capitalised ones (or all, when none is). */
-function nameWords(profile: NamedProfile): string[][] {
-    return variants(profile).map((variant) => {
+/** Words of a profile's names that identify it in prose: capitalised ones (or all, when none is), normalised. */
+export function nameWords(profile: NamedProfile): string[][] {
+    return nameVariants(profile).map((variant) => {
         const raw = variant.split(/[\s-]+/).filter(Boolean);
         const capital = raw.filter((word) => isCapitalized(word));
         return (capital.length ? capital : raw).map(normalizeName).filter((word) => word.length >= 2);
@@ -261,7 +262,7 @@ export function presentFromText(
     const found = new Set<string>();
     for (const profile of profiles) {
         if (profile.kind === 'group') {
-            const whole = variants(profile).map(words);
+            const whole = nameVariants(profile).map(words);
             if (whole.some((phrase) => phraseAt(tokens, phrase, false))) found.add(profile.id);
             continue;
         }

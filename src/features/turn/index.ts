@@ -5,10 +5,18 @@
 // schemes, corruption, drift, reputation, bands and initiative), records a journal entry with undo, and routes held
 // arc steps to Maestro's Inbox. Mode «Экономный» runs the pass every 2nd reply for the characters in focus or on
 // business with the player. Drift in mode «Переделать» offers a new swipe of the reply before it is committed.
+//
+// Departures (docs/model.md §6.4): the commit reads the reply's own narration (tracker JSON and Maestro's
+// `<offscreen>` block stripped) for who left the scene and who came back; who was in the scene during a reply is the
+// engine's present plus the reply's DES tracker — but a tracker that still lists someone who left earlier does not put
+// them back (only a change of place, the narration or the player's message do). With Maestro's scene split active the
+// commit also picks the absent characters of the next card's «Elsewhere» line.
 import { desSwipeRecord, parseDesScene } from '../../adapters/des/parse';
 import { PLAYER_ID } from '../../domain/model';
 import type { ChatState, Tie } from '../../domain/model';
+import { sceneDepartures } from '../../domain/departures';
 import { matchName, presentFromDes } from '../../domain/presence';
+import { sceneBreak } from '../../domain/scene';
 import type { SceneMark } from '../../domain/scene';
 import { cleanForAnalysis } from '../../domain/text-clean';
 import { hashText } from '../../domain/intent-prompt';
@@ -136,6 +144,11 @@ export function createTurnController(app: App, settings: TurnSettings, log: Logg
         return Array.isArray(list) ? list : [];
     };
     const fingerprint = (message: STChatMessage) => hashText(cleanForAnalysis(message));
+    /** The story text of a reply for the pass and the departures: also without a scene split block of another tag. */
+    const narration = (message: STChatMessage | undefined): string => {
+        const split = app.maestro.sceneSplit();
+        return cleanForAnalysis(message, split ? { offscreenTags: [split.tag] } : {});
+    };
 
     function leader(api: MaestroApiV1): boolean {
         try {
@@ -199,20 +212,45 @@ export function createTurnController(app: App, settings: TurnSettings, log: Logg
         return labels;
     }
 
-    function presentAt(index: number, view: EngineView): string[] {
-        const fromDes = presentFromDes(app.readers.des.castAt(index), view.profiles);
-        return [...new Set([...view.present, ...fromDes.present])].filter((id) => view.byId.has(id));
+    /** The reply moved the scene to another place (DES): the old scene's departures no longer hold. */
+    function newPlace(index: number, state: ChatState): boolean {
+        const prev: SceneMark = {};
+        if (state.place) prev.place = state.place;
+        return sceneBreak(prev, markAt(index))?.reason === 'place';
+    }
+
+    /**
+     * Who was in the scene while the reply was written: the engine's present, the reply's DES tracker less those who
+     * left before it (a stale tracker), and whoever the reply or the player's message brings back.
+     */
+    function presentAt(index: number, view: EngineView, state: ChatState = view.state): string[] {
+        const away = newPlace(index, state) ? {} : (state.away ?? {});
+        const fromDes = presentFromDes(app.readers.des.castAt(index), view.profiles).present.filter((id) => !away[id]);
+        const back = Object.keys(away).length
+            ? sceneDepartures({
+                  narration: narration(chat()[index]),
+                  profiles: view.profiles,
+                  playerName: view.playerName,
+                  inScene: [],
+                  away,
+                  playerMessage: lastPlayerMessage(index),
+                  turn: state.turn,
+              }).returned
+            : [];
+        return [...new Set([...view.present, ...fromDes, ...back])].filter((id) => view.byId.has(id));
     }
 
     function inputFor(view: EngineView, state: ChatState, index: number): TurnInput {
         return {
             state,
             profiles: view.profiles,
-            present: presentAt(index, view),
+            present: presentAt(index, view, state),
             playerName: view.playerName,
             desLabels: desLabels(index, view),
             mark: markAt(index),
             resolve: resolver(view),
+            reply: narration(chat()[index]),
+            playerMessage: lastPlayerMessage(index),
         };
     }
 
@@ -240,7 +278,7 @@ export function createTurnController(app: App, settings: TurnSettings, log: Logg
         let ids = presentAt(index, view);
         if (levers(view).mode === 'economy')
             ids = ids.filter((item) => (view.bands[item] ?? 'background') !== 'background');
-        const reply = cleanForAnalysis(message);
+        const reply = narration(message);
         if (!ids.length || !reply) {
             if (waiting.delete(id)) void apply(chatId, index, swipe, hash, null);
             return;
@@ -384,6 +422,7 @@ export function createTurnController(app: App, settings: TurnSettings, log: Logg
                 messageIndex: index,
                 uiLang: app.i18n.locale(),
                 cardLang: chatLevers(app.settings.get(), current.state.overrides).cardLanguage,
+                elsewhere: app.maestro.sceneSplit() !== null,
             });
             out.result.state.lastCommit = { messageIndex: index, swipeId: swipe, hash };
             return out.result.state;

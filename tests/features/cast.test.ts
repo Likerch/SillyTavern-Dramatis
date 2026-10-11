@@ -357,3 +357,72 @@ describe('cast — with Maestro', () => {
         expect(maestro.claims.size).toBe(0);
     });
 });
+
+describe('cast — the scene’s edges (§6.4–§6.5)', () => {
+    const elsewhere = [{ id: 'ilva', text: 'taking the letters to the rebels' }];
+    function awayState(): ChatState {
+        return tavernState({
+            turn: 3,
+            away: { ilva: { since: 3, by: 'narration', doing: 'taking the letters to the rebels' } },
+            lastCommit: { messageIndex: 1, swipeId: 0, hash: 'h' },
+            next: { turn: 3, elsewhere },
+        });
+    }
+    const chatLog = () => [message('Сажусь.', { is_user: true }), message('Ильва ушла.')];
+
+    it('gives no block, move or busy-line place to whoever left, though the tracker still lists her', async () => {
+        const h = await startHarness({
+            profiles: tavernCard(),
+            state: awayState(),
+            chat: chatLog(),
+            persona: 'Courier',
+        });
+        fakeDes(h.runtime, [
+            { name: 'Ильва', present: true, details: {} },
+            { name: 'Брам', present: true, details: {} },
+            { name: 'Фенн', present: true, details: {} },
+        ]);
+        await generate(h.mock);
+        const text = h.mock.prompts.get('dramatis_cast')!.value;
+        expect(text).toContain('Busy with their own: Брам (dicing with the carters), Фенн (asleep).');
+        expect(text).not.toContain('Ильва');
+        // Without Maestro's scene split: no «Elsewhere» line either.
+        expect(text).not.toContain('Elsewhere');
+    });
+
+    it('adds the «Elsewhere» line while Maestro keeps the scene split, and drops it when the split goes', async () => {
+        const maestro = fakeMaestro({ sceneSplit: true });
+        const h = await startHarness({
+            profiles: tavernCard(),
+            state: awayState(),
+            chat: chatLog(),
+            persona: 'Courier',
+            maestro,
+        });
+        fakeDes(h.runtime, [{ name: 'Брам', present: true, details: {} }]);
+        await generate(h.mock);
+        let text = h.mock.prompts.get('dramatis_cast')!.value;
+        expect(text.split('\n').at(-1)).toBe(
+            '[Elsewhere — not in this scene. Never bring them into it; at most one line about them in the <offscreen> block at the end, if something happens: Ильва (taking the letters to the rebels).]',
+        );
+        await h.mock.eventSource.emit('generation_ended');
+        maestro.splitActive = false;
+        await generate(h.mock);
+        text = h.mock.prompts.get('dramatis_cast')!.value;
+        expect(text).not.toContain('Elsewhere');
+    });
+
+    it('holds a pursuer’s initiative against the player’s «Подожди…», never against an OOC request', async () => {
+        const state = tavernState({ turn: 2, next: { turn: 2, pursuing: ['sota'] } });
+        const h = await startHarness({ profiles: tavernCard(), state, persona: 'Courier' });
+        document.body.insertAdjacentHTML('beforeend', '<textarea id="send_textarea">Подожди…</textarea>');
+        await generate(h.mock);
+        expect(h.mock.prompts.get('dramatis_cast')!.value).toContain(
+            'Сота — initiative holds: Courier\'s "Подожди…" is a beat of the scene, not its end.',
+        );
+        await h.mock.eventSource.emit('generation_ended');
+        (document.getElementById('send_textarea') as HTMLTextAreaElement).value = '((подожди, давай без этого))';
+        await generate(h.mock);
+        expect(h.mock.prompts.get('dramatis_cast')!.value).not.toContain('initiative holds');
+    });
+});

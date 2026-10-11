@@ -887,3 +887,61 @@ describe('engine — fitting a summary', () => {
         expect(fitSections([section('a', 2)], 25)[0]!.lines).toHaveLength(2);
     });
 });
+
+describe('engine — who left the scene (§6.4)', () => {
+    const tracker = [
+        { name: 'Ильва', present: true, details: {} },
+        { name: 'Брам', present: true, details: {} },
+    ];
+
+    it('keeps out whoever the committed turn took out, though the DES tracker still lists her', async () => {
+        const state = tavernState({
+            turn: 3,
+            away: { ilva: { since: 3, by: 'narration' } },
+            lastCommit: { messageIndex: 1, swipeId: 0, hash: 'h' },
+        });
+        const h = await startHarness({
+            profiles: tavernCard(),
+            state,
+            chat: [message('Сажусь.', { is_user: true }), message('Ильва ушла.')],
+        });
+        fakeDes(h.runtime, tracker);
+        await h.engine.refresh();
+        expect(h.engine.view()?.present).toEqual(['bram']);
+    });
+
+    it('brings her back when the player calls her after the last commit, tracker or not', async () => {
+        const state = tavernState({
+            turn: 3,
+            away: { ilva: { since: 3, by: 'narration' } },
+            lastCommit: { messageIndex: 1, swipeId: 0, hash: 'h' },
+        });
+        const h = await startHarness({
+            profiles: tavernCard(),
+            state,
+            chat: [message('Сажусь.', { is_user: true }), message('Ильва ушла.')],
+        });
+        fakeDes(h.runtime, [{ name: 'Брам', present: true, details: {} }]);
+        h.mock.chat.push(message('Ильва, вернись!', { is_user: true }));
+        await h.engine.refresh();
+        expect(h.engine.view()?.present).toEqual(['bram', 'ilva']);
+        // A message before the commit does not count.
+        h.mock.chat.splice(2);
+        h.mock.chat.unshift(message('Ильва, вернись!', { is_user: true }));
+        await h.engine.refresh();
+        expect(h.engine.view()?.present).toEqual(['bram']);
+    });
+
+    it('reads text presence from the narration only: names in the offscreen block are elsewhere', async () => {
+        const h = await startHarness({
+            card: ILVA_CARD,
+            profiles: tavernCard(),
+            state: tavernState(),
+            chat: [
+                message('Сажусь у стойки.', { is_user: true }),
+                message('Брам бросает кости.\n\n<offscreen>Сота спит наверху.</offscreen>'),
+            ],
+        });
+        expect(h.engine.view()?.present).toEqual(['ilva', 'bram']);
+    });
+});

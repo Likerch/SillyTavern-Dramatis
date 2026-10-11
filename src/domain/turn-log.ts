@@ -139,6 +139,12 @@ const W = {
     repWeakness: { en: '{among} know your weakness: {text}', ru: '{among} знают твою слабость: {text}' },
     rumour: { en: 'A rumour starts: «{text}»', ru: 'Пошёл слух: «{text}»' },
     sceneEnd: { en: 'The scene ends', ru: 'Сцена закончилась' },
+    sceneLeft: { en: '{name} left the scene', ru: '{name} ушёл из сцены', ruF: '{name} ушла из сцены' },
+    sceneBack: {
+        en: '{name} is back in the scene',
+        ru: '{name} вернулся в сцену',
+        ruF: '{name} вернулась в сцену',
+    },
     chapterEnd: { en: 'The scene ends; time passes ({hours} h)', ru: 'Сцена закончилась; прошло времени: {hours} ч' },
 } satisfies Record<string, Pair>;
 

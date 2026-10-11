@@ -344,6 +344,48 @@ export function moveLabel(move: Move, lang: Lang, target?: string): string {
     return `${MOVE[move].ru} (${who})`;
 }
 
+/** The move as the motive card says it: what the character does now, decisively (docs/model.md §6.1). */
+const MOVE_CARD: Record<Move, Word> = {
+    own: { en: 'pushes their own business forward, unasked', ru: 'двигает своё дело, никого не спрашивая' },
+    respond: { en: 'answers in their own way, from their own aims', ru: 'отвечает по-своему, из своих целей' },
+    initiate: {
+        en: 'acts first — starts it now, does not wait to be asked',
+        ru: 'действует первым — начинает сам, не дожидаясь приглашения',
+    },
+    obstruct: { en: 'gets in the way — openly or by cunning', ru: 'мешает — открыто или хитростью' },
+    watch: { en: 'watches closely and misses nothing', ru: 'пристально наблюдает, ничего не упуская' },
+    leave: {
+        en: 'leaves the scene for their own business — once gone, they stay out of it',
+        ru: 'уходит по своим делам — и после этого в сцене не появляется',
+    },
+};
+
+const MOVE_CARD_TARGET_EN: Record<Move, string> = {
+    own: MOVE_CARD.own.en,
+    respond: 'answers {t} in their own way, from their own aims',
+    initiate: 'acts first toward {t} — starts it now, does not wait to be asked',
+    obstruct: "gets in {t}'s way — openly or by cunning",
+    watch: 'watches {t} closely and misses nothing',
+    leave: MOVE_CARD.leave.en,
+};
+
+/** Russian keeps the target in brackets after the verb, in the nominative. */
+const MOVE_CARD_TARGET_RU: Record<Move, string> = {
+    own: MOVE_CARD.own.ru,
+    respond: 'отвечает ({t}) по-своему, из своих целей',
+    initiate: 'действует первым ({t}) — начинает сам, не дожидаясь приглашения',
+    obstruct: 'мешает ({t}) — открыто или хитростью',
+    watch: 'пристально наблюдает ({t}), ничего не упуская',
+    leave: MOVE_CARD.leave.ru,
+};
+
+/** This beat's move for the motive card, in decisive words. */
+export function moveCardPhrase(move: Move, lang: Lang, target?: string): string {
+    const who = target?.trim();
+    if (!who || move === 'own' || move === 'leave') return pick(MOVE_CARD[move], lang);
+    return (lang === 'en' ? MOVE_CARD_TARGET_EN : MOVE_CARD_TARGET_RU)[move].replace('{t}', who);
+}
+
 /* ------------------------------------------------------------------ moods (PAD octants) */
 
 const MOOD: Record<MoodOctant, Word> = {

@@ -4,7 +4,8 @@
 // - CarrotKernel "thinking" display: a `<BunnyMoTags>` dump appended to `mes`;
 // - NAI Studio: `[nai:img:<id>]` placeholders of inline images, and whole picture posts;
 // - HTML from models, DES-RU and regexes;
-// - Maestro's mechanics service block (`<mechanics>…</mechanics>`) when its module has not stripped it yet.
+// - Maestro's mechanics service block (`<mechanics>…</mechanics>`) when its module has not stripped it yet;
+// - Maestro's scene split (1.23+): the `<offscreen>…</offscreen>` block at the end, what happens elsewhere.
 // Pure: no DOM, no SillyTavern.
 
 type Dict = Record<string, unknown>;
@@ -215,6 +216,35 @@ export function stripMechanicsBlock(text: string): string {
     return text.replace(MECHANICS_BLOCK_RE, '').replace(MECHANICS_FENCE_RE, '');
 }
 
+/* ------------------------------------------------------------------ the world elsewhere */
+
+/** The block Maestro's scene split asks for at the end of a reply (MAESTRO_API.sceneSplit.tag). */
+export const OFFSCREEN_TAG = 'offscreen';
+
+function escapeRe(text: string): string {
+    return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * Removes the `<offscreen>…</offscreen>` block (escaped or bracketed too) of Maestro's scene split: it tells what
+ * happens elsewhere, so it is never the scene. A block left open at the end of a cut reply goes to the end. Other
+ * tags than the default can be named (`tags`); names that are not plain words are ignored.
+ */
+export function stripOffscreenBlock(text: string, tags: readonly string[] = [OFFSCREEN_TAG]): string {
+    if (typeof text !== 'string') return '';
+    let out = text;
+    for (const raw of new Set(tags)) {
+        const tag = raw.trim();
+        if (!/^[A-Za-z][\w-]*$/.test(tag) || !out.toLowerCase().includes(tag.toLowerCase())) continue;
+        const name = escapeRe(tag);
+        const open = `(?:<|&lt;|\\[)[ \\t]*${name}(?![\\w-])[^>\\]\\n]*?(?:>|&gt;|\\])`;
+        const close = `(?:<|&lt;|\\[)[ \\t]*\\/[ \\t]*${name}[ \\t]*(?:>|&gt;|\\])`;
+        out = out.replace(new RegExp(`${open}[\\s\\S]*?${close}`, 'gi'), '');
+        out = out.replace(new RegExp(`${open}[\\s\\S]*$`, 'i'), '');
+    }
+    return out;
+}
+
 /* ------------------------------------------------------------------ all together */
 
 function normalizeWhitespace(text: string): string {
@@ -227,9 +257,10 @@ function normalizeWhitespace(text: string): string {
 
 /**
  * Story text of a message (or of a raw string) for analysis: picture posts give '', otherwise the text without the DES
- * tracker JSON, CK dumps, NAI placeholders, the mechanics block and HTML, with tidy whitespace.
+ * tracker JSON, CK dumps, NAI placeholders, the mechanics block, the `<offscreen>` block of what happens elsewhere
+ * (plus any other tag `offscreenTags` names) and HTML, with tidy whitespace.
  */
-export function cleanForAnalysis(message: unknown): string {
+export function cleanForAnalysis(message: unknown, options: { offscreenTags?: readonly string[] } = {}): string {
     if (typeof message !== 'string' && isImagePost(message)) return '';
     const raw = typeof message === 'string' ? message : isDict(message) ? message.mes : undefined;
     if (typeof raw !== 'string' || !raw) return '';
@@ -237,6 +268,7 @@ export function cleanForAnalysis(message: unknown): string {
     text = stripCkDumps(text);
     text = stripNaiPlaceholders(text);
     text = stripMechanicsBlock(text);
+    text = stripOffscreenBlock(text, [OFFSCREEN_TAG, ...(options.offscreenTags ?? [])]);
     text = stripHtml(text);
     return normalizeWhitespace(text);
 }

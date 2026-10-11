@@ -1,6 +1,6 @@
 {
   "name": "sillytavern-dramatis",
-  "version": "1.4.1",
+  "version": "1.5.0",
   "private": true,
   "description": "Personality engine for SillyTavern: goals, motives, stances with reasons, appetites and a living world",
   "license": "AGPL-3.0-only",

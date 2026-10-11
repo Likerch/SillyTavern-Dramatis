@@ -7,14 +7,19 @@
 //   the next update, so merely opening a chat writes nothing.
 // - Presence (refresh on `reply:ready`, `turn:committed`, invalidated messages, Maestro coming or going, and on every
 //   load): the DES tracker of the last reply when there is one (names nobody has a profile for stay in `unknown` for the
-//   generator; Maestro's name gluing gets a second try), else the names in the last 3 messages with the card's own
-//   character always present; until the user's first message the starting scene's `present` flags count too.
+//   generator; Maestro's name gluing gets a second try), else the names in the last 3 messages (their narration:
+//   no tracker JSON, no `<offscreen>` block) with the card's own character always present; until the user's first
+//   message the starting scene's `present` flags count too. Whoever left the scene (`state.away`, written by the turn
+//   commit, docs/model.md §6.4) is out of it whatever the tracker says — unless a player's message since that commit
+//   calls them back («Лиза, иди сюда»).
 // - resolve(): a story name → profile id by presence matching, then Maestro's names, then DES's own aliases (a DES
 //   canonical name or alias whose other names match exactly one profile: what Maestro asks about from DES's sheet).
 // - Bands: the turn pass's `state.next.bands` when computed after the current turn, else static ones (view.ts).
 // - Updates are serialised. Each mutator gets a deep clone; a state save that lost the version race to another tab
 //   reloads and retries once. Queued log lines go into the next state save (the last 300 are kept).
+import { outOfScene } from '../../domain/departures';
 import { ensureCharacterState, syncCardWorld } from '../../domain/state-init';
+import { cleanForAnalysis } from '../../domain/text-clean';
 import { leversFor } from '../../domain/turn-apply';
 import { matchName, presentFromDes, presentFromText } from '../../domain/presence';
 import type { NamedProfile } from '../../domain/presence';
@@ -178,13 +183,42 @@ export function createEngine(deps: EngineDeps): EngineImpl {
             log.debug('card name unavailable', error);
         }
         const main = cardName ? (matchName(cardName, named) ?? undefined) : undefined;
-        const texts = messages.slice(-PRESENCE_MESSAGES).map((message) => String(message.mes ?? ''));
+        const texts = messages.slice(-PRESENCE_MESSAGES).map((message) => cleanForAnalysis(message));
         const present = presentFromText(texts, named, main);
         // The opening scene (nothing sent yet): the starting scene's cast stays even when the greeting does not name them.
         if (!messages.some((message) => message.is_user)) {
             for (const id of flagged) if (!present.includes(id)) present.push(id);
         }
         return { present, unknown: [] };
+    }
+
+    /**
+     * The player's messages since the last committed reply (the one the next generation answers, a swipe's too); the
+     * last one only before any commit.
+     */
+    function playerMessagesSinceCommit(state: ChatState): string[] {
+        const chat = app.host.ctx().chat;
+        const list = Array.isArray(chat) ? chat : [];
+        const from = state.lastCommit ? state.lastCommit.messageIndex + 1 : 0;
+        const texts: string[] = [];
+        for (let i = Math.max(0, from); i < list.length; i++) {
+            const message = list[i];
+            if (message?.is_user && !message.is_system) texts.push(cleanForAnalysis(message));
+        }
+        return state.lastCommit ? texts : texts.slice(-1);
+    }
+
+    /**
+     * Who is in the scene: the tracker's or the text's cast without those who left it (§6.4); one the player calls back
+     * is in it again, tracker or not.
+     */
+    function scenePresence(profiles: readonly CharacterProfile[], state: ChatState): Presence {
+        const found = presence(profiles, state);
+        const away = Object.keys(state.away ?? {}).filter((id) => profiles.some((profile) => profile.id === id));
+        if (!away.length) return found;
+        const out = outOfScene(state, profiles, playerMessagesSinceCommit(state), playerName());
+        const called = away.filter((id) => !out.has(id) && !found.present.includes(id));
+        return { present: [...found.present.filter((id) => !out.has(id)), ...called], unknown: found.unknown };
     }
 
     /** Ids the player's last message names. */
@@ -216,7 +250,7 @@ export function createEngine(deps: EngineDeps): EngineImpl {
         const profiles = effectiveProfiles(card, state);
         for (const profile of profiles) ensureCharacterState(state, profile);
         const byId = new Map(profiles.map((profile) => [profile.id, profile] as const));
-        const scene = presence(profiles, state);
+        const scene = scenePresence(profiles, state);
         const bands = sceneBands(scene.present, byId, state, {
             gravity: leversFor(app.settings.get(), state.overrides).playerGravity,
             addressed: addressed(profiles),

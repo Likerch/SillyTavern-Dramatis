@@ -118,6 +118,8 @@ async function setup(
         levers?: Partial<DramatisSettings>;
         patch?: (profiles: CharacterProfile[], state: ChatState) => void;
         pass?: TurnPass;
+        /** A Maestro 1.23+ whose scene split is active. */
+        split?: boolean;
     } = {},
 ): Promise<Setup> {
     const mock = installStMock();
@@ -146,7 +148,7 @@ async function setup(
     const { profiles, state } = tavern();
     options.patch?.(profiles, state);
     const engine = fakeEngine(profiles, state);
-    const maestro = fakeMaestro();
+    const maestro = fakeMaestro(options.split ? { sceneSplit: true } : {});
     const drafts = new Map<string, unknown>();
     const result: Setup = {
         mock,
@@ -650,5 +652,80 @@ describe('turn module', () => {
         expect(s.notices).toHaveLength(0);
         await send(s);
         expect(s.engine.box.state.next?.corrections?.ilva?.[0]).toContain('still hostile');
+    });
+});
+
+describe('turn module — departures (§6.4)', () => {
+    /** The reply at index 2 says this (one swipe). */
+    function replyText(s: Setup, text: string, index = 2): void {
+        const reply = s.mock.chat[index]!;
+        reply.mes = text;
+        reply.swipes = [text];
+    }
+
+    it('commits the departure the reply’s narration shows; the DES tracker of the reply still lists her', async () => {
+        const s = await setup({ pass: turnPass({ characters: [entry('ilva', { sceneGoal: 'see the rebels' })] }) });
+        s.des = [{ name: 'Ильва', present: true, details: {} }];
+        replyText(s, '```json\n{"characterThoughts": [{"name": "Ильва"}]}\n```\nИльва сгребла монеты в фартук и ушла.');
+        await reply(s);
+        await send(s);
+        const state = s.engine.box.state;
+        expect(state.away).toEqual({ ilva: { since: 1, by: 'narration', doing: 'see the rebels' } });
+        expect(state.next?.bands?.ilva).toBeUndefined();
+        expect(state.next?.moves?.ilva).toBeUndefined();
+    });
+
+    it('keeps her out through a later reply whose stale tracker lists her; the offscreen block is not the scene', async () => {
+        const s = await setup({ pass: turnPass() });
+        s.des = [{ name: 'Ильва', present: true, details: {} }];
+        replyText(s, 'Ильва ушла.');
+        await reply(s);
+        await send(s);
+        expect(s.engine.box.state.away?.ilva).toBeDefined();
+        s.mock.chat.push(
+            message('Брам заказал ещё пива.\n\n<offscreen>Ильва вернулась домой и легла спать.</offscreen>', {
+                swipe_id: 0,
+                swipes: ['Брам заказал ещё пива.'],
+            }),
+        );
+        await reply(s, 4);
+        // The pass sees neither her nor the offscreen block.
+        const last = s.maestro.requests.at(-1)!.messages[1]!.content;
+        expect(last).not.toContain('легла спать');
+        await send(s, 4);
+        const state = s.engine.box.state;
+        expect(state.turn).toBe(2);
+        expect(state.away?.ilva).toEqual({ since: 1, by: 'narration' });
+        expect(state.next?.bands?.ilva).toBeUndefined();
+    });
+
+    it('brings her back when the next reply has her come in', async () => {
+        const s = await setup({ pass: turnPass() });
+        replyText(s, 'Ильва ушла.');
+        await reply(s);
+        await send(s);
+        s.mock.chat.push(
+            message('Вошла Ильва с охапкой дров.', { swipe_id: 0, swipes: ['Вошла Ильва с охапкой дров.'] }),
+        );
+        await reply(s, 4);
+        await send(s, 4);
+        expect(s.engine.box.state.away).toEqual({});
+        expect(s.engine.box.state.next?.bands?.ilva).toBeDefined();
+    });
+
+    it('picks the «Elsewhere» line only while Maestro keeps the scene split', async () => {
+        const pass = turnPass({ characters: [entry('ilva', { sceneGoal: 'see the rebels' })] });
+        const split = await setup({ pass, split: true });
+        replyText(split, 'Ильва накинула шаль и ушла.');
+        await reply(split);
+        await send(split);
+        expect(split.engine.box.state.next?.elsewhere).toEqual([{ id: 'ilva', text: 'see the rebels' }]);
+
+        const plain = await setup({ pass });
+        replyText(plain, 'Ильва накинула шаль и ушла.');
+        await reply(plain);
+        await send(plain);
+        expect(plain.engine.box.state.away?.ilva).toBeDefined();
+        expect(plain.engine.box.state.next?.elsewhere).toBeUndefined();
     });
 });
