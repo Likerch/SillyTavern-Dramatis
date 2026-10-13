@@ -1,7 +1,8 @@
 // Module «intent» (stage 1, works without Maestro): reading the author's intent (docs/model.md §7, reader.ts) and
 // exposing it as IntentApi.
 // - Automatically (setting `autoRead`): a solo chat that opens with no user message yet, with a card never read before,
-//   is read once per card and session — only when an AI connection is ready (and, with Maestro, in its leading tab);
+//   is read once per card and session — only when an AI connection is ready (and, with Maestro, in its leading tab;
+//   a card whose structured intent is complete needs no connection: its text is not read with the model);
 //   a card whose sources changed since its reading gets an offer to read it again, once per session. Both marks live in
 //   the module's session memory: a stop and start (a workshop chat round trip) neither reads nor offers again. The
 //   paths that ask for the check (the start, a chat change, Maestro's leader pick) share one run at a time.
@@ -11,8 +12,8 @@
 //   with an undo that restores the profiles as they were. Maestro forgets both when it restarts, so they are
 //   registered again whenever it comes back.
 // - DRAMATIS_API: `intentState()` (whether the current card was read, when, how many characters and groups, a reading
-//   running) and `readIntent()` (a reading as the user's action — Maestro's «Подготовка» runs it); DRAMATIS_API
-//   listeners hear when a reading starts and ends.
+//   running, whether the card's own structured intent was taken) and `readIntent()` (a reading as the user's action —
+//   Maestro's «Подготовка» runs it); DRAMATIS_API listeners hear when a reading starts and ends.
 import { llmErrorText } from '../../core/strings';
 import type { ApiUnsubscribe, DramatisIntentState, DramatisReadOutcome } from '../../shared/apis';
 import type { DramatisModule } from '../../shared/contracts';
@@ -71,6 +72,7 @@ export const intentModule: DramatisModule<IntentSettings> = {
                 running: reader.running(),
             };
             if (card?.intent?.at) out.at = card.intent.at;
+            if (card?.intent?.fromCard) out.fromCard = true;
             return out;
         }
 
@@ -189,7 +191,10 @@ export const intentModule: DramatisModule<IntentSettings> = {
             if (stopped || !profiles || app.host.cardKey() !== cardKey) return;
             if (!profiles.intent) {
                 if (hasUserMessages() || autoRead.has(cardKey)) return;
-                if (!app.llm.available(INTENT_TASK, false) || !leads()) return;
+                // A card whose own structured intent is complete is read without the model: no connection needed.
+                const needsModel = (await reader.fingerprint())?.model !== false;
+                if (stopped || app.host.cardKey() !== cardKey) return;
+                if ((needsModel && !app.llm.available(INTENT_TASK, false)) || !leads()) return;
                 autoRead.add(cardKey);
                 await read({ auto: true });
                 return;

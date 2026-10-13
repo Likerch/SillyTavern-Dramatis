@@ -13,6 +13,9 @@ export const INTENT_STRINGS: I18nParts = {
         'intent.progress': 'Reading the author’s intent: part {n} of {total}…',
         'intent.done': 'Author’s intent read: {summary}.',
         'intent.done.nobody': 'Author’s intent read: the sources name nobody.',
+        'intent.done.card': 'Author’s intent taken from the card: {summary}.',
+        'intent.done.withCard':
+            'What the author wrote into the card itself ({summary}) is taken as is; the rest was read from the text.',
         'intent.done.warnings': 'Notes: {count} — see the intent sheet.',
         'intent.done.open': 'Open',
         'intent.failed': 'The author’s intent was not read: {error}',
@@ -86,6 +89,10 @@ export const INTENT_STRINGS: I18nParts = {
         'intent.warning.minor-target': '{who}an appetite toward a minor was removed',
         'intent.warning.partFailed': 'part {n} of {total} was not read: {error}',
         'intent.warning.skipped': '{n} lorebook entries did not fit into the reading',
+        'intent.warning.cardIntent':
+            'the card’s structured intent: {n} problems — those parts were left out (details in the browser console)',
+        'intent.warning.textFailed':
+            'the card’s text was not read: {error}; what the author wrote into the card was taken',
 
         'intent.slash.read': 'Reads the author’s intent of the current card again (your own edits stay).',
 
@@ -109,6 +116,9 @@ export const INTENT_STRINGS: I18nParts = {
         'intent.progress': 'Читаю замысел: часть {n} из {total}…',
         'intent.done': 'Замысел прочитан: {summary}.',
         'intent.done.nobody': 'Замысел прочитан: в источниках никого не нашлось.',
+        'intent.done.card': 'Замысел взят из карточки: {summary}.',
+        'intent.done.withCard':
+            'Записанное автором в самой карточке ({summary}) взято как есть, остальное дочитано по тексту.',
         'intent.done.warnings': 'Замечаний: {count} — подробно в листе замысла.',
         'intent.done.open': 'Открыть',
         'intent.failed': 'Замысел не прочитан: {error}',
@@ -181,6 +191,9 @@ export const INTENT_STRINGS: I18nParts = {
         'intent.warning.minor-target': '{who}влечение к несовершеннолетнему убрано',
         'intent.warning.partFailed': 'часть {n} из {total} не прочитана: {error}',
         'intent.warning.skipped': 'не вошло в чтение записей лорбука: {n}',
+        'intent.warning.cardIntent':
+            'структурный замысел карточки: ошибок — {n}, эти части не взяты (подробно — в консоли браузера)',
+        'intent.warning.textFailed': 'текст карточки не прочитан: {error}; взято то, что автор записал в карточке',
 
         'intent.slash.read': 'Заново читает замысел автора текущей карточки (твои правки останутся).',
 

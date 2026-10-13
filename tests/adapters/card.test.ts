@@ -80,6 +80,20 @@ describe('CardReader', () => {
         expect(unshallow).toHaveBeenCalledWith(0);
     });
 
+    it('passes the structured intent on as stored, macros and all; absent when the card has none', () => {
+        const intent = { version: 1, characters: { Марта: { core: { concept: '{{char}} держит таверну' } } } };
+        openSoloChat(mock, character('Marta', { data: { extensions: { dramatis: { intent }, world: 'Марта' } } }));
+        const reader = createCardReader(mockHost(), memoryLogger());
+        expect(reader.current()!.intent).toEqual(intent);
+        openSoloChat(mock, character('Bram', { data: { extensions: { dramatis: { other: 1 } } } }));
+        expect(reader.current()).not.toHaveProperty('intent');
+        openSoloChat(mock, character('Fenn', { data: { extensions: { dramatis: 'broken' } } }));
+        expect(reader.current()).not.toHaveProperty('intent');
+        // Not an object, still the card's: the reading validates it (and says it cannot use it).
+        openSoloChat(mock, character('Ola', { data: { extensions: { dramatis: { intent: 'v1' } } } }));
+        expect(reader.current()!.intent).toBe('v1');
+    });
+
     it('replaces only the name macros', () => {
         expect(replaceNames('{{CHAR}} и {{user}}, {{random::a,b}}', 'A', 'B')).toBe('A и B, {{random::a,b}}');
         expect(replaceNames('', 'A', 'B')).toBe('');

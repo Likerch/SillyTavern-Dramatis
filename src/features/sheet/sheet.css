@@ -380,6 +380,12 @@
     color: var(--dramatis-accent);
 }
 
+.dramatis-sheet-origin[data-origin='card'] {
+    border-color: var(--dramatis-accent);
+    background: color-mix(in srgb, var(--dramatis-accent) 18%, transparent);
+    color: var(--dramatis-accent);
+}
+
 .dramatis-sheet-origin[data-origin='inferred'] {
     border-style: dotted;
     border-color: var(--dramatis-accent);

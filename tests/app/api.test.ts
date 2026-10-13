@@ -152,6 +152,25 @@ describe('DRAMATIS_API publication', () => {
         expect(publisher.api.active()).toBe(false);
     });
 
+    it('tells the card intent it reads and checks one (1.6), also while switched off', () => {
+        const { publisher, settings } = setup();
+        publisher.publish();
+        const api = globals[DRAMATIS_API_GLOBAL] as DramatisApiV1;
+        expect(api.features).toEqual(['cardIntent']);
+        expect(Object.isFrozen(api.features)).toBe(true);
+        expect(api.cardIntentVersion).toBe(1);
+        expect(api.validateCardIntent!({ version: 1, world: { tone: 'hostile', mood: 'grim' } })).toEqual({
+            ok: false,
+            errors: [{ path: 'world.mood', code: 'unknown', message: 'not a field of the format' }],
+            intent: { version: 1, world: { tone: 'hostile' } },
+            complete: false,
+            missing: ['characters'],
+        });
+        settings.set('enabled', false);
+        expect(api.validateCardIntent!({ version: 2 })).toMatchObject({ ok: false, intent: null });
+        expect(api.active()).toBe(false);
+    });
+
     it('fires onChange once per burst of changes', async () => {
         const { publisher, bus, settings } = setup();
         publisher.publish();

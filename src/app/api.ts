@@ -5,7 +5,10 @@
 // (readIntent: a failed outcome saying the reading is not available). In a workshop chat (Maestro 1.21+ «Мастерская»)
 // no module runs, so every method gives its default too; readIntent then says it is a workshop chat.
 // onChange listeners fire (once per microtask) when the state, the profiles, the chat, the parts or the switch change.
+// `features`, `cardIntentVersion` and `validateCardIntent` (1.6+) are fixed and pure: they answer even while Dramatis is
+// switched off or in a workshop chat (a workshop checks the intent it is about to write into a card).
 import { DRAMATIS_API_GLOBAL, DRAMATIS_API_READY_EVENT } from '../shared/apis';
+import { CARD_INTENT_VERSION, validateCardIntent } from '../shared/card-intent';
 import type {
     ApiUnsubscribe,
     DramatisApiV1,
@@ -16,7 +19,12 @@ import type {
 import type { Bus, I18n, Logger, SettingsService, Unsubscribe } from '../shared/contracts';
 
 /** What a module may provide (every member optional). */
-export type DramatisApiPart = Partial<Omit<DramatisApiV1, 'version' | 'dramatisVersion' | 'onChange'>>;
+export type DramatisApiPart = Partial<
+    Omit<
+        DramatisApiV1,
+        'version' | 'dramatisVersion' | 'onChange' | 'features' | 'cardIntentVersion' | 'validateCardIntent'
+    >
+>;
 
 /** The key under which modules expose their API part. */
 export const API_PART_KEY = 'api';
@@ -44,6 +52,9 @@ export interface ApiPublisherDeps {
     /** The open chat is a workshop chat (MaestroBridge.workshop): readIntent's default says so. */
     workshop?: () => boolean;
 }
+
+/** What this Dramatis understands beyond the v1 members (DRAMATIS_API.features). */
+export const FEATURES: readonly string[] = Object.freeze(['cardIntent']);
 
 type Method = keyof DramatisApiPart;
 
@@ -121,6 +132,9 @@ export function createApiPublisher(deps: ApiPublisherDeps): ApiPublisher {
         openSheet: (name?: string) => {
             call<'openSheet', void>('openSheet', undefined, [name]);
         },
+        features: FEATURES,
+        cardIntentVersion: CARD_INTENT_VERSION,
+        validateCardIntent: (value: unknown) => validateCardIntent(value),
         onChange(listener: () => void): ApiUnsubscribe {
             listeners.add(listener);
             return () => {

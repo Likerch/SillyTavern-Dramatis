@@ -23,6 +23,7 @@ import type {
     Tie,
 } from '../../domain/model';
 import {
+    cardIntentMeta,
     emptyProfile,
     emptyTie,
     getPath,
@@ -332,14 +333,17 @@ export function removeChatRule(engine: EngineApi, ruleId: string): Promise<boole
 
 /* ------------------------------------------------------------------ the author's value back (re-read diff) */
 
-/** Drops the meta of a path and everything below it, then marks the path as the author's (unlocked). */
-function authorAgain<T extends MetaHolder>(holder: T, path: string): T {
+/**
+ * Drops the meta of a path and everything below it, then marks the path as the author's (unlocked) — as the card's
+ * structured intent when the value came from it.
+ */
+function authorAgain<T extends MetaHolder>(holder: T, path: string, fromCard: boolean): T {
     const meta: Record<string, FieldMeta> = {};
     for (const [key, value] of Object.entries(holder.meta)) {
         if (key === path || key.startsWith(`${path}.`)) continue;
         meta[key] = value;
     }
-    meta[path] = { origin: 'author' };
+    meta[path] = fromCard ? cardIntentMeta() : { origin: 'author' };
     return { ...holder, meta };
 }
 
@@ -349,7 +353,8 @@ function authorAgain<T extends MetaHolder>(holder: T, path: string): T {
  */
 export function takeAuthor(engine: EngineApi, entry: IntentDiffEntry): Promise<boolean> {
     const value = entry.after === undefined ? undefined : structuredClone(entry.after);
-    const apply = <T extends MetaHolder>(holder: T): T => authorAgain(setPath(holder, entry.path, value), entry.path);
+    const apply = <T extends MetaHolder>(holder: T): T =>
+        authorAgain(setPath(holder, entry.path, value), entry.path, entry.fromCard === true);
     if (entry.character) return updateProfile(engine, entry.character, apply);
     return engine.updateProfiles((card) => apply(card));
 }

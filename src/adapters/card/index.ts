@@ -1,7 +1,9 @@
 // Reader of the current character card and persona: everything the intent reading takes as sources
 // (docs/model.md §7). Card fields are read as the card stores them — not the per-chat overrides of scenario or
 // examples, not the "prefer character prompt" switches — with only `{{char}}` / `{{user}}` (and the legacy
-// `<BOT>` / `<USER>`) replaced by the names, so the text stays deterministic for source hashing.
+// `<BOT>` / `<USER>`) replaced by the names, so the text stays deterministic for source hashing. The card's structured
+// intent (`data.extensions.dramatis.intent`, src/shared/card-intent.ts) is passed on as stored.
+import { CARD_INTENT_EXTENSION, CARD_INTENT_KEY } from '../../shared/card-intent';
 import type { CardReader, CardSource, Host, Logger } from '../../shared/contracts';
 
 export interface CardReaderImpl extends CardReader {
@@ -73,6 +75,10 @@ export function createCardReader(host: Host, log: Logger): CardReaderImpl {
             const name = str(card.name) || str(data.name);
             const personaName = str(ctx.name1);
             const fill = (value: unknown) => replaceNames(str(value).trim(), name, personaName);
+            // The structured intent is read as stored: no macros replaced (they stay as the author wrote them).
+            const own = data.extensions?.[CARD_INTENT_EXTENSION];
+            const intent =
+                own && typeof own === 'object' ? (own as Record<string, unknown>)[CARD_INTENT_KEY] : undefined;
             return {
                 avatar: card.avatar,
                 name,
@@ -95,6 +101,7 @@ export function createCardReader(host: Host, log: Logger): CardReaderImpl {
                         personaName,
                     ),
                 },
+                ...(intent === undefined || intent === null ? {} : { intent }),
             };
         },
 

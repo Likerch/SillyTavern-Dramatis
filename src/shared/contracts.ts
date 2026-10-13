@@ -307,6 +307,11 @@ export interface CardSource {
     depthPrompt: string;
     tags: string[];
     persona: { name: string; description: string };
+    /**
+     * The card's structured intent as stored at `data.extensions.dramatis.intent` (src/shared/card-intent.ts), raw and
+     * unchecked; absent when the card has none.
+     */
+    intent?: unknown;
 }
 
 export interface CardReader {

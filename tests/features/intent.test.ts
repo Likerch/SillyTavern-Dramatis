@@ -5,7 +5,7 @@
 // empty answer, a failed dossier), the settings section and /dramatis-read.
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { applyIntent } from '../../src/domain/intent-apply';
-import { DOSSIER_SYSTEM_PROMPT, INTENT_TASK, intentSources } from '../../src/domain/intent-prompt';
+import { DOSSIER_SYSTEM_PROMPT, INTENT_TASK, intentFingerprint, intentSources } from '../../src/domain/intent-prompt';
 import { PLAYER_ID } from '../../src/domain/model';
 import type { CardProfiles } from '../../src/domain/model';
 import { emptyCardProfiles, emptyProfile, setMeta } from '../../src/domain/profile-defaults';
@@ -23,6 +23,8 @@ import type { FakeMaestro } from '../helpers/fakes';
 import { character, flush, message } from '../helpers/st-mock';
 import type { StMock } from '../helpers/st-mock';
 import { TAVERN_CARD, answer, tavernAnswer } from '../domain/intent-fixtures';
+import { partialTavernIntent, tavernIntent } from '../domain/card-intent-fixtures';
+import { CARD_INTENT_NOTES_BEGIN, CARD_INTENT_NOTES_END } from '../../src/shared/card-intent';
 import { readProfilesFile, startHarness, stopHarness, switchChat, until } from './harness';
 import type { Harness, HarnessOptions } from './harness';
 
@@ -907,5 +909,161 @@ describe('intent — plural forms', () => {
         ]);
         locale = 'en';
         expect([1, 2].map((n) => plural(i18n, 'intent.n.groups', n))).toEqual(['1 group', '2 groups']);
+    });
+});
+
+/* ------------------------------------------------------------------ the card's structured intent (1.6) */
+
+/** The creator's notes with the «Замысел» section a workshop writes from the same data. */
+const MARKED_NOTES = `${TAVERN_CARD.creatorNotes}\n\n${CARD_INTENT_NOTES_BEGIN}\n## Замысел\nИльва враждебна к курьеру: позиция −2.\n${CARD_INTENT_NOTES_END}`;
+
+/** The tavern card carrying a structured intent at `data.extensions.dramatis.intent`. */
+function intentCard(intent: unknown, options: { short?: boolean } = {}): STCharacter {
+    const card = tavernCharacter(options);
+    card.data = { ...card.data, creator_notes: MARKED_NOTES, extensions: { dramatis: { intent } } };
+    return card;
+}
+
+const AUTHOR = { origin: 'author', sources: ['card.intent'] };
+
+describe('intent — the card’s structured intent', () => {
+    it('takes a complete one from the card as the author’s, without asking the model', async () => {
+        const { h, maestro, intent, records } = await setup({ card: intentCard(tavernIntent()) });
+        const result = await intent.read({ force: true });
+        expect(result).toMatchObject({ ok: true, characters: 3, warnings: [] });
+        expect(result.message).toBe('Замысел взят из карточки: 3 персонажа, 1 правило влечений.');
+        expect(maestro!.requests).toHaveLength(0);
+        const profiles = profilesOf(h.mock)!;
+        expect(profiles.characters.map((profile) => profile.name)).toEqual(['Ильва', 'Сота', 'Брам']);
+        const ilva = profiles.characters[0]!;
+        expect(ilva.core.concept).toBe('вдова мятежника, держит трактир назло оккупантам');
+        expect(ilva.meta['core.concept']).toEqual(AUTHOR);
+        expect(ilva.ties.find((tie) => tie.target === PLAYER_ID)).toMatchObject({ stance: -2, intent: 'avoid' });
+        expect(profiles.worldTone).toBe('hostile');
+        expect(profiles.intent).toMatchObject({ fromCard: 1 });
+        expect(profiles.intent!.model).toBeUndefined();
+        expect(records).toHaveLength(1);
+        expect(api().intentState!()).toMatchObject({ read: true, characters: 3, groups: 0, fromCard: true });
+    });
+
+    it('reads only what a partial one leaves out, without the «Замысел» section of the notes', async () => {
+        const { h, maestro, intent } = await setup({ card: intentCard(partialTavernIntent()) });
+        const result = await intent.read({ force: true });
+        expect(result.ok).toBe(true);
+        expect(maestro!.requests).toHaveLength(3);
+        const sent = maestro!.requests.map((request) => request.messages[1]!.content).join('\n');
+        expect(sent).toContain(TAVERN_CARD.creatorNotes);
+        expect(sent).not.toContain('Ильва враждебна к курьеру');
+        expect(result.message).toMatch(
+            /^Замысел прочитан: 3 персонажа, 1 группа\. Записанное автором в самой карточке \(1 персонаж\) взято как есть, остальное дочитано по тексту\./,
+        );
+        const profiles = profilesOf(h.mock)!;
+        const ilva = profiles.characters.find((profile) => profile.name === 'Ильва')!;
+        // The author's word stands over the reading's (its English concept, its colder stance).
+        expect(ilva.core.concept).toBe('вдова мятежника, держит трактир назло оккупантам');
+        expect(ilva.meta['core.concept']).toEqual(AUTHOR);
+        expect(ilva.ties.find((tie) => tie.target === PLAYER_ID)!.stance).toBe(-1);
+        // The rest comes from the text.
+        expect(ilva.core.wound?.ghost).toBe('The Empire hanged her husband');
+        expect(profiles.characters).toHaveLength(4);
+        expect(profiles.intent).toMatchObject({ fromCard: 1 });
+    });
+
+    it('asks for a re-read when the intent object changes, skips an unchanged card', async () => {
+        const card = intentCard(tavernIntent());
+        const { h, intent, maestro } = await setup({ card });
+        await intent.read({ force: true });
+        expect((await intent.read()).skipped).toBe(true);
+        const changed = tavernIntent();
+        changed.characters!['Брам']!.core!.want = 'разбогатеть и уехать';
+        card.data!.extensions!.dramatis = { intent: changed };
+        const again = await intent.read();
+        expect(again).toMatchObject({ ok: true });
+        expect(again.skipped).toBeUndefined();
+        const bram = profilesOf(h.mock)!.characters.find((profile) => profile.name === 'Брам')!;
+        expect(bram.core.want).toBe('разбогатеть и уехать');
+        expect(again.diff).toContainEqual(
+            expect.objectContaining({
+                path: 'core.want',
+                after: 'разбогатеть и уехать',
+                status: 'updated',
+                fromCard: true,
+            }),
+        );
+        expect(maestro!.requests).toHaveLength(0);
+    });
+
+    it('fingerprints a card without one exactly as before; with one, the object counts and the «Замысел» section not', () => {
+        expect(sourcesFingerprint(TAVERN_CARD, [])).toBe(
+            intentFingerprint(intentSources(TAVERN_CARD, { cardBook: [] })),
+        );
+        const withIntent = { ...TAVERN_CARD, intent: tavernIntent() };
+        expect(sourcesFingerprint(withIntent, [])).not.toBe(sourcesFingerprint(TAVERN_CARD, []));
+        expect(sourcesFingerprint({ ...withIntent, creatorNotes: MARKED_NOTES }, [])).toBe(
+            sourcesFingerprint(withIntent, []),
+        );
+        const other = tavernIntent();
+        other.world!.tone = 'neutral';
+        expect(sourcesFingerprint({ ...TAVERN_CARD, intent: other }, [])).not.toBe(sourcesFingerprint(withIntent, []));
+        // An unusable object still counts (a fixed one asks for a re-read), but the notes are read whole then.
+        const broken = { ...TAVERN_CARD, intent: { version: 9 }, creatorNotes: MARKED_NOTES };
+        expect(sourcesFingerprint(broken, [])).not.toBe(sourcesFingerprint({ ...broken, intent: { version: 8 } }, []));
+        expect(sourcesFingerprint(broken, [])).not.toBe(
+            sourcesFingerprint({ ...broken, creatorNotes: TAVERN_CARD.creatorNotes }, []),
+        );
+    });
+
+    it('notes what the card’s intent could not use and takes the rest', async () => {
+        const broken = { ...tavernIntent(), extra: true };
+        const { h, intent } = await setup({ card: intentCard(broken) });
+        const result = await intent.read({ force: true });
+        expect(result.ok).toBe(true);
+        expect(result.warnings).toContain(
+            'структурный замысел карточки: ошибок — 1, эти части не взяты (подробно — в консоли браузера)',
+        );
+        expect(profilesOf(h.mock)!.characters).toHaveLength(3);
+    });
+
+    it('keeps the author’s part when the text cannot be read, and marks the reading for a re-read', async () => {
+        const { h, intent } = await setup({
+            card: intentCard(partialTavernIntent()),
+            replies: [{ ok: false, error: 'no-profile' }],
+        });
+        const result = await intent.read({ force: true });
+        expect(result.ok).toBe(true);
+        expect(result.message).toMatch(/^Замысел взят из карточки: 1 персонаж\./);
+        expect(result.warnings.some((warning) => warning.startsWith('текст карточки не прочитан'))).toBe(true);
+        const profiles = profilesOf(h.mock)!;
+        expect(profiles.characters.map((profile) => profile.name)).toEqual(['Ильва']);
+        expect(profiles.intent!.sourcesHash.endsWith(PARTIAL_MARK)).toBe(true);
+    });
+
+    it('reads a complete one by itself even with no AI connection; a partial one waits for a connection', async () => {
+        const complete = await setup({ card: intentCard(tavernIntent()), autoRead: true, withMaestro: false });
+        await until(() => !!profilesOf(complete.h.mock)?.intent);
+        expect(profilesOf(complete.h.mock)!.intent!.fromCard).toBe(1);
+        await stopHarness();
+
+        const partial = await setup({ card: intentCard(partialTavernIntent()), autoRead: true, withMaestro: false });
+        await flush();
+        await flush();
+        expect(profilesOf(partial.h.mock)?.intent).toBeUndefined();
+    });
+
+    it('a card that drops its intent gives the author’s fields back to the reading of the text', async () => {
+        const card = intentCard(partialTavernIntent());
+        const { h, intent, maestro } = await setup({ card });
+        await intent.read({ force: true });
+        answering(maestro!, tavernParts().map(ok));
+        card.data!.extensions = {};
+        card.data!.creator_notes = TAVERN_CARD.creatorNotes;
+        const result = await intent.read();
+        expect(result.ok).toBe(true);
+        const profiles = profilesOf(h.mock)!;
+        const ilva = profiles.characters.find((profile) => profile.name === 'Ильва')!;
+        expect(ilva.core.concept).toBe("A rebel's widow who keeps the inn in an occupied town");
+        expect(ilva.meta['core.concept']?.sources ?? []).not.toContain('card.intent');
+        expect(ilva.ties.find((tie) => tie.target === PLAYER_ID)!.stance).toBe(-2);
+        expect(profiles.intent!.fromCard).toBeUndefined();
     });
 });

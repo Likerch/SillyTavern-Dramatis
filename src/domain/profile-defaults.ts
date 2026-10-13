@@ -789,6 +789,7 @@ export function normalizeCardProfiles(raw: unknown, card: string): CardProfiles 
                       at: intIn(intent.at, 0, Number.MAX_SAFE_INTEGER, 0),
                       sourcesHash: intent.sourcesHash,
                       model: optionalText(intent.model, LIMITS.name),
+                      fromCard: intent.fromCard === undefined ? undefined : intIn(intent.fromCard, 1, 99, 1),
                   })
                 : undefined,
         meta: normalizeMeta(dict.meta),
@@ -839,6 +840,27 @@ export function isUserEdited(holder: MetaHolder, path: string): boolean {
 /** Neither the intent reading nor the generator may overwrite it. */
 export function isProtected(holder: MetaHolder, path: string): boolean {
     return isLocked(holder, path) || isUserEdited(holder, path);
+}
+
+/** The source id of fields the author wrote into the card itself (`extensions.dramatis.intent`). */
+export const CARD_INTENT_SOURCE = 'card.intent';
+
+/** The meta of a field taken from the card's structured intent: the author's, no quote needed. */
+export function cardIntentMeta(): FieldMeta {
+    return { origin: 'author', sources: [CARD_INTENT_SOURCE] };
+}
+
+/** This meta marks a field the author wrote into the card's structured intent. */
+export function isCardMeta(meta: FieldMeta | undefined): boolean {
+    return meta?.origin === 'author' && !!meta.sources?.includes(CARD_INTENT_SOURCE);
+}
+
+/**
+ * The path (or its nearest ancestor with meta) holds the card's structured intent: the reading of the card's text
+ * leaves it as the author wrote it — only a new structured intent, the user's edit or his lock changes it.
+ */
+export function isCardAuthored(holder: MetaHolder, path: string): boolean {
+    return isCardMeta(metaAt(holder, path));
 }
 
 /* ------------------------------------------------------------------ path access */

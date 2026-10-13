@@ -9,7 +9,8 @@
 // (`replaceGenerated`) drops what the generator wrote for the characters it reads, so the new reading and a grounded
 // fill take its place. Characters merge with existing profiles by name and alias; their English name, first name,
 // nicknames and Russian forms become names the story can call them by; groups become kind 'group'; minors are flagged
-// and never get, or become the target of, sexual appetites. Pure.
+// and never get, or become the target of, sexual appetites. What the card's structured intent wrote (card-intent.ts,
+// meta source 'card.intent') is the author's word: this reading skips those fields silently. Pure.
 import {
     APPETITE_KINDS,
     DRIVES,
@@ -56,6 +57,7 @@ import {
     enumList,
     getPath,
     intIn,
+    isCardAuthored,
     isDict,
     isEmptyValue,
     isLocked,
@@ -93,6 +95,8 @@ export interface ApplyOptions {
      * author's and inferred values, group-rule draws and BunnyMo hints stay.
      */
     replaceGenerated?: boolean;
+    /** The version of the card's structured intent taken alongside (stored in `intent.fromCard`). */
+    fromCard?: number;
 }
 
 export interface IntentDiff {
@@ -104,6 +108,8 @@ export interface IntentDiff {
     after: unknown;
     /** updated: the new reading replaced an older author/generated value; kept-*: the user's value stayed. */
     status: 'updated' | 'kept-user' | 'kept-locked';
+    /** The new value is the card's structured intent («Взять авторское» marks it so again). */
+    fromCard?: boolean;
 }
 
 export type IntentWarningCode =
@@ -947,7 +953,9 @@ export function canonicalPaths(
 
 /* ------------------------------------------------------------------ applying */
 
-const MINOR_CLASS_RE = /(child|children|kid|minor|underage|teen|ребен|ребён|дет|малолет|несовершеннолет|подрост)/iu;
+/** A class of people that means children (no sexual rule may aim at it). */
+export const MINOR_CLASS_RE =
+    /(child|children|kid|minor|underage|teen|ребен|ребён|дет|малолет|несовершеннолет|подрост)/iu;
 const PLAYER_WORDS = [
     'player',
     'the player',
@@ -967,7 +975,8 @@ const PLAYER_WORDS = [
 const PLAYER_QUOTE_RE =
     /(\{\{user\}\}|\bhero\b|\bthe player\b|\byou\b|\byour\b|геро[йяюе]\p{L}*|(?:^|[^\p{L}])(?:ты|тебя|тебе|тобой|вас|вам)(?=[^\p{L}]|$))/iu;
 
-const DEFAULT_STYLE: Record<AppetiteKind, Style> = {
+/** The method style of an appetite whose source names none. */
+export const DEFAULT_STYLE: Record<AppetiteKind, Style> = {
     flesh: 'siren',
     plunder: 'raider',
     dominance: 'raider',
@@ -982,7 +991,8 @@ const DEFAULT_STYLE: Record<AppetiteKind, Style> = {
     other: 'buyer',
 };
 
-const DEFAULT_ONSET: Partial<Record<AppetiteKind, AffectionOnset>> = {
+/** Whether getting it may turn into affection, when the source does not say (else 'possible'). */
+export const DEFAULT_ONSET: Partial<Record<AppetiteKind, AffectionOnset>> = {
     plunder: 'rare',
     cruelty: 'rare',
     hunger: 'rare',
@@ -1028,6 +1038,8 @@ function writeField<T extends { meta: Record<string, FieldMeta> }>(
     value: unknown,
     evidence: readonly Evidence[],
 ): T {
+    // The card's structured intent is the author's word: the reading of the text leaves it as written.
+    if (isCardAuthored(holder, path)) return holder;
     const before = getPath(holder, path);
     if (isProtected(holder, path)) {
         if (!same(before, value)) {
@@ -1086,7 +1098,7 @@ interface CharacterPlan {
  * A tie target, bound or anchor that means the player's character: PLAYER, {{user}}, «the player's character», the
  * persona's name (any case form: «Тарена» of «Тарен»), also with a parenthesis («PLAYER (Тарен)»).
  */
-function isPlayerRef(target: string, persona: string): boolean {
+export function isPlayerRef(target: string, persona: string): boolean {
     const raw = target.trim();
     const bare = raw.replace(/\s*\([^)]*\)\s*$/, '').trim();
     for (const value of [raw, bare]) {
@@ -1110,7 +1122,8 @@ function devotionQuoted(evidence: readonly Evidence[], persona: string): boolean
     );
 }
 
-function authorReasons(texts: readonly string[], stance: number): Reason[] {
+/** The author's reasons of a tie: permanent, sharing the stance between them. */
+export function authorReasons(texts: readonly string[], stance: number): Reason[] {
     if (!texts.length || stance === 0) {
         return texts.map((value, i) => ({ id: `author-${i + 1}`, text: value, delta: 0, scenesLeft: null, stacks: 1 }));
     }
@@ -1270,6 +1283,7 @@ export function applyParsedIntent(current: CardProfiles, parsed: ParsedIntent, o
             ...(evidence.length ? { evidence: metaOf(evidence).evidence } : {}),
         };
         const path = `rules.${id}`;
+        if (isCardAuthored(card, path)) continue;
         if (isProtected(card, path)) {
             if (existing && !same(existing, value)) {
                 session.diff.push({
@@ -1352,6 +1366,7 @@ export function applyParsedIntent(current: CardProfiles, parsed: ParsedIntent, o
             at: options.now,
             sourcesHash: options.sourcesHash,
             ...(options.model ? { model: options.model } : {}),
+            ...(options.fromCard ? { fromCard: options.fromCard } : {}),
         },
     };
     for (const [name, count] of session.inferred) {
@@ -1369,7 +1384,7 @@ function field(
     value: unknown,
     backing: readonly string[] = [path],
 ): CharacterProfile {
-    if (isEmptyValue(value)) return profile;
+    if (isEmptyValue(value) || isCardAuthored(profile, path)) return profile;
     const evidence = backing.flatMap((key) => plan.evidence.get(key) ?? []);
     const gated = gate(session, evidence, plan.parsed.name);
     return writeField(session, profile, { id: profile.id, name: profile.name }, path, value, gated);
@@ -1454,7 +1469,7 @@ function applyCharacter(
     const where = { id: profile.id, name: profile.name };
     // Who they are needs no quote; it keeps its old provenance unless a quote backs it.
     const identity = (path: string, value: unknown) => {
-        if (isEmptyValue(value) || same(getPath(profile, path), value)) return;
+        if (isEmptyValue(value) || same(getPath(profile, path), value) || isCardAuthored(profile, path)) return;
         const evidence = plan.evidence.get(path) ?? [];
         if (evidence.length || isProtected(profile, path)) {
             profile = writeField(session, profile, where, path, value, evidence);
@@ -1488,7 +1503,7 @@ function applyCharacter(
         LIMITS.name,
     ).filter((alias) => textKey(alias) !== textKey(profile.name));
     identity('aliases', aliases);
-    if (parsed.minor && !profile.minor) profile = { ...profile, minor: true };
+    if (parsed.minor && !profile.minor && !isCardAuthored(profile, 'minor')) profile = { ...profile, minor: true };
 
     /* core, field by field (the answer's shape → the profile's) */
     const core: Core = normalizeCore(parsed.core);
@@ -1609,6 +1624,7 @@ function applyCharacter(
             rule: appetite.rule ? (ruleIds.get(textKey(appetite.rule)) ?? slugId(appetite.rule)) : existing?.rule,
         })!;
         const path = `appetites.${id}`;
+        if (isCardAuthored(profile, path)) continue;
         const evidence = gate(session, plan.evidence.get(`appetites.${appetite.kind}`) ?? [], parsed.name);
         profile = writeField(session, profile, where, path, value, evidence);
     }
@@ -1620,7 +1636,7 @@ function applyCharacter(
     const ties: { id: string; tie: ParsedTie; evidence: Evidence[] }[] = [];
     for (const tie of parsed.ties) {
         const id = resolveTarget(tie.target);
-        if (id === profile.id) continue;
+        if (id === profile.id || isCardAuthored(profile, `ties.${id}`)) continue;
         const evidence = plan.evidence.get(`ties.${id}`) ?? [];
         let stance = tie.stance;
         const guarded = id === PLAYER_ID || isStrangerClass(id);
@@ -1643,6 +1659,7 @@ function applyCharacter(
     if (
         strangerTie &&
         strangerTie.tie.stance < 0 &&
+        !isCardAuthored(profile, `ties.${PLAYER_ID}`) &&
         (!playerTie || (!playerTie.evidence.length && playerTie.tie.stance <= 1))
     ) {
         const stance = Math.min(strangerTie.tie.stance, playerTie?.tie.stance ?? 0) as Stance;
@@ -1656,6 +1673,7 @@ function applyCharacter(
     }
     for (const entry of ties) {
         const path = `ties.${entry.id}`;
+        if (isCardAuthored(profile, path)) continue;
         const gated = gate(session, entry.evidence, parsed.name);
         const existing = profile.ties.find((item) => item.target === entry.id);
         const base: Tie = existing ?? emptyTie(entry.id);
@@ -1690,7 +1708,9 @@ function applyCharacter(
     const bounds: StanceBound[] = core.stanceBounds.map((bound) => ({ ...bound, target: resolveTarget(bound.target) }));
     const boundEvidence = [...(plan.evidence.get('core.stanceBounds') ?? [])];
     const playerBound = bounds.some((bound) => bound.target === PLAYER_ID);
-    if (fidelity === 'strict' && playerTie && !playerBound && playerTie.evidence.length > 0) {
+    // The author's own tie to the player (the card's structured intent) is not this reading's to bound.
+    const playerAuthored = isCardAuthored(profile, `ties.${PLAYER_ID}`);
+    if (fidelity === 'strict' && playerTie && !playerBound && !playerAuthored && playerTie.evidence.length > 0) {
         if (playerTie.tie.stance <= -1) {
             bounds.push({ target: PLAYER_ID, max: 0 });
             boundEvidence.push(...playerTie.evidence);
@@ -1699,13 +1719,13 @@ function applyCharacter(
             boundEvidence.push(...playerTie.evidence);
         }
     }
-    if (bounds.length) {
+    if (bounds.length && !isCardAuthored(profile, 'core.stanceBounds')) {
         const gated = gate(session, boundEvidence, parsed.name);
         profile = writeField(session, profile, where, 'core.stanceBounds', bounds.slice(0, LIMITS.bounds), gated);
     }
 
     /* starts per greeting */
-    if (parsed.starts.length) {
+    if (parsed.starts.length && !isCardAuthored(profile, 'starts')) {
         const evidence = parsed.starts
             .flatMap((start) => [...(plan.evidence.get(`starts.${start.greeting}`) ?? [])])
             .concat(plan.evidence.get('starts') ?? []);
@@ -1727,7 +1747,7 @@ function applyCharacter(
  * The content boundary: minors have no sexual appetites, and nobody's sexual appetite (or a mate's gaze) aims at a
  * minor. Applies to the whole card, whatever the origin of the data.
  */
-function enforceMinors(session: Session, card: CardProfiles): CardProfiles {
+export function enforceMinors(session: { warnings: IntentWarning[] }, card: CardProfiles): CardProfiles {
     const minors = new Set(card.characters.filter((profile) => profile.minor).map((profile) => profile.id));
     if (!minors.size) return card;
     const characters = card.characters.map((profile) => {

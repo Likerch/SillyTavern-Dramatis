@@ -119,6 +119,45 @@ describe('reading the intent', () => {
         expect(bramAfter.meta[`ties.${PLAYER_ID}.stance`]).toBeUndefined();
     });
 
+    it('labels what the author wrote into the card «автор · в карточке»; «Взять авторское» keeps it the card’s', async () => {
+        h = harness();
+        const ilva = profileOf(h.engine!, 'ilva');
+        ilva.meta['core.want'] = { origin: 'author', sources: ['card.intent'] };
+        ilva.meta['core.need'] = { origin: 'author', evidence: ['ненавидит имперцев'], sources: ['card.description'] };
+        const page = h.open({ character: 'ilva' });
+        const badge = page.querySelector<HTMLElement>('[data-unit="core.want"] .dramatis-sheet-origin')!;
+        expect(badge.textContent).toBe('автор · в карточке');
+        expect(badge.dataset.origin).toBe('card');
+        expect(badge.title).toContain('прямо в карточке');
+        expect(page.querySelector('[data-unit="core.need"] .dramatis-sheet-origin')?.textContent).toBe('автор');
+
+        ilva.core.concept = 'моя Ильва';
+        ilva.meta['core.concept'] = { origin: 'user', locked: true };
+        h.open();
+        readButton(h.body()).click();
+        h.intent!.finish({
+            ok: true,
+            characters: 1,
+            warnings: [],
+            diff: [
+                {
+                    path: 'core.concept',
+                    character: 'ilva',
+                    status: 'kept-locked',
+                    before: 'моя Ильва',
+                    after: 'вдова мятежника',
+                    fromCard: true,
+                },
+            ],
+        });
+        await flush();
+        buttonByText(h.body(), 'Взять авторское').click();
+        await flush();
+        const after = profileOf(h.engine!, 'ilva');
+        expect(after.core.concept).toBe('вдова мятежника');
+        expect(after.meta['core.concept']).toEqual({ origin: 'author', sources: ['card.intent'] });
+    });
+
     it('re-reads with force once the intent was read, and keeps the result after reopening', async () => {
         h = harness();
         h.engine!.card.intent = { at: 1, sourcesHash: 'abc' };

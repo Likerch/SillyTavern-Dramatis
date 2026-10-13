@@ -15,11 +15,29 @@
 // `intent.sourcesHash` fingerprints the card and its lorebook, not the archives: those are written by the stack itself
 // (Maestro «Оформить», BunnyMo) and would keep offering re-reads. A reading whose later part failed keeps what it got
 // and stores a marked hash, so the next chat with the card offers to read it again.
+//
+// The card's structured intent (`data.extensions.dramatis.intent` v1, domain/card-intent.ts) comes first: its valid
+// parts are written as the author's (origin 'author', source 'card.intent', no quote), what it could not use is
+// logged and noted. When it covers what the motive card needs (`complete`), the text is not read with the model at
+// all; otherwise the model reads the card as above — with the creator's notes' «Замысел» section left out, the same
+// intent in words — and fills only what the structured intent leaves out. A reading of the text that fails then keeps
+// the author's part (marked for a re-read). The intent object joins the fingerprint.
 import { llmErrorText } from '../../core/strings';
 import { parseJsonText, repairJsonText } from '../../core/llm';
+import {
+    applyCardIntent,
+    cardIntentHash,
+    hasCardMarks,
+    readCardIntent,
+    withoutIntentNotes,
+} from '../../domain/card-intent';
+import type { AuthoredIntent } from '../../domain/card-intent';
 import { applyIntent, mergeIntentResults, parseIntentResult } from '../../domain/intent-apply';
 import { refreshLiveState } from '../../domain/intent-reread';
 import type { ApplyResult } from '../../domain/intent-apply';
+import { matchName } from '../../domain/presence';
+import { CARD_INTENT_SOURCE, textKey } from '../../domain/profile-defaults';
+import { CARD_INTENT_VERSION } from '../../shared/card-intent';
 import {
     INTENT_TASK,
     chunkIntentSources,
@@ -83,17 +101,30 @@ export interface ReadOptions {
 
 export interface IntentReader extends IntentApi {
     read(options?: ReadOptions): Promise<IntentReadResult>;
-    /** The current card and the fingerprint of its sources now (null outside a solo chat). */
-    fingerprint(): Promise<{ card: string; hash: string } | null>;
+    /**
+     * The current card, the fingerprint of its sources now and whether reading it needs the model (false when its
+     * structured intent is complete); null outside a solo chat.
+     */
+    fingerprint(): Promise<{ card: string; hash: string; model: boolean } | null>;
     /** Restores a journal snapshot (Maestro undo of `dramatis-profiles`). */
     undo(change: ApiJournalChange): Promise<boolean>;
     /** Cancels a reading in progress. */
     abort(): void;
 }
 
-/** Fingerprint of a card's sources for re-read checks: card fields, greetings, persona and lorebook (no archives). */
-export function sourcesFingerprint(card: CardSource, book: readonly CardBookEntry[]): string {
-    return intentFingerprint(intentSources(card, { cardBook: book }));
+/**
+ * Fingerprint of a card's sources for re-read checks: card fields, greetings, persona and lorebook (no archives); with
+ * a structured intent, the intent object too, and the creator's notes without their «Замысел» section. A card without
+ * one fingerprints exactly as before 1.6.
+ */
+export function sourcesFingerprint(
+    card: CardSource,
+    book: readonly CardBookEntry[],
+    authored: AuthoredIntent = readCardIntent(card.intent),
+): string {
+    const sources = intentSources(authored.intent ? withoutIntentNotes(card) : card, { cardBook: book });
+    if (!authored.present) return intentFingerprint(sources);
+    return intentFingerprint([...sources, { id: CARD_INTENT_SOURCE, hash: cardIntentHash(card.intent) }]);
 }
 
 function failure(error: string): IntentReadResult {
@@ -258,10 +289,16 @@ export function createIntentReader(deps: {
         const { card, book, greeting } = gathered;
         const cardKey = app.host.cardKey() ?? card.avatar;
         const current = await profilesOf(cardKey);
-        const hash = sourcesFingerprint(card, book);
+        const authored = readCardIntent(card.intent);
+        const hash = sourcesFingerprint(card, book, authored);
         if (!force && current?.intent?.sourcesHash === hash) {
             return { ok: true, skipped: true, characters: 0, warnings: [], diff: [], message: t('intent.upToDate') };
         }
+        if (authored.errors.length) {
+            log.warn('the card’s structured intent has parts that could not be used', authored.errors);
+        }
+        // With a structured intent, the «Замысел» section of the creator's notes is the same intent in words.
+        const reading = authored.intent ? withoutIntentNotes(card) : card;
 
         const asked = new Set<string>();
         const lookup = async (names: string[]) => {
@@ -269,10 +306,10 @@ export function createIntentReader(deps: {
             for (const name of fresh) asked.add(name.toLowerCase());
             return archivesFor(fresh);
         };
-        let archives = await lookup(archiveNames(card, book, current));
-        let sources = intentSources(card, { archives, cardBook: book, greeting });
+        let archives = authored.complete ? [] : await lookup(archiveNames(card, book, current));
+        let sources = intentSources(reading, { archives, cardBook: book, greeting });
         let chunks = chunkIntentSources(sources);
-        if (!chunks.parts.length) return failure(t('intent.error.empty'));
+        if (!chunks.parts.length && !authored.intent) return failure(t('intent.error.empty'));
         const context = intentContext(sources);
         const schema = intentSchema();
         const fidelity = app.settings.get().fidelity;
@@ -281,6 +318,7 @@ export function createIntentReader(deps: {
         const notes: string[] = [];
         let known: IntentKnown = emptyKnown();
         let partial = false;
+        if (authored.errors.length) notes.push(t('intent.warning.cardIntent', { n: authored.errors.length }));
 
         /**
          * Step 1 of the card's own part: the dossier (plain text). A failure costs only the step — the part is read in
@@ -310,7 +348,8 @@ export function createIntentReader(deps: {
             return { text: '' };
         };
 
-        for (let index = 0; index < chunks.parts.length; index++) {
+        // The text is not read with the model at all when the card's own intent covers what the motive card needs.
+        for (let index = 0; !authored.complete && index < chunks.parts.length; index++) {
             const part = chunks.parts[index]!;
             const total = chunks.parts.length;
             progress(index, total);
@@ -354,6 +393,12 @@ export function createIntentReader(deps: {
                     ? t('intent.error.emptyAnswer')
                     : llmErrorText(app.i18n, response.ok ? 'parse' : response.error);
                 if (index === 0) {
+                    if (authored.intent && !quietError(response.error, auto)) {
+                        // The author's own part stands without the text; the next chat with the card offers a re-read.
+                        notes.push(t('intent.warning.textFailed', { error }));
+                        partial = true;
+                        break;
+                    }
                     return {
                         ...failure(error),
                         ...(quietError(response.error, auto) ? { quiet: true } : {}),
@@ -371,7 +416,7 @@ export function createIntentReader(deps: {
                 const added = found.filter((sheet) => !archives.some((other) => sheetKey(other) === sheetKey(sheet)));
                 if (added.length) {
                     archives = [...archives, ...added];
-                    sources = intentSources(card, { archives, cardBook: book, greeting });
+                    sources = intentSources(reading, { archives, cardBook: book, greeting });
                     chunks = chunkIntentSources(sources);
                 }
             }
@@ -386,12 +431,30 @@ export function createIntentReader(deps: {
             personaName: card.persona.name,
             cardName: card.name,
             replaceGenerated: force,
+            ...(authored.intent ? { fromCard: CARD_INTENT_VERSION } : {}),
         };
-        const out: { applied?: ApplyResult; before?: CardProfiles } = {};
+        const out: { applied?: ApplyResult; before?: CardProfiles; authoredIds: string[] } = { authoredIds: [] };
         const saved = await saveProfiles(cardKey, (profiles) => {
             out.before = structuredClone(profiles);
-            out.applied = applyIntent(profiles, results, options);
-            return out.applied.profiles;
+            let next = profiles;
+            const diff: ApplyResult['diff'] = [];
+            const found: ApplyResult['warnings'] = [];
+            // The author's structured intent first (or only clearing what an earlier one wrote), then the text.
+            if (authored.intent || hasCardMarks(profiles)) {
+                const own = applyCardIntent(next, authored.intent, options);
+                next = own.profiles;
+                diff.push(...own.diff);
+                found.push(...own.warnings);
+                out.authoredIds = own.characters;
+            }
+            if (results.length) {
+                const read = applyIntent(next, results, options);
+                next = read.profiles;
+                diff.push(...read.diff);
+                found.push(...read.warnings);
+            }
+            out.applied = { profiles: next, diff, warnings: found };
+            return next;
         });
         if (!saved || !out.applied || !out.before) return failure(t('intent.error.save'));
         await refreshChat(cardKey, out.before, out.applied.profiles);
@@ -406,6 +469,30 @@ export function createIntentReader(deps: {
             groups: merged.characters.filter((item) => item.kind === 'group').length,
             rules: merged.rules.length,
         };
+        // The author's own entries: counted once, also when the text names the same people.
+        const own = { characters: 0, groups: 0, rules: authored.intent?.world?.rules?.length ?? 0 };
+        if (out.authoredIds.length) {
+            const final = out.applied.profiles.characters;
+            const read = new Set(
+                merged.characters.map(
+                    (item) =>
+                        matchName(item.name, final, { strict: true }) ??
+                        (item.english ? matchName(item.english, final, { strict: true }) : null),
+                ),
+            );
+            for (const id of out.authoredIds) {
+                const group = final.find((profile) => profile.id === id)?.kind === 'group';
+                if (group) own.groups++;
+                else own.characters++;
+                if (read.has(id)) continue;
+                if (group) counts.groups++;
+                else counts.characters++;
+            }
+            const rules = new Set(merged.rules.map((rule) => textKey(rule.name)));
+            counts.rules += (authored.intent?.world?.rules ?? []).filter(
+                (rule) => !rules.has(textKey(rule.name)),
+            ).length;
+        }
         const warnings = unique(
             [...notes, ...out.applied.warnings.map((warning) => warningText(app.i18n, warning))],
             Number.MAX_SAFE_INTEGER,
@@ -414,6 +501,8 @@ export function createIntentReader(deps: {
         await record(cardKey, summary, out.before, out.applied.profiles);
 
         let text = summary ? t('intent.done', { summary }) : t('intent.done.nobody');
+        if (authored.intent && !results.length) text = summary ? t('intent.done.card', { summary }) : text;
+        else if (authored.intent) text = `${text} ${t('intent.done.withCard', { summary: summaryOf(own) || '—' })}`;
         if (warnings.length) {
             const shown = warnings.slice(0, NOTICE_NOTES).join('; ');
             const list = warnings.length > NOTICE_NOTES ? `${shown}; …` : shown;
@@ -508,11 +597,16 @@ export function createIntentReader(deps: {
 
         lastResult: () => memory.last,
 
-        async fingerprint(): Promise<{ card: string; hash: string } | null> {
+        async fingerprint(): Promise<{ card: string; hash: string; model: boolean } | null> {
             const gathered = await cardAndBook();
             const cardKey = app.host.cardKey();
             if (!gathered || !cardKey) return null;
-            return { card: cardKey, hash: sourcesFingerprint(gathered.card, gathered.book) };
+            const authored = readCardIntent(gathered.card.intent);
+            return {
+                card: cardKey,
+                hash: sourcesFingerprint(gathered.card, gathered.book, authored),
+                model: !authored.complete,
+            };
         },
 
         async undo(change: ApiJournalChange): Promise<boolean> {

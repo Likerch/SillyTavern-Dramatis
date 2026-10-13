@@ -4,7 +4,7 @@ import { STANCES } from '../../domain/model';
 import type { CharacterProfile, CharacterState, ChatState, FieldMeta, Origin, Stance } from '../../domain/model';
 import { stanceBehaviour, stanceLabel } from '../../domain/ladders';
 import type { Gender } from '../../domain/ladders';
-import { LIMITS, cleanList, cleanText, getPath, isLocked, metaAt } from '../../domain/profile-defaults';
+import { LIMITS, cleanList, cleanText, getPath, isCardMeta, isLocked, metaAt } from '../../domain/profile-defaults';
 import { select } from '../../ui/controls';
 import type { SelectOption } from '../../ui/controls';
 import { button, el } from '../../ui/dom';
@@ -135,7 +135,7 @@ export function unitBlock(ctx: SheetCtx, options: UnitOptions, children: Child[]
     const open = ctx.session.expanded.has(quotesKey);
 
     const head: Child[] = [el('div', { class: 'dramatis-sheet-unit-title', text: options.title })];
-    if (meta) head.push(originBadge(ctx, meta.origin));
+    if (meta) head.push(originBadge(ctx, meta.origin, isCardMeta(meta)));
     const lock = keyed(
         button({
             icon: locked ? 'fa-lock' : 'fa-lock-open',
@@ -185,12 +185,17 @@ export function unitBlock(ctx: SheetCtx, options: UnitOptions, children: Child[]
     ]);
 }
 
-export function originBadge(ctx: SheetCtx, origin: Origin): HTMLElement {
+/**
+ * The provenance badge; `fromCard`: the author wrote it into the card's structured intent («автор · в карточке»), not
+ * read from the text.
+ */
+export function originBadge(ctx: SheetCtx, origin: Origin, fromCard = false): HTMLElement {
+    const key = fromCard ? 'card' : origin;
     return el('span', {
         class: 'dramatis-sheet-origin',
-        data: { origin },
-        text: ctx.t(`sheet.origin.${origin}`),
-        title: ctx.t(`sheet.origin.${origin}.hint`),
+        data: { origin: key },
+        text: ctx.t(`sheet.origin.${key}`),
+        title: ctx.t(`sheet.origin.${key}.hint`),
     });
 }
 

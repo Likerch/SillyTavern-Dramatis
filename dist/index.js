@@ -1,5 +1,788 @@
 //#region package.json
-var version$2 = "1.5.0";
+var version$2 = "1.6.0";
+/** The intent lives at `character.data.extensions[CARD_INTENT_EXTENSION][CARD_INTENT_KEY]`. */
+var CARD_INTENT_EXTENSION = "dramatis";
+var CARD_INTENT_KEY = "intent";
+/**
+* Markers around the human-readable «Замысел» section a workshop writes into creator_notes from the same data: with a
+* structured intent present, Dramatis leaves that section out of its reading (it would count the intent twice).
+*/
+var CARD_INTENT_NOTES_BEGIN = "<!-- dramatis:intent -->";
+var CARD_INTENT_NOTES_END = "<!-- /dramatis:intent -->";
+var CARD_INTENT_VOCABULARY = {
+	/** Schwartz basic values. */
+	values: [
+		"self-direction",
+		"stimulation",
+		"hedonism",
+		"achievement",
+		"power",
+		"security",
+		"conformity",
+		"tradition",
+		"benevolence",
+		"universalism"
+	],
+	/** HEXACO axes, each −2 … +2. */
+	temperament: [
+		"honesty",
+		"emotionality",
+		"extraversion",
+		"agreeableness",
+		"conscientiousness",
+		"openness"
+	],
+	/** Reiss basic desires. */
+	drives: [
+		"power",
+		"independence",
+		"curiosity",
+		"acceptance",
+		"order",
+		"saving",
+		"honor",
+		"idealism",
+		"social",
+		"family",
+		"status",
+		"vengeance",
+		"romance",
+		"eating",
+		"physical",
+		"tranquility"
+	],
+	/** PAD mood octants. */
+	moods: [
+		"exuberant",
+		"dependent",
+		"relaxed",
+		"docile",
+		"hostile",
+		"anxious",
+		"disdainful",
+		"bored"
+	],
+	coping: [
+		"surrender",
+		"avoid",
+		"overcompensate"
+	],
+	/** Bandura's moral disengagement mechanisms. */
+	justifications: [
+		"moral-justification",
+		"euphemism",
+		"comparison",
+		"displacement",
+		"diffusion",
+		"minimizing",
+		"dehumanization",
+		"blame"
+	],
+	appetiteKinds: [
+		"flesh",
+		"plunder",
+		"dominance",
+		"cruelty",
+		"hunger",
+		"food",
+		"drink",
+		"substance",
+		"thrill",
+		"luxury",
+		"adoration",
+		"other"
+	],
+	appetiteSources: [
+		"individual",
+		"species",
+		"culture",
+		"situation",
+		"world"
+	],
+	appetiteTargets: [
+		"thing",
+		"class",
+		"player"
+	],
+	drift: [
+		"daily",
+		"seasonal",
+		"opportunity",
+		"none"
+	],
+	endorsement: [
+		"proud",
+		"torn",
+		"fighting"
+	],
+	vow: [
+		"none",
+		"moderate",
+		"abstinent"
+	],
+	visibility: [
+		"open",
+		"hidden",
+		"secret"
+	],
+	/** Method styles. */
+	styles: [
+		"siren",
+		"buyer",
+		"insider",
+		"spider",
+		"raider",
+		"shadow",
+		"shepherd",
+		"duelist",
+		"honest"
+	],
+	affectionOnset: [
+		"never",
+		"rare",
+		"possible",
+		"common"
+	],
+	tieIntents: [
+		"none",
+		"recruit",
+		"extract",
+		"use",
+		"avenge",
+		"avoid",
+		"protect",
+		"seduce",
+		"court"
+	],
+	gazes: [
+		"person",
+		"prize",
+		"instrument",
+		"property",
+		"prey",
+		"mate"
+	],
+	goalKinds: ["external", "internal"],
+	kinds: ["character", "group"],
+	genders: ["female", "male"],
+	worldTones: [
+		"hostile",
+		"indifferent",
+		"neutral",
+		"welcoming"
+	],
+	ruleSources: [
+		"species",
+		"culture",
+		"situation",
+		"world"
+	],
+	exclusivity: [
+		"exclusive",
+		"shared",
+		"harem"
+	],
+	groupModes: [
+		"solitary",
+		"pack",
+		"tribe"
+	]
+};
+var L = {
+	/** Names, labels, tie targets, aliases. */
+	name: 80,
+	/** One short line: concept, role, tactics, reasons, behaviour, steps… */
+	short: 200,
+	/** A sentence: want, need, wound, signatures, goals, secrets, invariants… */
+	text: 600,
+	characters: 60,
+	aliases: 12,
+	russian: 4,
+	values: 3,
+	drivesHigh: 4,
+	drivesLow: 2,
+	signatures: 6,
+	tactics: 6,
+	keys: 8,
+	redLines: 6,
+	anchors: 6,
+	justifications: 4,
+	triggers: 8,
+	satisfiers: 6,
+	restraints: 4,
+	goals: 6,
+	intentions: 2,
+	dropIf: 4,
+	steps: 8,
+	agendaList: 8,
+	appetites: 6,
+	ties: 40,
+	reasons: 6,
+	changeIf: 4,
+	starts: 24,
+	bounds: 8,
+	invariants: 24,
+	reputation: 30,
+	rules: 30
+};
+var V = CARD_INTENT_VOCABULARY;
+var text$3 = (maxLength, description) => ({
+	type: "string",
+	maxLength,
+	description
+});
+var word = (values, description) => ({
+	type: "string",
+	enum: values,
+	description
+});
+var int$1 = (minimum, maximum, description) => ({
+	type: "integer",
+	minimum,
+	maximum,
+	description
+});
+var flag$1 = (description) => ({
+	type: "boolean",
+	description
+});
+var list$3 = (items, maxItems, description) => ({
+	type: "array",
+	items,
+	maxItems,
+	description
+});
+var texts = (maxItems, maxLength, description) => list$3({
+	type: "string",
+	maxLength
+}, maxItems, description);
+var words$2 = (values, maxItems, description) => list$3({
+	type: "string",
+	enum: values
+}, maxItems, description);
+var object$3 = (description, properties, required = []) => ({
+	type: "object",
+	description,
+	additionalProperties: false,
+	properties,
+	...required.length ? { required } : {}
+});
+var STANCE$1 = int$1(-3, 3, "−3 war, −2 hostile, −1 interfering, 0 neutral, +1 helpful, +2 friendly, +3 allied.");
+var LEVEL$1 = (description) => int$1(-2, 2, description);
+var GREETING = int$1(-1, 999, "Starting scene: 0 = first_mes, N = alternate greeting N, −1 = every start.");
+var CORE$1 = object$3("Who they are (src/domain/model.ts Core).", {
+	concept: text$3(L.short, "One line: who they are at their core, as the author frames them."),
+	values: object$3("Top values by priority and the one they would sacrifice.", {
+		top: words$2(V.values, L.values, "Top values by priority (Schwartz)."),
+		sacrifice: word(V.values, "The value they would give up first; not one of the top.")
+	}, ["top"]),
+	temperament: object$3("HEXACO axes −2…+2; honesty and agreeableness are separate (a polite schemer: low honesty, high agreeableness).", Object.fromEntries(V.temperament.map((axis) => [axis, LEVEL$1(axis)]))),
+	drives: object$3("Reiss drives: what they live for and what leaves them cold.", {
+		high: words$2(V.drives, L.drivesHigh, "The 2–4 drives the author stresses."),
+		low: words$2(V.drives, L.drivesLow, "The 1–2 drives they are shown indifferent to.")
+	}),
+	wound: object$3("The wound.", {
+		ghost: text$3(L.text, "What happened."),
+		lie: text$3(L.text, "The false belief it left."),
+		triggers: texts(L.triggers, L.short, "What touches it."),
+		coping: word(V.coping, "surrender, avoid, or overcompensate (attacks).")
+	}, ["ghost"]),
+	want: text$3(L.text, "The outer goal."),
+	need: text$3(L.text, "What they truly need."),
+	arcLock: flag$1("The author means them never to change."),
+	signatures: texts(L.signatures, L.text, "«if <situation> → <behaviour>» as concrete actions."),
+	tactics: texts(L.tactics, L.short, "How they get their way (flattery, bargaining, pressure, lies by omission…)."),
+	attachment: object$3("Attachment, −2…+2 each.", {
+		anxiety: LEVEL$1("Attachment anxiety."),
+		avoidance: LEVEL$1("Attachment avoidance.")
+	}),
+	proactivity: int$1(0, 10, "How often they act unprompted."),
+	baselineMood: object$3("Where their mood returns to.", {
+		octant: word(V.moods, "PAD mood octant."),
+		label: text$3(L.name, "The author’s own words for it («мрачная настороженность»).")
+	}, ["octant"]),
+	stanceBounds: list$3(object$3("A stance floor (min) or ceiling (max); unconditional devotion is a floor of 3.", {
+		target: text$3(L.name, "PLAYER, a name, or a class («имперцы»)."),
+		min: STANCE$1,
+		max: STANCE$1
+	}, ["target"]), L.bounds, "Stance limits; each gives min, max or both."),
+	redLines: object$3("Red lines.", {
+		never: texts(L.redLines, L.short, "What they never do."),
+		would: texts(L.redLines, L.short, "What they would do without hesitation.")
+	}),
+	keys: texts(L.keys, L.short, "Events able to move them («уважает только дела»)."),
+	moralWeakness: text$3(L.short, "Their moral weakness."),
+	voice: text$3(L.short, "One line of their speech."),
+	justifications: words$2(V.justifications, L.justifications, "Moral disengagement they habitually use."),
+	dark: object$3("Dark traits remove brakes.", {
+		ruthless: flag$1("Ruthless."),
+		schemer: flag$1("A schemer."),
+		sadist: flag$1("A sadist."),
+		entitled: flag$1("Entitled.")
+	}),
+	corruption: int$1(0, 10, "Corruption they start with."),
+	anchors: texts(L.anchors, L.name, "People who keep them human or whom they live for (PLAYER for the player).")
+});
+var AGENDA$1 = object$3("What they are after (src/domain/model.ts Agenda).", {
+	dream: text$3(L.text, "The dream."),
+	goals: list$3(object$3("A goal.", {
+		text: text$3(L.text, "«wants X because Y, but Z»."),
+		kind: word(V.goalKinds, "external (default) or internal."),
+		priority: int$1(1, 3, "1 highest … 3 (default 2).")
+	}, ["text"]), L.goals, "Goals."),
+	intentions: list$3(object$3("A goal in work.", {
+		text: text$3(L.text, "What they mean to do."),
+		nextStep: text$3(L.short, "The next step."),
+		dropIf: texts(L.dropIf, L.short, "What would make them drop it.")
+	}, ["text"]), L.intentions, "At most 2 goals in work."),
+	front: object$3("For factions and major NPCs: an agenda that moves the world by itself.", {
+		impulse: text$3(L.short, "What drives it."),
+		steps: texts(L.steps, L.short, "The escalation ladder, in order."),
+		doom: text$3(L.short, "What happens if nobody intervenes."),
+		segments: int$1(4, 8, "Clock segments (default 6).")
+	}, ["impulse"]),
+	resources: texts(L.agendaList, L.short, "Resources."),
+	leverage: texts(L.agendaList, L.short, "What can be used against them."),
+	secrets: texts(L.agendaList, L.text, "What they hide and from whom («скрывает прошлое от PLAYER»)."),
+	ifIgnored: text$3(L.text, "What they do if nobody pays attention.")
+});
+var APPETITE$1 = object$3("A craving that acts apart from liking (src/domain/model.ts Appetite); one per kind.", {
+	kind: word(V.appetiteKinds, "The kind of craving."),
+	label: text$3(L.name, "Story words for it («брага», «кровь живых»)."),
+	sources: words$2(V.appetiteSources, V.appetiteSources.length, "Where it comes from (default individual)."),
+	target: word(V.appetiteTargets, "thing (default), class (named in targetClass) or player."),
+	targetClass: text$3(L.name, "The class of people it aims at, with target class."),
+	baseline: int$1(0, 5, "How strong the craving is as a trait (default 2)."),
+	triggers: texts(L.triggers, L.short, "What wakes it."),
+	satisfiers: texts(L.satisfiers, L.short, "What satisfies it."),
+	drift: word(V.drift, "How its pressure grows by itself (default opportunity)."),
+	dependence: int$1(0, 3, "Dependence (default 0)."),
+	endorsement: word(V.endorsement, "How they feel about it (default proud)."),
+	vow: word(V.vow, "A vow against it (default none)."),
+	visibility: word(V.visibility, "Who knows of it (default open)."),
+	style: word(V.styles, "How they usually get it."),
+	affectionOnset: word(V.affectionOnset, "Whether getting it can turn into affection."),
+	excuse: text$3(L.short, "The habitual self-justification."),
+	restraints: texts(L.restraints, L.short, "What holds them back."),
+	rule: text$3(L.name, "The name of the world rule (world.rules) it comes from.")
+}, ["kind"]);
+var TIE$1 = object$3("How the character treats someone (src/domain/model.ts Tie); one per target.", {
+	target: text$3(L.name, "PLAYER, a character’s name, or a class («чужаки», «все остальные»)."),
+	stance: STANCE$1,
+	reasons: texts(L.reasons, L.short, "Why, as story facts, the strongest first."),
+	behaviour: text$3(L.short, "How the stance shows in action."),
+	intent: word(V.tieIntents, "What they mean to do with them (default none)."),
+	changeIf: texts(L.changeIf, L.short, "What could change the stance, or what the author says will not."),
+	want: int$1(0, 5, "Appetite aimed at this target."),
+	gaze: word(V.gazes, "How they see the target as an object of appetite."),
+	appetite: word(V.appetiteKinds, "The appetite kind the want comes from.")
+}, ["target", "stance"]);
+var START = object$3("Where they are when a starting scene begins; one per greeting.", {
+	greeting: GREETING,
+	present: flag$1("Present when the scene begins (default true)."),
+	doing: text$3(L.short, "What their hands are busy with."),
+	goal: text$3(L.short, "What they want in that scene.")
+}, ["greeting"]);
+var CHARACTER$1 = object$3("One character or group, keyed by the name as the story writes it.", {
+	kind: word(V.kinds, "character (default) or group."),
+	english: text$3(L.name, "The name in Latin letters."),
+	aliases: texts(L.aliases, L.name, "The first name alone, nicknames, titles, short forms."),
+	russian: texts(L.russian, L.name, "Russian forms of the name for a Russian story."),
+	gender: word(V.genders, "For grammar."),
+	minor: flag$1("Under 18."),
+	role: text$3(L.short, "Their role in the story."),
+	species: text$3(L.name, "Species or folk, when it matters."),
+	core: CORE$1,
+	agenda: AGENDA$1,
+	appetites: list$3(APPETITE$1, L.appetites, "Appetites, one per kind."),
+	ties: list$3(TIE$1, L.ties, "Ties, one per target."),
+	starts: list$3(START, L.starts, "Starting scenes, one per greeting.")
+});
+var RULE$1 = object$3("A group, species, custom or world appetite rule (src/domain/model.ts AppetiteRule).", {
+	name: text$3(L.name, "The rule’s name."),
+	holders: text$3(L.name, "Who has it (default: the name)."),
+	kind: word(V.appetiteKinds, "The kind of craving."),
+	label: text$3(L.name, "Story words for it."),
+	source: word(V.ruleSources, "species (default), culture, situation or world."),
+	target: word(V.appetiteTargets, "class (default): everyone who fits shares it; player: exactly the player’s character; thing."),
+	targetClass: text$3(L.name, "The class it aims at (default: the holders)."),
+	intensity: object$3("Shares of holders by strength (normalised to sum 1).", {
+		zero: {
+			type: "number",
+			minimum: 0,
+			description: "None (sated, taken, busy)."
+		},
+		low: {
+			type: "number",
+			minimum: 0,
+			description: "Low."
+		},
+		mid: {
+			type: "number",
+			minimum: 0,
+			description: "Middle."
+		},
+		high: {
+			type: "number",
+			minimum: 0,
+			description: "High."
+		}
+	}),
+	styles: object$3("Method styles with weights.", Object.fromEntries(V.styles.map((style) => [style, {
+		type: "number",
+		minimum: 0,
+		description: style
+	}]))),
+	choosiness: int$1(0, 5, "The least a target must be worth to be pursued (default 2)."),
+	exclusivity: word(V.exclusivity, "exclusive (default), shared or harem."),
+	affectionOnset: word(V.affectionOnset, "Whether getting it can turn into affection (default possible)."),
+	groupMode: word(V.groupModes, "solitary (default), pack or tribe.")
+}, ["name", "kind"]);
+var WORLD = object$3("The card level.", {
+	tone: word(V.worldTones, "How the world treats the player’s character by default."),
+	invariants: texts(L.invariants, L.text, "What must always hold."),
+	reputation: list$3(object$3("What a group thinks the player’s character is at the start.", {
+		among: text$3(L.name, "A group or a place; * (default) = everyone."),
+		label: text$3(L.short, "What they think the player is."),
+		stance: STANCE$1,
+		greeting: GREETING
+	}, ["label", "stance"]), L.reputation, "Starting reputation."),
+	rules: list$3(RULE$1, L.rules, "Appetite rules.")
+});
+function deepFreeze(value) {
+	if (value && typeof value === "object") {
+		for (const item of Object.values(value)) deepFreeze(item);
+		Object.freeze(value);
+	}
+	return value;
+}
+/** The JSON Schema of card intent v1. Absent fields, empty strings and empty lists mean «the author does not say». */
+var CARD_INTENT_SCHEMA = deepFreeze({
+	$schema: "https://json-schema.org/draft/2020-12/schema",
+	$id: "https://github.com/Likerch/SillyTavern-Dramatis/card-intent-v1.json",
+	title: "Dramatis card intent v1",
+	description: "The author’s intent at character.data.extensions.dramatis.intent. Text in the story’s language; PLAYER is the player’s character.",
+	type: "object",
+	additionalProperties: false,
+	required: ["version"],
+	properties: {
+		version: {
+			type: "integer",
+			const: 1,
+			description: "Always 1."
+		},
+		world: WORLD,
+		characters: {
+			type: "object",
+			description: "Characters and groups keyed by the name as the story writes it (nominative).",
+			maxProperties: L.characters,
+			propertyNames: {
+				type: "string",
+				maxLength: L.name
+			},
+			additionalProperties: CHARACTER$1
+		}
+	}
+});
+function isDict$11(value) {
+	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+function show$1(value) {
+	const raw = typeof value === "string" ? JSON.stringify(value) : String(JSON.stringify(value) ?? value);
+	return raw.length > 60 ? `${raw.slice(0, 57)}…` : raw;
+}
+function child(path, key) {
+	return /^[A-Za-z_$][\w$]*$/.test(key) ? path ? `${path}.${key}` : key : `${path}[${JSON.stringify(key)}]`;
+}
+/** Walks a value along the schema: what is valid comes back (cut where too long), the rest is listed and dropped. */
+function walk(value, schema, path, errors) {
+	if (value === void 0 || value === null) return void 0;
+	const fail = (code, message) => {
+		errors.push({
+			path,
+			code,
+			message
+		});
+	};
+	switch (schema.type) {
+		case "string": {
+			if (typeof value !== "string") return fail("type", `expected text, got ${show$1(value)}`);
+			const trimmed = value.trim();
+			if (!trimmed) return void 0;
+			if (schema.enum && !schema.enum.includes(trimmed)) return fail("enum", `${show$1(trimmed)} is not one of: ${schema.enum.join(", ")}`);
+			if (schema.maxLength !== void 0 && trimmed.length > schema.maxLength) {
+				errors.push({
+					path,
+					code: "length",
+					message: `longer than ${schema.maxLength} characters: cut`
+				});
+				return `${trimmed.slice(0, schema.maxLength - 1).trimEnd()}…`;
+			}
+			return trimmed;
+		}
+		case "integer":
+		case "number": {
+			const whole = schema.type === "integer";
+			if (typeof value !== "number" || !Number.isFinite(value) || whole && !Number.isInteger(value)) return fail("type", `expected ${whole ? "a whole number" : "a number"}, got ${show$1(value)}`);
+			if (schema.const !== void 0 && value !== schema.const) return fail("range", `must be ${schema.const}`);
+			if (schema.minimum !== void 0 && value < schema.minimum) return fail("range", `${value} is below the minimum ${schema.minimum}`);
+			if (schema.maximum !== void 0 && value > schema.maximum) return fail("range", `${value} is above the maximum ${schema.maximum}`);
+			return value;
+		}
+		case "boolean": return typeof value === "boolean" ? value : fail("type", `expected true or false, got ${show$1(value)}`);
+		case "array": {
+			if (!Array.isArray(value)) return fail("type", `expected a list, got ${show$1(value)}`);
+			const out = [];
+			value.forEach((item, index) => {
+				const kept = schema.items ? walk(item, schema.items, `${path}[${index}]`, errors) : item;
+				if (kept !== void 0) out.push(kept);
+			});
+			if (schema.maxItems !== void 0 && out.length > schema.maxItems) {
+				errors.push({
+					path,
+					code: "size",
+					message: `more than ${schema.maxItems} items: the rest dropped`
+				});
+				out.length = schema.maxItems;
+			}
+			return out.length ? out : void 0;
+		}
+		case "object": {
+			if (!isDict$11(value)) return fail("type", `expected an object, got ${show$1(value)}`);
+			const out = {};
+			let count = 0;
+			for (const [key, item] of Object.entries(value)) {
+				const at = child(path, key);
+				const known = schema.properties?.[key];
+				if (known) {
+					const kept = walk(item, known, at, errors);
+					if (kept !== void 0) out[key] = kept;
+					continue;
+				}
+				const extra = schema.additionalProperties;
+				if (!extra || extra === true) {
+					if (extra !== true) errors.push({
+						path: at,
+						code: "unknown",
+						message: "not a field of the format"
+					});
+					continue;
+				}
+				const name = key.trim();
+				if (!name) {
+					errors.push({
+						path: at,
+						code: "missing",
+						message: "an empty name"
+					});
+					continue;
+				}
+				if (schema.propertyNames?.maxLength !== void 0 && name.length > schema.propertyNames.maxLength) {
+					errors.push({
+						path: at,
+						code: "length",
+						message: `a name longer than ${schema.propertyNames.maxLength} characters`
+					});
+					continue;
+				}
+				if (schema.maxProperties !== void 0 && count >= schema.maxProperties) {
+					errors.push({
+						path: at,
+						code: "size",
+						message: `more than ${schema.maxProperties} entries`
+					});
+					continue;
+				}
+				if (name in out) {
+					errors.push({
+						path: at,
+						code: "duplicate",
+						message: "the same name twice"
+					});
+					continue;
+				}
+				const kept = walk(item, extra, child(path, name), errors);
+				if (kept !== void 0) {
+					out[name] = kept;
+					count++;
+				}
+			}
+			for (const key of schema.required ?? []) if (!(key in out)) return fail("missing", `"${key}" is missing: left out`);
+			return Object.keys(out).length ? out : void 0;
+		}
+		default: return value;
+	}
+}
+var fold$1 = (value) => value.toLowerCase().replace(/ё/g, "е").replace(/\s+/g, " ").trim();
+/** Keeps the first entry of each key; later ones are listed as duplicates. */
+function unique$1(items, key, path, errors) {
+	const seen = /* @__PURE__ */ new Set();
+	const out = [];
+	(items ?? []).forEach((item, index) => {
+		const id = key(item);
+		if (seen.has(id)) {
+			errors.push({
+				path: `${path}[${index}]`,
+				code: "duplicate",
+				message: "a second entry for the same one"
+			});
+			return;
+		}
+		seen.add(id);
+		out.push(item);
+	});
+	return out;
+}
+/** Sets or deletes (an empty list or object goes). */
+function put$1(holder, key, value) {
+	if (value === void 0 || Array.isArray(value) && !value.length || isDict$11(value) && !Object.keys(value).length) delete holder[key];
+	else holder[key] = value;
+}
+/** What the schema cannot say: one entry per target, kind, greeting and name; members that must fit together. */
+function refine(intent, errors) {
+	const world = intent.world;
+	if (world) {
+		put$1(world, "reputation", unique$1(world.reputation, (seed) => `${seed.greeting ?? -1}\u0000${fold$1(seed.among ?? "*")}`, "world.reputation", errors));
+		put$1(world, "rules", unique$1(world.rules, (rule) => fold$1(rule.name), "world.rules", errors));
+		if (!Object.keys(world).length) delete intent.world;
+	}
+	const names = /* @__PURE__ */ new Map();
+	for (const [name, character] of Object.entries(intent.characters ?? {})) {
+		const at = child("characters", name);
+		const own = [
+			name,
+			character.english ?? "",
+			...character.aliases ?? [],
+			...character.russian ?? []
+		].map(fold$1).filter(Boolean);
+		const clash = own.find((key) => names.has(key) && names.get(key) !== name);
+		if (clash) {
+			errors.push({
+				path: at,
+				code: "duplicate",
+				message: `the same person as "${names.get(clash)}"`
+			});
+			delete intent.characters[name];
+			continue;
+		}
+		for (const key of own) names.set(key, name);
+		const core = character.core;
+		if (core?.values?.sacrifice && core.values.top.includes(core.values.sacrifice)) {
+			errors.push({
+				path: `${at}.core.values.sacrifice`,
+				code: "conflict",
+				message: "one of the top values"
+			});
+			delete core.values.sacrifice;
+		}
+		if (core?.drives?.high && core.drives.low) {
+			const high = core.drives.high;
+			const low = core.drives.low.filter((drive) => !high.includes(drive));
+			if (low.length !== core.drives.low.length) {
+				errors.push({
+					path: `${at}.core.drives.low`,
+					code: "conflict",
+					message: "a drive both high and low"
+				});
+				put$1(core.drives, "low", low);
+			}
+		}
+		if (core?.stanceBounds) put$1(core, "stanceBounds", unique$1(core.stanceBounds.filter((bound, index) => {
+			const where = `${at}.core.stanceBounds[${index}]`;
+			if (bound.min === void 0 && bound.max === void 0) {
+				errors.push({
+					path: where,
+					code: "conflict",
+					message: "neither min nor max"
+				});
+				return false;
+			}
+			if (bound.min !== void 0 && bound.max !== void 0 && bound.min > bound.max) {
+				errors.push({
+					path: where,
+					code: "conflict",
+					message: "min above max"
+				});
+				return false;
+			}
+			return true;
+		}), (bound) => fold$1(bound.target), `${at}.core.stanceBounds`, errors));
+		for (const [index, appetite] of (character.appetites ?? []).entries()) if (appetite.target === "class" && !appetite.targetClass) {
+			errors.push({
+				path: `${at}.appetites[${index}].targetClass`,
+				code: "missing",
+				message: "target class names no class: aimed at things"
+			});
+			delete appetite.target;
+		}
+		put$1(character, "appetites", unique$1(character.appetites, (item) => item.kind, `${at}.appetites`, errors));
+		put$1(character, "ties", unique$1(character.ties, (tie) => fold$1(tie.target), `${at}.ties`, errors));
+		put$1(character, "starts", unique$1(character.starts, (start) => String(start.greeting), `${at}.starts`, errors));
+	}
+	if (intent.characters && !Object.keys(intent.characters).length) delete intent.characters;
+	return intent;
+}
+/** A tie target, bound or anchor that names the player's character in the intent. */
+function isCardIntentPlayer(target) {
+	const key = target.trim().toLowerCase();
+	return key === "PLAYER".toLowerCase() || key === "{{user}}";
+}
+/**
+* What the motive card needs from the author for Dramatis to skip reading the card's text with the model: the world's
+* tone, at least one character, and for each character the concept, top values, high drives, the want or a goal and
+* the stance toward PLAYER (a group: the concept and the stance toward PLAYER).
+*/
+function cardIntentCoverage(intent) {
+	const missing = [];
+	if (!intent.world?.tone) missing.push("world.tone");
+	const characters = Object.entries(intent.characters ?? {});
+	if (!characters.length) missing.push("characters");
+	for (const [name, character] of characters) {
+		const at = child("characters", name);
+		const core = character.core ?? {};
+		if (!core.concept) missing.push(`${at}.core.concept`);
+		if (!character.ties?.some((tie) => isCardIntentPlayer(tie.target))) missing.push(`${at}.ties[PLAYER]`);
+		if (character.kind === "group") continue;
+		if (!core.values?.top.length) missing.push(`${at}.core.values.top`);
+		if (!core.drives?.high?.length) missing.push(`${at}.core.drives.high`);
+		if (!core.want && !character.agenda?.goals?.length) missing.push(`${at}.core.want|agenda.goals`);
+	}
+	return {
+		complete: missing.length === 0,
+		missing
+	};
+}
+/**
+* Checks a card intent (pure). Every valid part is kept, the rest listed in `errors` (see the file header); `intent`
+* is null only when nothing is usable: not an object, or not version 1.
+*/
+function validateCardIntent(value) {
+	const errors = [];
+	const none = (error) => ({
+		ok: false,
+		errors: [error],
+		intent: null,
+		complete: false,
+		missing: []
+	});
+	if (!isDict$11(value)) return none({
+		path: "",
+		code: "format",
+		message: "the intent must be a JSON object"
+	});
+	if (value.version !== 1) return none({
+		path: "version",
+		code: "version",
+		message: `version 1 is read; got ${show$1(value.version)}`
+	});
+	const intent = refine(walk(value, CARD_INTENT_SCHEMA, "", errors) ?? { version: 1 }, errors);
+	return {
+		ok: errors.length === 0,
+		errors,
+		intent,
+		...cardIntentCoverage(intent)
+	};
+}
 //#endregion
 //#region src/adapters/card/index.ts
 function str$4(value) {
@@ -52,6 +835,8 @@ function createCardReader(host, log) {
 			const name = str$4(card.name) || str$4(data.name);
 			const personaName = str$4(ctx.name1);
 			const fill = (value) => replaceNames(str$4(value).trim(), name, personaName);
+			const own = data.extensions?.[CARD_INTENT_EXTENSION];
+			const intent = own && typeof own === "object" ? own[CARD_INTENT_KEY] : void 0;
 			return {
 				avatar: card.avatar,
 				name,
@@ -69,7 +854,8 @@ function createCardReader(host, log) {
 				persona: {
 					name: personaName,
 					description: replaceNames(str$4(ctx.powerUserSettings?.persona_description).trim(), name, personaName)
-				}
+				},
+				...intent === void 0 || intent === null ? {} : { intent }
 			};
 		},
 		greetingIndex() {
@@ -2204,7 +2990,7 @@ function cardWorldOf(profiles) {
 		reputation: copy(profiles.reputation ?? [])
 	};
 }
-var same$2 = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+var same$3 = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 /**
 * Brings a later reading or edit of the card into a chat that already has its state (a three-way merge against what
 * the chat last took over, `state.cardBase`): the world tone and every rule or reputation entry the chat still holds
@@ -2215,20 +3001,20 @@ var same$2 = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 function syncCardWorld(state, profiles) {
 	const now = cardWorldOf(profiles);
 	const base = state.cardBase;
-	if (base && same$2(base, now)) return false;
+	if (base && same$3(base, now)) return false;
 	const before = base ?? {
 		worldTone: state.worldTone,
 		rules: state.rules.filter((rule) => now.rules.some((other) => other.id === rule.id)),
 		reputation: []
 	};
-	const changed = () => !same$2(base, now);
+	const changed = () => !same$3(base, now);
 	if (state.worldTone === before.worldTone) state.worldTone = now.worldTone;
 	const was = new Map(before.rules.map((rule) => [rule.id, rule]));
 	const fresh = new Map(now.rules.map((rule) => [rule.id, rule]));
 	const rules = [];
 	for (const rule of state.rules) {
 		const old = was.get(rule.id);
-		if (old && same$2(rule, old)) {
+		if (old && same$3(rule, old)) {
 			const current = fresh.get(rule.id);
 			if (current) rules.push(copy(current));
 			continue;
@@ -2241,7 +3027,7 @@ function syncCardWorld(state, profiles) {
 	for (const seed of startingReputation(now.reputation, state.greeting)) {
 		const at = state.reputation.findIndex((entry) => entry.among === seed.among);
 		if (at < 0) state.reputation.push(seed);
-		else if (same$2(state.reputation[at], seededBefore.find((entry) => entry.among === seed.among))) state.reputation[at] = seed;
+		else if (same$3(state.reputation[at], seededBefore.find((entry) => entry.among === seed.among))) state.reputation[at] = seed;
 	}
 	const result = changed();
 	state.cardBase = now;
@@ -4203,6 +4989,8 @@ function createUi(deps) {
 }
 //#endregion
 //#region src/app/api.ts
+/** What this Dramatis understands beyond the v1 members (DRAMATIS_API.features). */
+var FEATURES = Object.freeze(["cardIntent"]);
 function createApiPublisher(deps) {
 	const { settings, bus, log } = deps;
 	const parts = [];
@@ -4268,6 +5056,9 @@ function createApiPublisher(deps) {
 		openSheet: (name) => {
 			call("openSheet", void 0, [name]);
 		},
+		features: FEATURES,
+		cardIntentVersion: 1,
+		validateCardIntent: (value) => validateCardIntent(value),
 		onChange(listener) {
 			listeners.add(listener);
 			return () => {
@@ -12684,7 +13475,8 @@ function normalizeCardProfiles(raw, card) {
 		intent: intent && typeof intent.sourcesHash === "string" ? compact({
 			at: intIn(intent.at, 0, Number.MAX_SAFE_INTEGER, 0),
 			sourcesHash: intent.sourcesHash,
-			model: optionalText(intent.model, LIMITS.name)
+			model: optionalText(intent.model, LIMITS.name),
+			fromCard: intent.fromCard === void 0 ? void 0 : intIn(intent.fromCard, 1, 99, 1)
 		}) : void 0,
 		meta: normalizeMeta(dict.meta)
 	});
@@ -12724,6 +13516,26 @@ function isUserEdited(holder, path) {
 /** Neither the intent reading nor the generator may overwrite it. */
 function isProtected(holder, path) {
 	return isLocked(holder, path) || isUserEdited(holder, path);
+}
+/** The source id of fields the author wrote into the card itself (`extensions.dramatis.intent`). */
+var CARD_INTENT_SOURCE = "card.intent";
+/** The meta of a field taken from the card's structured intent: the author's, no quote needed. */
+function cardIntentMeta() {
+	return {
+		origin: "author",
+		sources: [CARD_INTENT_SOURCE]
+	};
+}
+/** This meta marks a field the author wrote into the card's structured intent. */
+function isCardMeta(meta) {
+	return meta?.origin === "author" && !!meta.sources?.includes("card.intent");
+}
+/**
+* The path (or its nearest ancestor with meta) holds the card's structured intent: the reading of the card's text
+* leaves it as the author wrote it — only a new structured intent, the user's edit or his lock changes it.
+*/
+function isCardAuthored(holder, path) {
+	return isCardMeta(metaAt(holder, path));
 }
 function findIn(list, key) {
 	return list.findIndex((item) => isDict$3(item) && (item.id === key || item.target === key));
@@ -22285,7 +23097,7 @@ var generatorModule = {
 var INTENT_API$1 = "intent";
 //#endregion
 //#region src/domain/intent-reread.ts
-function same$1(a, b) {
+function same$2(a, b) {
 	return JSON.stringify(a) === JSON.stringify(b);
 }
 /** The value a fresh profile holds at a provenance unit ('core.values' → { top: [] }, 'agenda.dream' → none). */
@@ -22320,7 +23132,7 @@ function clearGenerated(start) {
 		if (head === "ties" && key !== "@player") continue;
 		const before = getPath(profile, path);
 		const empty = emptyValueOf(path);
-		if (!isEmptyValue(before) && !same$1(before, empty)) cleared.set(path, before);
+		if (!isEmptyValue(before) && !same$2(before, empty)) cleared.set(path, before);
 		profile = setMeta(setPath(profile, path, empty), path, null);
 	}
 	return {
@@ -22336,10 +23148,10 @@ function clearGenerated(start) {
 */
 function refreshLiveState(live, before, after) {
 	const next = structuredClone(live);
-	const untouched = (now, old) => now === void 0 || same$1(now, old);
+	const untouched = (now, old) => now === void 0 || same$2(now, old);
 	for (const old of before?.ties ?? []) {
 		const now = next.ties[old.target];
-		if (now && same$1(now, old) && !after.ties.some((tie) => tie.target === old.target)) delete next.ties[old.target];
+		if (now && same$2(now, old) && !after.ties.some((tie) => tie.target === old.target)) delete next.ties[old.target];
 	}
 	for (const tie of after.ties) {
 		const old = before?.ties.find((item) => item.target === tie.target);
@@ -22347,16 +23159,16 @@ function refreshLiveState(live, before, after) {
 		if (!now) {
 			next.ties[tie.target] = structuredClone(tie);
 			if (tie.target === "@player") next.knowsPlayer = true;
-		} else if (old && same$1(now, old) && !same$1(old, tie)) next.ties[tie.target] = structuredClone(tie);
+		} else if (old && same$2(now, old) && !same$2(old, tie)) next.ties[tie.target] = structuredClone(tie);
 	}
 	const agenda = next.agenda;
 	const oldAgenda = before?.agenda ?? {};
 	for (const [key, value] of Object.entries(after.agenda)) {
 		const now = agenda[key];
-		if ((isEmptyValue(now) || untouched(now, oldAgenda[key])) && !same$1(now, value)) agenda[key] = structuredClone(value);
+		if ((isEmptyValue(now) || untouched(now, oldAgenda[key])) && !same$2(now, value)) agenda[key] = structuredClone(value);
 	}
-	for (const key of Object.keys(agenda)) if (!(key in after.agenda) && same$1(agenda[key], oldAgenda[key])) delete agenda[key];
-	if (before && same$1(next.mood, before.core.baselineMood)) next.mood = structuredClone(after.core.baselineMood);
+	for (const key of Object.keys(agenda)) if (!(key in after.agenda) && same$2(agenda[key], oldAgenda[key])) delete agenda[key];
+	if (before && same$2(next.mood, before.core.baselineMood)) next.mood = structuredClone(after.core.baselineMood);
 	const kept = new Set(after.appetites.map((appetite) => appetite.id));
 	for (const id of Object.keys(next.appetites)) if (!kept.has(id)) delete next.appetites[id];
 	for (const appetite of after.appetites) {
@@ -23073,6 +23885,7 @@ function canonicalPaths(path, resolveTarget, entries) {
 	}
 	return out;
 }
+/** A class of people that means children (no sexual rule may aim at it). */
 var MINOR_CLASS_RE = /(child|children|kid|minor|underage|teen|ребен|ребён|дет|малолет|несовершеннолет|подрост)/iu;
 var PLAYER_WORDS = [
 	"player",
@@ -23091,6 +23904,7 @@ var PLAYER_WORDS = [
 	PLAYER_ID
 ];
 var PLAYER_QUOTE_RE = /(\{\{user\}\}|\bhero\b|\bthe player\b|\byou\b|\byour\b|геро[йяюе]\p{L}*|(?:^|[^\p{L}])(?:ты|тебя|тебе|тобой|вас|вам)(?=[^\p{L}]|$))/iu;
+/** The method style of an appetite whose source names none. */
 var DEFAULT_STYLE = {
 	flesh: "siren",
 	plunder: "raider",
@@ -23105,12 +23919,13 @@ var DEFAULT_STYLE = {
 	adoration: "siren",
 	other: "buyer"
 };
+/** Whether getting it may turn into affection, when the source does not say (else 'possible'). */
 var DEFAULT_ONSET = {
 	plunder: "rare",
 	cruelty: "rare",
 	hunger: "rare"
 };
-function same(a, b) {
+function same$1(a, b) {
 	return JSON.stringify(a) === JSON.stringify(b);
 }
 function diffWhere(where) {
@@ -23133,9 +23948,10 @@ function metaOf(evidence) {
 * when the user's value stays against a different reading.
 */
 function writeField(session, holder, where, path, value, evidence) {
+	if (isCardAuthored(holder, path)) return holder;
 	const before = getPath(holder, path);
 	if (isProtected(holder, path)) {
-		if (!same(before, value)) session.diff.push({
+		if (!same$1(before, value)) session.diff.push({
 			character: where.id,
 			name: where.name,
 			path,
@@ -23145,7 +23961,7 @@ function writeField(session, holder, where, path, value, evidence) {
 		});
 		return holder;
 	}
-	if (metaAt(holder, path) && !isEmptyValue(before) && !same(before, value)) session.diff.push({
+	if (metaAt(holder, path) && !isEmptyValue(before) && !same$1(before, value)) session.diff.push({
 		character: where.id,
 		name: where.name,
 		path,
@@ -23206,6 +24022,7 @@ function isPlayerRef(target, persona) {
 function devotionQuoted(evidence, persona) {
 	return evidence.some((item) => item.verified && (PLAYER_QUOTE_RE.test(item.quote) || !!persona && quoteKey(item.quote).includes(quoteKey(persona))) && warmSignal([item.quote]));
 }
+/** The author's reasons of a tie: permanent, sharing the stance between them. */
 function authorReasons(texts, stance) {
 	if (!texts.length || stance === 0) return texts.map((value, i) => ({
 		id: `author-${i + 1}`,
@@ -23383,8 +24200,9 @@ function applyParsedIntent(current, parsed, options) {
 			...evidence.length ? { evidence: metaOf(evidence).evidence } : {}
 		};
 		const path = `rules.${id}`;
+		if (isCardAuthored(card, path)) continue;
 		if (isProtected(card, path)) {
-			if (existing && !same(existing, value)) session.diff.push({
+			if (existing && !same$1(existing, value)) session.diff.push({
 				character: "",
 				name: rule.name,
 				path,
@@ -23394,7 +24212,7 @@ function applyParsedIntent(current, parsed, options) {
 			});
 			continue;
 		}
-		if (existing && !same(existing, value)) session.diff.push({
+		if (existing && !same$1(existing, value)) session.diff.push({
 			character: "",
 			name: rule.name,
 			path,
@@ -23430,7 +24248,7 @@ function applyParsedIntent(current, parsed, options) {
 		profiles.set(plan.id, after);
 		for (const [path, old] of cleared.get(plan.id) ?? []) {
 			const now = getPath(after, path);
-			if (!same(old, now)) session.diff.push({
+			if (!same$1(old, now)) session.diff.push({
 				character: after.id,
 				name: after.name,
 				path,
@@ -23450,7 +24268,8 @@ function applyParsedIntent(current, parsed, options) {
 		intent: {
 			at: options.now,
 			sourcesHash: options.sourcesHash,
-			...options.model ? { model: options.model } : {}
+			...options.model ? { model: options.model } : {},
+			...options.fromCard ? { fromCard: options.fromCard } : {}
 		}
 	};
 	for (const [name, count] of session.inferred) session.warnings.push({
@@ -23466,7 +24285,7 @@ function applyParsedIntent(current, parsed, options) {
 }
 /** One field of a character: backed by the evidence of any of its paths (inferred without), then written. */
 function field(session, profile, plan, path, value, backing = [path]) {
-	if (isEmptyValue(value)) return profile;
+	if (isEmptyValue(value) || isCardAuthored(profile, path)) return profile;
 	const gated = gate(session, backing.flatMap((key) => plan.evidence.get(key) ?? []), plan.parsed.name);
 	return writeField(session, profile, {
 		id: profile.id,
@@ -23546,7 +24365,7 @@ function applyCharacter(session, start, plan, resolveTarget, ruleIds) {
 		name: profile.name
 	};
 	const identity = (path, value) => {
-		if (isEmptyValue(value) || same(getPath(profile, path), value)) return;
+		if (isEmptyValue(value) || same$1(getPath(profile, path), value) || isCardAuthored(profile, path)) return;
 		const evidence = plan.evidence.get(path) ?? [];
 		if (evidence.length || isProtected(profile, path)) {
 			profile = writeField(session, profile, where, path, value, evidence);
@@ -23573,7 +24392,7 @@ function applyCharacter(session, start, plan, resolveTarget, ruleIds) {
 		...parsed.russian,
 		...first ? [first] : []
 	], LIMITS.aliases, LIMITS.name).filter((alias) => textKey(alias) !== textKey(profile.name)));
-	if (parsed.minor && !profile.minor) profile = {
+	if (parsed.minor && !profile.minor && !isCardAuthored(profile, "minor")) profile = {
 		...profile,
 		minor: true
 	};
@@ -23667,6 +24486,7 @@ function applyCharacter(session, start, plan, resolveTarget, ruleIds) {
 			rule: appetite.rule ? ruleIds.get(textKey(appetite.rule)) ?? slugId(appetite.rule) : existing?.rule
 		});
 		const path = `appetites.${id}`;
+		if (isCardAuthored(profile, path)) continue;
 		const evidence = gate(session, plan.evidence.get(`appetites.${appetite.kind}`) ?? [], parsed.name);
 		profile = writeField(session, profile, where, path, value, evidence);
 	}
@@ -23676,7 +24496,7 @@ function applyCharacter(session, start, plan, resolveTarget, ruleIds) {
 	const ties = [];
 	for (const tie of parsed.ties) {
 		const id = resolveTarget(tie.target);
-		if (id === profile.id) continue;
+		if (id === profile.id || isCardAuthored(profile, `ties.${id}`)) continue;
 		const evidence = plan.evidence.get(`ties.${id}`) ?? [];
 		let stance = tie.stance;
 		if ((id === "@player" || isStrangerClass(id)) && stance > -1 && softened(tie, evidence, id === "@player", persona)) {
@@ -23706,7 +24526,7 @@ function applyCharacter(session, start, plan, resolveTarget, ruleIds) {
 		};
 		ties.push(entry);
 	}
-	if (strangerTie && strangerTie.tie.stance < 0 && (!playerTie || !playerTie.evidence.length && playerTie.tie.stance <= 1)) {
+	if (strangerTie && strangerTie.tie.stance < 0 && !isCardAuthored(profile, `ties.@player`) && (!playerTie || !playerTie.evidence.length && playerTie.tie.stance <= 1)) {
 		const stance = Math.min(strangerTie.tie.stance, playerTie?.tie.stance ?? 0);
 		const derived = {
 			...strangerTie.tie,
@@ -23736,6 +24556,7 @@ function applyCharacter(session, start, plan, resolveTarget, ruleIds) {
 	}
 	for (const entry of ties) {
 		const path = `ties.${entry.id}`;
+		if (isCardAuthored(profile, path)) continue;
 		const gated = gate(session, entry.evidence, parsed.name);
 		const base = profile.ties.find((item) => item.target === entry.id) ?? emptyTie(entry.id);
 		const kept = base.reasons.filter((reason) => !reason.id.startsWith("author-"));
@@ -23760,7 +24581,8 @@ function applyCharacter(session, start, plan, resolveTarget, ruleIds) {
 	}));
 	const boundEvidence = [...plan.evidence.get("core.stanceBounds") ?? []];
 	const playerBound = bounds.some((bound) => bound.target === PLAYER_ID);
-	if (fidelity === "strict" && playerTie && !playerBound && playerTie.evidence.length > 0) {
+	const playerAuthored = isCardAuthored(profile, `ties.${PLAYER_ID}`);
+	if (fidelity === "strict" && playerTie && !playerBound && !playerAuthored && playerTie.evidence.length > 0) {
 		if (playerTie.tie.stance <= -1) {
 			bounds.push({
 				target: PLAYER_ID,
@@ -23775,11 +24597,11 @@ function applyCharacter(session, start, plan, resolveTarget, ruleIds) {
 			boundEvidence.push(...playerTie.evidence);
 		}
 	}
-	if (bounds.length) {
+	if (bounds.length && !isCardAuthored(profile, "core.stanceBounds")) {
 		const gated = gate(session, boundEvidence, parsed.name);
 		profile = writeField(session, profile, where, "core.stanceBounds", bounds.slice(0, LIMITS.bounds), gated);
 	}
-	if (parsed.starts.length) {
+	if (parsed.starts.length && !isCardAuthored(profile, "starts")) {
 		const evidence = parsed.starts.flatMap((start) => [...plan.evidence.get(`starts.${start.greeting}`) ?? []]).concat(plan.evidence.get("starts") ?? []);
 		const merged = [...profile.starts.filter((old) => !parsed.starts.some((start) => start.greeting === old.greeting)), ...parsed.starts.map((start) => ({
 			greeting: start.greeting,
@@ -23843,6 +24665,497 @@ function stripWant(tie) {
 	return rest;
 }
 //#endregion
+//#region src/domain/card-intent.ts
+/** The card's structured intent, validated (see the file header). */
+function readCardIntent(raw) {
+	if (raw === void 0 || raw === null) return {
+		present: false,
+		intent: null,
+		errors: [],
+		complete: false,
+		missing: []
+	};
+	const check = validateCardIntent(raw);
+	const usable = check.intent && (check.intent.world || check.intent.characters) ? check.intent : null;
+	return {
+		present: true,
+		intent: usable,
+		errors: check.errors,
+		complete: !!usable && check.complete,
+		missing: check.missing
+	};
+}
+/** JSON with sorted keys: the same object always gives the same text. */
+function canonical$1(value) {
+	if (Array.isArray(value)) return `[${value.map(canonical$1).join(",")}]`;
+	if (value && typeof value === "object") {
+		const dict = value;
+		return `{${Object.keys(dict).sort().map((key) => `${JSON.stringify(key)}:${canonical$1(dict[key])}`).join(",")}}`;
+	}
+	return JSON.stringify(value) ?? "null";
+}
+/** Hash of the intent object as the card stores it (key order aside), for the card's fingerprint. */
+function cardIntentHash(raw) {
+	return hashText(canonical$1(raw));
+}
+var escape = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+var MARKED_RE = new RegExp(`${escape(CARD_INTENT_NOTES_BEGIN)}[\\s\\S]*?(?:${escape(CARD_INTENT_NOTES_END)}|$)`, "g");
+var HEADING_RE = /^\s{0,3}(#{1,6})\s+(.*?)\s*#*\s*$/;
+/** «Замысел», «Замысел автора», «Intent», «Author's intent», with anything after them («Замысел (Dramatis)»). */
+var INTENT_TITLE_RE = /^(?:замысел(?:\s+автора)?|(?:author['’]?s?\s+)?intent)(?![\p{L}\p{N}])/iu;
+/**
+* Creator's notes without the «Замысел» section: everything between CARD_INTENT_NOTES_BEGIN and _END (to the end
+* when the end marker is missing); without markers, a Markdown heading «Замысел» / «Intent» up to the next heading of
+* the same or a higher level.
+*/
+function stripIntentNotes(text) {
+	const value = text ?? "";
+	const tidy = (out) => out.replace(/\n{3,}/g, "\n\n").trim();
+	const marked = value.replace(MARKED_RE, "\n");
+	if (marked !== value) return tidy(marked);
+	const kept = [];
+	let skipping = 0;
+	for (const line of value.split("\n")) {
+		const heading = HEADING_RE.exec(line);
+		if (heading) {
+			const level = heading[1].length;
+			if (skipping && level <= skipping) skipping = 0;
+			if (!skipping && INTENT_TITLE_RE.test(heading[2].replace(/[*_`]/g, "").trim())) {
+				skipping = level;
+				continue;
+			}
+		}
+		if (!skipping) kept.push(line);
+	}
+	return kept.length === value.split("\n").length ? value.trim() : tidy(kept.join("\n"));
+}
+/** The card as the reading of its text sees it while a structured intent is there: notes without «Замысел». */
+function withoutIntentNotes(card) {
+	return {
+		...card,
+		creatorNotes: stripIntentNotes(card.creatorNotes)
+	};
+}
+/** Some field of the card's profiles came from a structured intent. */
+function hasCardMarks(profiles) {
+	const marked = (meta) => Object.values(meta).some((item) => isCardMeta(item));
+	return marked(profiles.meta) || profiles.characters.some((profile) => marked(profile.meta));
+}
+function same(a, b) {
+	return JSON.stringify(a) === JSON.stringify(b);
+}
+/** Writes one unit as the author's (card meta), unless the user owns it or it is locked (then a difference). */
+function put(session, holder, where, path, value) {
+	const before = getPath(holder, path);
+	if (isProtected(holder, path)) {
+		if (!same(before, value)) session.diff.push({
+			character: where.id,
+			name: where.name,
+			path,
+			before,
+			after: value,
+			status: isLocked(holder, path) ? "kept-locked" : "kept-user",
+			fromCard: true
+		});
+		return holder;
+	}
+	if (metaAt(holder, path) && !isEmptyValue(before) && !same(before, value)) session.diff.push({
+		character: where.id,
+		name: where.name,
+		path,
+		before,
+		after: value,
+		status: "updated",
+		fromCard: true
+	});
+	return setMeta(setPath(holder, path, value), path, cardIntentMeta());
+}
+/**
+* Units the card's intent wrote before and does not give now go back to empty (who they are keeps its value), so the
+* reading of the text may fill them again; locked ones stay.
+*/
+function clearStale(session, holder, where, given, reset) {
+	let out = holder;
+	for (const [path, meta] of Object.entries(holder.meta)) {
+		if (!isCardMeta(meta) || given.has(path) || isLocked(holder, path)) continue;
+		const before = getPath(out, path);
+		out = setMeta(reset(out, path), path, null);
+		const after = getPath(out, path);
+		if (!same(before, after)) session.diff.push({
+			character: where.id,
+			name: where.name,
+			path,
+			before,
+			after,
+			status: "updated"
+		});
+	}
+	return out;
+}
+function resetProfile(profile, path) {
+	const [head = "", key = ""] = path.split(".");
+	if (head === "core") return setPath(profile, path, structuredClone(emptyCore()[key]));
+	if (head === "agenda") return setPath(profile, path, structuredClone(emptyAgenda()[key]));
+	if (head === "ties" || head === "appetites") return setPath(profile, path, void 0);
+	if (head === "starts") return {
+		...profile,
+		starts: []
+	};
+	return profile;
+}
+function resetCard(card, path) {
+	if (path === "invariants") return {
+		...card,
+		invariants: []
+	};
+	if (path === "reputation") return {
+		...card,
+		reputation: []
+	};
+	if (path.startsWith("rules.")) return setPath(card, path, void 0);
+	return card;
+}
+/** Applies the card's structured intent (null: only clears what an earlier one wrote). See the file header. */
+function applyCardIntent(current, intent, options) {
+	const session = {
+		diff: [],
+		warnings: []
+	};
+	let card = normalizeCardProfiles(current, current.card);
+	const persona = options.personaName?.trim() ?? "";
+	const cardWhere = {
+		id: "",
+		name: ""
+	};
+	const plans = [];
+	for (const [key, character] of Object.entries(intent?.characters ?? {})) {
+		const name = cleanText(key, LIMITS.name);
+		if (!name) continue;
+		const names = [
+			name,
+			character.english ?? "",
+			...character.aliases ?? [],
+			...character.russian ?? []
+		];
+		let id = null;
+		for (const candidate of names.filter(Boolean)) {
+			id = matchName(candidate, card.characters, { strict: true });
+			if (id) break;
+		}
+		if (!id) {
+			const main = !!options.cardName && normalizeName(options.cardName) === normalizeName(name);
+			const profile = emptyProfile(name, {
+				taken: card.characters.map((item) => item.id),
+				kind: character.kind ?? "character",
+				lod: main ? "portrait" : "draft",
+				english: character.english,
+				aliases: [...character.aliases ?? [], ...character.russian ?? []]
+			});
+			card = {
+				...card,
+				characters: [...card.characters, profile]
+			};
+			id = profile.id;
+		}
+		if (plans.some((plan) => plan.id === id)) continue;
+		plans.push({
+			id,
+			name,
+			character
+		});
+	}
+	const resolveTarget = (target) => {
+		if (isPlayerRef(target, persona)) return PLAYER_ID;
+		const bare = target.replace(/\s*\([^)]*\)\s*$/, "").trim() || target;
+		return matchName(bare, card.characters, { strict: true }) ?? cleanText(bare, LIMITS.name);
+	};
+	const world = intent?.world ?? {};
+	const rulePlans = [];
+	for (const rule of world.rules ?? []) {
+		const holders = cleanText(rule.holders ?? "", LIMITS.name) || rule.name;
+		const existing = card.rules.find((other) => textKey(other.label ?? "") === textKey(rule.name) || textKey(other.holders) === textKey(holders) && other.kind === rule.kind);
+		const taken = [...card.rules.map((other) => other.id), ...rulePlans.map((plan) => plan.id)];
+		const id = existing?.id ?? slugId(rule.name, taken);
+		const target = rule.target === "player" ? { mode: "player" } : rule.target === "thing" ? { mode: "thing" } : {
+			mode: "class",
+			class: cleanText(rule.targetClass ?? "", LIMITS.name) || holders
+		};
+		const blocked = SEXUAL_KINDS.includes(rule.kind) && target.mode === "class" && MINOR_CLASS_RE.test(target.class);
+		rulePlans.push({
+			rule,
+			id,
+			holders,
+			target,
+			blocked
+		});
+	}
+	const ruleIds = new Map(rulePlans.map((plan) => [textKey(plan.rule.name), plan.id]));
+	const givenCard = /* @__PURE__ */ new Set();
+	if (world.tone) givenCard.add("worldTone");
+	if (world.invariants) givenCard.add("invariants");
+	if (world.reputation) givenCard.add("reputation");
+	for (const plan of rulePlans) if (!plan.blocked) givenCard.add(`rules.${plan.id}`);
+	const units = /* @__PURE__ */ new Map();
+	const appetiteIds = /* @__PURE__ */ new Map();
+	for (const plan of plans) {
+		const profile = card.characters.find((item) => item.id === plan.id);
+		const c = plan.character;
+		const given = /* @__PURE__ */ new Set();
+		for (const key of [
+			"kind",
+			"english",
+			"gender",
+			"role",
+			"species",
+			"minor"
+		]) if (c[key] !== void 0) given.add(key);
+		if (c.aliases || c.russian) given.add("aliases");
+		for (const key of Object.keys(c.core ?? {})) given.add(`core.${key}`);
+		if (c.ties?.some((tie) => tie.changeIf?.length)) given.add("core.keys");
+		for (const key of Object.keys(c.agenda ?? {})) given.add(`agenda.${key}`);
+		const ids = /* @__PURE__ */ new Map();
+		const taken = profile.appetites.map((item) => item.id);
+		for (const appetite of c.appetites ?? []) {
+			const id = profile.appetites.find((item) => item.kind === appetite.kind)?.id ?? slugId(appetite.kind, taken);
+			taken.push(id);
+			ids.set(appetite.kind, id);
+			given.add(`appetites.${id}`);
+		}
+		appetiteIds.set(plan.id, ids);
+		for (const tie of c.ties ?? []) {
+			const target = resolveTarget(tie.target);
+			if (target !== plan.id) given.add(`ties.${target}`);
+		}
+		if (c.starts) given.add("starts");
+		units.set(plan.id, given);
+	}
+	const cleared = /* @__PURE__ */ new Map();
+	if (options.replaceGenerated) {
+		const ids = new Set(plans.map((plan) => plan.id));
+		card = {
+			...card,
+			characters: card.characters.map((profile) => {
+				if (!ids.has(profile.id)) return profile;
+				const out = clearGenerated(profile);
+				if (out.cleared.size) cleared.set(profile.id, out.cleared);
+				return out.profile;
+			})
+		};
+	}
+	card = clearStale(session, card, cardWhere, givenCard, resetCard);
+	card = {
+		...card,
+		characters: card.characters.map((profile) => clearStale(session, profile, {
+			id: profile.id,
+			name: profile.name
+		}, units.get(profile.id) ?? /* @__PURE__ */ new Set(), resetProfile))
+	};
+	if (world.tone) card = put(session, card, cardWhere, "worldTone", world.tone);
+	if (world.invariants) card = put(session, card, cardWhere, "invariants", cleanList(world.invariants, 24, LIMITS.text));
+	if (world.reputation) {
+		const seeds = world.reputation.map((seed) => ({
+			among: cleanText(seed.among ?? "", LIMITS.name) || "*",
+			label: cleanText(seed.label, LIMITS.short),
+			stance: seed.stance,
+			greeting: seed.greeting ?? -1
+		}));
+		card = put(session, card, cardWhere, "reputation", seeds);
+	}
+	for (const plan of rulePlans) {
+		const rule = plan.rule;
+		if (plan.blocked) {
+			session.warnings.push({
+				code: "minor-target",
+				name: rule.name
+			});
+			continue;
+		}
+		const styles = {};
+		for (const [style, weight] of Object.entries(rule.styles ?? {})) if (weight > 0) styles[style] = Math.round(Math.min(weight, 100) * 1e3) / 1e3;
+		const value = {
+			id: plan.id,
+			holders: plan.holders,
+			kind: rule.kind,
+			label: cleanText(rule.label ?? "", LIMITS.name) || rule.name,
+			source: rule.source ?? "species",
+			target: plan.target,
+			intensity: normalizeIntensity(rule.intensity),
+			styles,
+			choosiness: rule.choosiness ?? 2,
+			exclusivity: rule.exclusivity ?? "exclusive",
+			affectionOnset: rule.affectionOnset ?? "possible",
+			groupMode: rule.groupMode ?? "solitary"
+		};
+		card = put(session, card, {
+			id: "",
+			name: rule.name
+		}, `rules.${plan.id}`, value);
+	}
+	const profiles = new Map(card.characters.map((profile) => [profile.id, profile]));
+	for (const plan of plans) {
+		const after = writeCharacter(session, profiles.get(plan.id), plan, resolveTarget, ruleIds, appetiteIds);
+		profiles.set(plan.id, after);
+		for (const [path, old] of cleared.get(plan.id) ?? []) {
+			const now = getPath(after, path);
+			if (!same(old, now)) session.diff.push({
+				character: after.id,
+				name: after.name,
+				path,
+				before: old,
+				after: now,
+				status: "updated"
+			});
+		}
+	}
+	card = {
+		...card,
+		characters: card.characters.map((profile) => profiles.get(profile.id) ?? profile)
+	};
+	card = enforceMinors(session, card);
+	card = {
+		...card,
+		intent: {
+			at: options.now,
+			sourcesHash: options.sourcesHash,
+			...intent ? { fromCard: 1 } : {}
+		}
+	};
+	return {
+		profiles: card,
+		diff: session.diff,
+		warnings: session.warnings,
+		characters: plans.map((plan) => plan.id)
+	};
+}
+function writeCharacter(session, start, plan, resolveTarget, ruleIds, appetiteIds) {
+	const c = plan.character;
+	let profile = start;
+	const where = {
+		id: profile.id,
+		name: profile.name
+	};
+	const set = (path, value) => {
+		profile = put(session, profile, where, path, value);
+	};
+	if (c.kind) set("kind", c.kind);
+	if (c.english) set("english", c.english);
+	if (c.aliases || c.russian) {
+		const key = textKey(plan.name) !== textKey(profile.name) ? [plan.name] : [];
+		set("aliases", cleanList([
+			...c.aliases ?? [],
+			...c.russian ?? [],
+			...key
+		], LIMITS.aliases, LIMITS.name).filter((alias) => textKey(alias) !== textKey(profile.name)));
+	}
+	if (c.gender) set("gender", c.gender);
+	if (c.role) set("role", c.role);
+	if (c.species) set("species", c.species);
+	if (c.minor !== void 0) set("minor", c.minor ? true : void 0);
+	const raw = c.core ?? {};
+	const tieKeys = (c.ties ?? []).flatMap((tie) => tie.changeIf ?? []);
+	const core = normalizeCore({
+		...raw,
+		stanceBounds: (raw.stanceBounds ?? []).map((bound) => ({
+			...bound,
+			target: resolveTarget(bound.target)
+		})),
+		anchors: (raw.anchors ?? []).map((anchor) => resolveTarget(anchor)),
+		keys: [...raw.keys ?? [], ...tieKeys]
+	});
+	for (const key of Object.keys(raw)) set(`core.${key}`, core[key]);
+	if (!raw.keys && tieKeys.length) set("core.keys", core.keys);
+	const agendaRaw = c.agenda ?? {};
+	const front = agendaRaw.front;
+	const agenda = normalizeAgenda({
+		dream: agendaRaw.dream,
+		goals: (agendaRaw.goals ?? []).map((goal, i) => ({
+			id: `g${i + 1}`,
+			text: goal.text,
+			kind: goal.kind ?? "external",
+			priority: goal.priority ?? 2
+		})),
+		intentions: (agendaRaw.intentions ?? []).map((item, i) => ({
+			id: `i${i + 1}`,
+			text: item.text,
+			nextStep: item.nextStep ?? "",
+			dropIf: item.dropIf ?? []
+		})),
+		front: front ? {
+			impulse: front.impulse,
+			steps: front.steps ?? [],
+			doom: front.doom ?? "",
+			clock: {
+				segments: front.segments ?? 6,
+				filled: 0
+			}
+		} : void 0,
+		resources: agendaRaw.resources,
+		leverage: agendaRaw.leverage,
+		secrets: agendaRaw.secrets,
+		ifIgnored: agendaRaw.ifIgnored
+	});
+	for (const key of Object.keys(agendaRaw)) set(`agenda.${key}`, agenda[key]);
+	const ids = appetiteIds.get(plan.id) ?? /* @__PURE__ */ new Map();
+	for (const appetite of c.appetites ?? []) {
+		const id = ids.get(appetite.kind) ?? slugId(appetite.kind, profile.appetites.map((item) => item.id));
+		const value = normalizeAppetite({
+			...profile.appetites.find((item) => item.id === id) ?? {},
+			id,
+			kind: appetite.kind,
+			label: appetite.label,
+			sources: appetite.sources ?? ["individual"],
+			target: appetite.target === "player" ? { mode: "player" } : appetite.target === "class" && appetite.targetClass ? {
+				mode: "class",
+				class: appetite.targetClass
+			} : { mode: "thing" },
+			baseline: appetite.baseline ?? 2,
+			triggers: appetite.triggers ?? [],
+			satisfiers: (appetite.satisfiers ?? []).map((what) => ({
+				what,
+				amount: 2
+			})),
+			drift: appetite.drift ?? "opportunity",
+			dependence: appetite.dependence ?? 0,
+			endorsement: appetite.endorsement ?? "proud",
+			vow: appetite.vow ?? "none",
+			visibility: appetite.visibility ?? "open",
+			style: appetite.style ?? DEFAULT_STYLE[appetite.kind],
+			affectionOnset: appetite.affectionOnset ?? DEFAULT_ONSET[appetite.kind] ?? "possible",
+			excuse: appetite.excuse,
+			restraints: appetite.restraints,
+			rule: appetite.rule ? ruleIds.get(textKey(appetite.rule)) ?? slugId(appetite.rule) : void 0
+		}, profile.appetites.filter((item) => item.id !== id).map((item) => item.id));
+		set(`appetites.${id}`, value);
+	}
+	for (const tie of c.ties ?? []) {
+		const id = resolveTarget(tie.target);
+		if (id === profile.id) continue;
+		const base = profile.ties.find((item) => item.target === id) ?? emptyTie(id);
+		const { behaviour: _behaviour, want: _want, gaze: _gaze, claim: _claim, appetite: _appetite, ...rest } = base;
+		const kept = base.reasons.filter((reason) => !reason.id.startsWith("author-") && !reason.id.startsWith("gen-"));
+		const want = tie.want ?? 0;
+		const appetiteId = tie.appetite ? ids.get(tie.appetite) ?? profile.appetites.find((item) => item.kind === tie.appetite)?.id : void 0;
+		const value = {
+			...rest,
+			stance: tie.stance,
+			reasons: [...authorReasons(tie.reasons ?? [], tie.stance), ...kept].slice(0, LIMITS.reasons),
+			intent: tie.intent ?? "none",
+			...tie.behaviour ? { behaviour: tie.behaviour } : {},
+			...want > 0 ? { want } : {},
+			...want > 0 && tie.gaze ? { gaze: tie.gaze } : {},
+			...want > 0 && appetiteId ? { appetite: appetiteId } : {}
+		};
+		set(`ties.${id}`, value);
+	}
+	if (c.starts) set("starts", [...c.starts].sort((a, b) => a.greeting - b.greeting).map((item) => ({
+		greeting: item.greeting,
+		present: item.present !== false,
+		...item.doing ? { doing: item.doing } : {},
+		...item.goal ? { goal: item.goal } : {}
+	})));
+	return profile;
+}
+//#endregion
 //#region src/features/intent/strings.ts
 var INTENT_STRINGS = {
 	en: {
@@ -23853,6 +25166,8 @@ var INTENT_STRINGS = {
 		"intent.progress": "Reading the author’s intent: part {n} of {total}…",
 		"intent.done": "Author’s intent read: {summary}.",
 		"intent.done.nobody": "Author’s intent read: the sources name nobody.",
+		"intent.done.card": "Author’s intent taken from the card: {summary}.",
+		"intent.done.withCard": "What the author wrote into the card itself ({summary}) is taken as is; the rest was read from the text.",
 		"intent.done.warnings": "Notes: {count} — see the intent sheet.",
 		"intent.done.open": "Open",
 		"intent.failed": "The author’s intent was not read: {error}",
@@ -23920,6 +25235,8 @@ var INTENT_STRINGS = {
 		"intent.warning.minor-target": "{who}an appetite toward a minor was removed",
 		"intent.warning.partFailed": "part {n} of {total} was not read: {error}",
 		"intent.warning.skipped": "{n} lorebook entries did not fit into the reading",
+		"intent.warning.cardIntent": "the card’s structured intent: {n} problems — those parts were left out (details in the browser console)",
+		"intent.warning.textFailed": "the card’s text was not read: {error}; what the author wrote into the card was taken",
 		"intent.slash.read": "Reads the author’s intent of the current card again (your own edits stay).",
 		"intent.settings.title": "Author’s intent",
 		"intent.settings.autoRead": "Read the intent automatically",
@@ -23939,6 +25256,8 @@ var INTENT_STRINGS = {
 		"intent.progress": "Читаю замысел: часть {n} из {total}…",
 		"intent.done": "Замысел прочитан: {summary}.",
 		"intent.done.nobody": "Замысел прочитан: в источниках никого не нашлось.",
+		"intent.done.card": "Замысел взят из карточки: {summary}.",
+		"intent.done.withCard": "Записанное автором в самой карточке ({summary}) взято как есть, остальное дочитано по тексту.",
 		"intent.done.warnings": "Замечаний: {count} — подробно в листе замысла.",
 		"intent.done.open": "Открыть",
 		"intent.failed": "Замысел не прочитан: {error}",
@@ -24006,6 +25325,8 @@ var INTENT_STRINGS = {
 		"intent.warning.minor-target": "{who}влечение к несовершеннолетнему убрано",
 		"intent.warning.partFailed": "часть {n} из {total} не прочитана: {error}",
 		"intent.warning.skipped": "не вошло в чтение записей лорбука: {n}",
+		"intent.warning.cardIntent": "структурный замысел карточки: ошибок — {n}, эти части не взяты (подробно — в консоли браузера)",
+		"intent.warning.textFailed": "текст карточки не прочитан: {error}; взято то, что автор записал в карточке",
 		"intent.slash.read": "Заново читает замысел автора текущей карточки (твои правки останутся).",
 		"intent.settings.title": "Замысел",
 		"intent.settings.autoRead": "Читать замысел автоматически",
@@ -24086,9 +25407,18 @@ var QUIET_ERRORS = /* @__PURE__ */ new Set([
 function quietError(error, auto) {
 	return error === "workshop" || auto && QUIET_ERRORS.has(error ?? "");
 }
-/** Fingerprint of a card's sources for re-read checks: card fields, greetings, persona and lorebook (no archives). */
-function sourcesFingerprint(card, book) {
-	return intentFingerprint(intentSources(card, { cardBook: book }));
+/**
+* Fingerprint of a card's sources for re-read checks: card fields, greetings, persona and lorebook (no archives); with
+* a structured intent, the intent object too, and the creator's notes without their «Замысел» section. A card without
+* one fingerprints exactly as before 1.6.
+*/
+function sourcesFingerprint(card, book, authored = readCardIntent(card.intent)) {
+	const sources = intentSources(authored.intent ? withoutIntentNotes(card) : card, { cardBook: book });
+	if (!authored.present) return intentFingerprint(sources);
+	return intentFingerprint([...sources, {
+		id: CARD_INTENT_SOURCE,
+		hash: cardIntentHash(card.intent)
+	}]);
 }
 function failure(error) {
 	return {
@@ -24240,7 +25570,8 @@ function createIntentReader(deps) {
 		const { card, book, greeting } = gathered;
 		const cardKey = app.host.cardKey() ?? card.avatar;
 		const current = await profilesOf(cardKey);
-		const hash = sourcesFingerprint(card, book);
+		const authored = readCardIntent(card.intent);
+		const hash = sourcesFingerprint(card, book, authored);
 		if (!force && current?.intent?.sourcesHash === hash) return {
 			ok: true,
 			skipped: true,
@@ -24249,20 +25580,22 @@ function createIntentReader(deps) {
 			diff: [],
 			message: t("intent.upToDate")
 		};
+		if (authored.errors.length) log.warn("the card’s structured intent has parts that could not be used", authored.errors);
+		const reading = authored.intent ? withoutIntentNotes(card) : card;
 		const asked = /* @__PURE__ */ new Set();
 		const lookup = async (names) => {
 			const fresh = names.filter((name) => !asked.has(name.toLowerCase()));
 			for (const name of fresh) asked.add(name.toLowerCase());
 			return archivesFor(fresh);
 		};
-		let archives = await lookup(archiveNames(card, book, current));
-		let sources = intentSources(card, {
+		let archives = authored.complete ? [] : await lookup(archiveNames(card, book, current));
+		let sources = intentSources(reading, {
 			archives,
 			cardBook: book,
 			greeting
 		});
 		let chunks = chunkIntentSources(sources);
-		if (!chunks.parts.length) return failure(t("intent.error.empty"));
+		if (!chunks.parts.length && !authored.intent) return failure(t("intent.error.empty"));
 		const context = intentContext(sources);
 		const schema = intentSchema();
 		const fidelity = app.settings.get().fidelity;
@@ -24271,6 +25604,7 @@ function createIntentReader(deps) {
 		const notes = [];
 		let known = emptyKnown();
 		let partial = false;
+		if (authored.errors.length) notes.push(t("intent.warning.cardIntent", { n: authored.errors.length }));
 		/**
 		* Step 1 of the card's own part: the dossier (plain text). A failure costs only the step — the part is read in
 		* one — unless it is a «not now» (another tab leads, the daily cap): then the reading stops here.
@@ -24301,7 +25635,7 @@ function createIntentReader(deps) {
 			}
 			return { text: "" };
 		};
-		for (let index = 0; index < chunks.parts.length; index++) {
+		for (let index = 0; !authored.complete && index < chunks.parts.length; index++) {
 			const part = chunks.parts[index];
 			const total = chunks.parts.length;
 			progress(index, total);
@@ -24344,10 +25678,17 @@ function createIntentReader(deps) {
 			}
 			if (!data) {
 				const error = (response.ok || response.error === "parse") && !response.text?.trim() ? t("intent.error.emptyAnswer") : llmErrorText(app.i18n, response.ok ? "parse" : response.error);
-				if (index === 0) return {
-					...failure(error),
-					...quietError(response.error, auto) ? { quiet: true } : {}
-				};
+				if (index === 0) {
+					if (authored.intent && !quietError(response.error, auto)) {
+						notes.push(t("intent.warning.textFailed", { error }));
+						partial = true;
+						break;
+					}
+					return {
+						...failure(error),
+						...quietError(response.error, auto) ? { quiet: true } : {}
+					};
+				}
 				notes.push(t("intent.warning.partFailed", {
 					n: index + 1,
 					total,
@@ -24362,7 +25703,7 @@ function createIntentReader(deps) {
 				const added = (await lookup(unique([...known.characters, ...known.groups], MAX_ARCHIVE_NAMES))).filter((sheet) => !archives.some((other) => sheetKey(other) === sheetKey(sheet)));
 				if (added.length) {
 					archives = [...archives, ...added];
-					sources = intentSources(card, {
+					sources = intentSources(reading, {
 						archives,
 						cardBook: book,
 						greeting
@@ -24379,13 +25720,34 @@ function createIntentReader(deps) {
 			sources,
 			personaName: card.persona.name,
 			cardName: card.name,
-			replaceGenerated: force
+			replaceGenerated: force,
+			...authored.intent ? { fromCard: 1 } : {}
 		};
-		const out = {};
+		const out = { authoredIds: [] };
 		if (!await saveProfiles(cardKey, (profiles) => {
 			out.before = structuredClone(profiles);
-			out.applied = applyIntent(profiles, results, options);
-			return out.applied.profiles;
+			let next = profiles;
+			const diff = [];
+			const found = [];
+			if (authored.intent || hasCardMarks(profiles)) {
+				const own = applyCardIntent(next, authored.intent, options);
+				next = own.profiles;
+				diff.push(...own.diff);
+				found.push(...own.warnings);
+				out.authoredIds = own.characters;
+			}
+			if (results.length) {
+				const read = applyIntent(next, results, options);
+				next = read.profiles;
+				diff.push(...read.diff);
+				found.push(...read.warnings);
+			}
+			out.applied = {
+				profiles: next,
+				diff,
+				warnings: found
+			};
+			return next;
 		}) || !out.applied || !out.before) return failure(t("intent.error.save"));
 		await refreshChat(cardKey, out.before, out.applied.profiles);
 		const merged = mergeIntentResults(results.map((result) => parseIntentResult(result, {
@@ -24398,10 +25760,31 @@ function createIntentReader(deps) {
 			groups: merged.characters.filter((item) => item.kind === "group").length,
 			rules: merged.rules.length
 		};
+		const own = {
+			characters: 0,
+			groups: 0,
+			rules: authored.intent?.world?.rules?.length ?? 0
+		};
+		if (out.authoredIds.length) {
+			const final = out.applied.profiles.characters;
+			const read = new Set(merged.characters.map((item) => matchName(item.name, final, { strict: true }) ?? (item.english ? matchName(item.english, final, { strict: true }) : null)));
+			for (const id of out.authoredIds) {
+				const group = final.find((profile) => profile.id === id)?.kind === "group";
+				if (group) own.groups++;
+				else own.characters++;
+				if (read.has(id)) continue;
+				if (group) counts.groups++;
+				else counts.characters++;
+			}
+			const rules = new Set(merged.rules.map((rule) => textKey(rule.name)));
+			counts.rules += (authored.intent?.world?.rules ?? []).filter((rule) => !rules.has(textKey(rule.name))).length;
+		}
 		const warnings = unique([...notes, ...out.applied.warnings.map((warning) => warningText(app.i18n, warning))], Number.MAX_SAFE_INTEGER);
 		const summary = summaryOf(counts);
 		await record(cardKey, summary, out.before, out.applied.profiles);
 		let text = summary ? t("intent.done", { summary }) : t("intent.done.nobody");
+		if (authored.intent && !results.length) text = summary ? t("intent.done.card", { summary }) : text;
+		else if (authored.intent) text = `${text} ${t("intent.done.withCard", { summary: summaryOf(own) || "—" })}`;
 		if (warnings.length) {
 			const shown = warnings.slice(0, NOTICE_NOTES).join("; ");
 			const list = warnings.length > NOTICE_NOTES ? `${shown}; …` : shown;
@@ -24502,9 +25885,11 @@ function createIntentReader(deps) {
 			const gathered = await cardAndBook();
 			const cardKey = app.host.cardKey();
 			if (!gathered || !cardKey) return null;
+			const authored = readCardIntent(gathered.card.intent);
 			return {
 				card: cardKey,
-				hash: sourcesFingerprint(gathered.card, gathered.book)
+				hash: sourcesFingerprint(gathered.card, gathered.book, authored),
+				model: !authored.complete
 			};
 		},
 		async undo(change) {
@@ -24564,6 +25949,7 @@ var intentModule = {
 				running: reader.running()
 			};
 			if (card?.intent?.at) out.at = card.intent.at;
+			if (card?.intent?.fromCard) out.fromCard = true;
 			return out;
 		}
 		/** The reading result as DRAMATIS_API reports it: what the user's notice says, the error in words. */
@@ -24674,7 +26060,9 @@ var intentModule = {
 			if (stopped || !profiles || app.host.cardKey() !== cardKey) return;
 			if (!profiles.intent) {
 				if (hasUserMessages() || autoRead.has(cardKey)) return;
-				if (!app.llm.available("dramatis.intent", false) || !leads()) return;
+				const needsModel = (await reader.fingerprint())?.model !== false;
+				if (stopped || app.host.cardKey() !== cardKey) return;
+				if (needsModel && !app.llm.available("dramatis.intent", false) || !leads()) return;
 				autoRead.add(cardKey);
 				await read({ auto: true });
 				return;
@@ -25289,7 +26677,7 @@ var metricsModule = {
 };
 //#endregion
 //#region src/features/sheet/sheet.css?inline
-var sheet_default = "/*\n * The intent sheet («Состав / Лист замысла»), added by the `sheet` module through app.ui.style and removed with it.\n * Colours come from the ST theme (SmartTheme variables via the --dramatis-* tokens of src/ui/style.css; hostile and\n * friendly from ST's --warning and --active). Phones (< 768px): one column, sections as an accordion.\n */\n\n.dramatis-sheet {\n    --dramatis-hostile: var(--warning, rgb(225, 80, 80));\n    --dramatis-friendly: var(--active, rgb(88, 182, 0));\n    display: flex;\n    flex-direction: column;\n    gap: var(--dramatis-gap);\n    min-width: 0;\n}\n\n.dramatis-sheet h3,\n.dramatis-sheet h4 {\n    margin: 0;\n}\n\n.dramatis-sheet-title {\n    flex: 1 1 auto;\n    min-width: 0;\n    overflow-wrap: anywhere;\n}\n\n.dramatis-sheet-heading {\n    margin-top: var(--dramatis-gap-sm);\n    color: var(--dramatis-muted);\n    font-size: 0.95em;\n    font-weight: 600;\n    text-transform: none;\n}\n\n.dramatis-sheet-empty {\n    display: flex;\n    flex-direction: column;\n    align-items: center;\n    gap: var(--dramatis-gap-sm);\n    padding: var(--dramatis-gap) var(--dramatis-gap-sm);\n    text-align: center;\n}\n\n.dramatis-sheet-big {\n    min-height: var(--dramatis-tap);\n    padding: 8px 20px;\n    font-size: 1.1em;\n}\n\n/* ------------------------------------------------------------------ header and list */\n\n.dramatis-sheet-header,\n.dramatis-sheet-page-head {\n    display: flex;\n    flex-direction: column;\n    gap: var(--dramatis-gap-sm);\n}\n\n.dramatis-sheet-header-top {\n    display: flex;\n    align-items: center;\n    gap: var(--dramatis-gap-sm);\n    min-width: 0;\n}\n\n.dramatis-sheet-back {\n    align-self: flex-start;\n}\n\n.dramatis-sheet-intent {\n    display: flex;\n    flex-direction: column;\n    gap: var(--dramatis-gap-sm);\n    padding: var(--dramatis-gap-sm) var(--dramatis-gap);\n    border: 1px solid var(--dramatis-border);\n    border-left: 3px solid var(--dramatis-accent);\n    border-radius: var(--dramatis-radius-sm);\n    background: var(--dramatis-raised);\n}\n\n.dramatis-sheet-intent > .dramatis-btn {\n    align-self: flex-end;\n}\n\n.dramatis-sheet-warnings,\n.dramatis-sheet-diff,\n.dramatis-sheet-quotes,\n.dramatis-sheet-reasons,\n.dramatis-sheet-list,\n.dramatis-sheet-log {\n    margin: 0;\n    padding: 0;\n    list-style: none;\n}\n\n.dramatis-sheet-warnings li {\n    padding-left: 1em;\n    text-indent: -1em;\n}\n\n.dramatis-sheet-warnings li::before {\n    content: '• ';\n}\n\n.dramatis-sheet-diff {\n    display: flex;\n    flex-direction: column;\n    gap: var(--dramatis-gap-sm);\n}\n\n.dramatis-sheet-diff-item {\n    display: flex;\n    flex-direction: column;\n    gap: 2px;\n    padding: 6px 8px;\n    border: 1px solid var(--dramatis-border);\n    border-radius: var(--dramatis-radius-sm);\n}\n\n.dramatis-sheet-diff-head {\n    display: flex;\n    flex-wrap: wrap;\n    align-items: baseline;\n    gap: var(--dramatis-gap-sm);\n}\n\n.dramatis-sheet-diff-values {\n    display: grid;\n    grid-template-columns: auto minmax(0, 1fr);\n    gap: 2px var(--dramatis-gap-sm);\n    overflow-wrap: anywhere;\n}\n\n.dramatis-sheet-take {\n    align-self: flex-start;\n}\n\n.dramatis-sheet-links,\n.dramatis-sheet-filter {\n    display: flex;\n    flex-wrap: wrap;\n    gap: 4px;\n}\n\n.dramatis-sheet-filter .dramatis-btn[aria-pressed='true'] {\n    background: color-mix(in srgb, var(--dramatis-accent) 16%, transparent);\n}\n\n.dramatis-sheet-list {\n    display: flex;\n    flex-direction: column;\n    gap: 4px;\n}\n\n.dramatis-sheet-row {\n    display: flex;\n    flex-direction: column;\n    gap: 2px;\n    padding: 6px 8px;\n    border: 1px solid var(--dramatis-border);\n    border-radius: var(--dramatis-radius-sm);\n}\n\n.dramatis-sheet-row-present {\n    border-left: 3px solid var(--dramatis-accent);\n}\n\n.dramatis-sheet-row-main {\n    display: flex;\n    flex-wrap: wrap;\n    align-items: center;\n    gap: var(--dramatis-gap-sm);\n}\n\n.dramatis-sheet-row-open {\n    padding: 2px 4px;\n    font-weight: 600;\n    text-align: left;\n    white-space: normal;\n}\n\n.dramatis-sheet-row-facts {\n    display: flex;\n    flex-wrap: wrap;\n    gap: 4px var(--dramatis-gap);\n}\n\n.dramatis-sheet-fact {\n    display: inline-flex;\n    flex-wrap: wrap;\n    align-items: baseline;\n    gap: 4px;\n}\n\n.dramatis-sheet-tags {\n    display: inline-flex;\n    flex-wrap: wrap;\n    align-items: center;\n    gap: 4px;\n}\n\n.dramatis-sheet-tag {\n    display: inline-block;\n    padding: 0 6px;\n    border: 1px solid var(--dramatis-border);\n    border-radius: 999px;\n    color: var(--dramatis-muted);\n    font-size: 0.82em;\n    line-height: 1.6;\n    white-space: nowrap;\n}\n\n.dramatis-sheet-tag-on {\n    border-color: var(--dramatis-accent);\n    color: var(--dramatis-text);\n}\n\n.dramatis-sheet-tag[data-band='focus'] {\n    border-color: var(--dramatis-accent);\n    color: var(--dramatis-accent);\n}\n\n.dramatis-sheet-lod {\n    width: auto;\n    max-width: 12em;\n    margin: 0;\n    padding: 0 4px;\n    font-size: 0.85em;\n}\n\n.dramatis-stance {\n    font-weight: 600;\n}\n\n.dramatis-stance[data-stance='-3'],\n.dramatis-stance[data-stance='-2'] {\n    color: var(--dramatis-hostile);\n}\n\n.dramatis-stance[data-stance='-1'] {\n    color: color-mix(in srgb, var(--dramatis-hostile) 60%, var(--dramatis-text));\n}\n\n.dramatis-stance[data-stance='0'] {\n    color: var(--dramatis-muted);\n}\n\n.dramatis-stance[data-stance='1'] {\n    color: color-mix(in srgb, var(--dramatis-friendly) 60%, var(--dramatis-text));\n}\n\n.dramatis-stance[data-stance='2'],\n.dramatis-stance[data-stance='3'] {\n    color: var(--dramatis-friendly);\n}\n\n.dramatis-sheet-pressure {\n    font-style: italic;\n}\n\n.dramatis-sheet-add {\n    display: flex;\n    flex-wrap: wrap;\n    align-items: center;\n    gap: var(--dramatis-gap-sm);\n}\n\n.dramatis-sheet-add > .dramatis-input,\n.dramatis-sheet-add > .dramatis-select {\n    flex: 1 1 10em;\n    width: auto;\n    margin: 0;\n}\n\n/* ------------------------------------------------------------------ sections: tabs and accordion */\n\n.dramatis-sheet-tabs {\n    display: flex;\n    flex-wrap: wrap;\n    gap: 2px;\n    border-bottom: 1px solid var(--dramatis-border);\n}\n\n.dramatis-sheet-tab {\n    border-bottom: 2px solid transparent;\n    border-radius: var(--dramatis-radius-sm) var(--dramatis-radius-sm) 0 0;\n}\n\n.dramatis-sheet-tab[aria-selected='true'] {\n    border-bottom-color: var(--dramatis-accent);\n    color: var(--dramatis-accent);\n}\n\n.dramatis-sheet-panel {\n    display: flex;\n    flex-direction: column;\n    gap: var(--dramatis-gap-sm);\n    padding-top: var(--dramatis-gap-sm);\n}\n\n.dramatis-sheet-accordion {\n    display: flex;\n    flex-direction: column;\n    gap: 4px;\n}\n\n.dramatis-sheet-acc {\n    border: 1px solid var(--dramatis-border);\n    border-radius: var(--dramatis-radius-sm);\n}\n\n.dramatis-sheet-acc-head {\n    justify-content: flex-start;\n    width: 100%;\n    min-height: var(--dramatis-tap);\n    font-weight: 600;\n}\n\n.dramatis-sheet-acc > .dramatis-sheet-panel {\n    padding: 0 8px 8px;\n}\n\n/* ------------------------------------------------------------------ units, fields, items */\n\n.dramatis-sheet-unit {\n    display: flex;\n    flex-direction: column;\n    gap: 4px;\n    min-width: 0;\n    padding: 6px 0;\n    border-bottom: 1px solid color-mix(in srgb, var(--dramatis-border) 60%, transparent);\n}\n\n.dramatis-sheet-card {\n    padding: 8px;\n    border: 1px solid var(--dramatis-border);\n    border-radius: var(--dramatis-radius-sm);\n    background: var(--dramatis-raised);\n}\n\n.dramatis-sheet-unit-head {\n    display: flex;\n    flex-wrap: wrap;\n    align-items: center;\n    gap: 4px;\n    min-width: 0;\n}\n\n.dramatis-sheet-unit-title {\n    flex: 1 1 auto;\n    min-width: 0;\n    font-weight: 600;\n    overflow-wrap: anywhere;\n}\n\n.dramatis-sheet-unit-actions {\n    display: inline-flex;\n    gap: 2px;\n}\n\n.dramatis-sheet-unit-body {\n    display: flex;\n    flex-direction: column;\n    gap: 4px;\n    min-width: 0;\n}\n\n.dramatis-sheet-origin {\n    padding: 0 6px;\n    border-radius: 999px;\n    font-size: 0.78em;\n    line-height: 1.6;\n    white-space: nowrap;\n    border: 1px solid var(--dramatis-border);\n    color: var(--dramatis-muted);\n}\n\n.dramatis-sheet-origin[data-origin='author'] {\n    border-color: var(--dramatis-accent);\n    color: var(--dramatis-accent);\n}\n\n.dramatis-sheet-origin[data-origin='inferred'] {\n    border-style: dotted;\n    border-color: var(--dramatis-accent);\n    color: var(--dramatis-accent);\n}\n\n.dramatis-sheet-origin[data-origin='user'] {\n    border-color: var(--dramatis-friendly);\n    color: var(--dramatis-friendly);\n}\n\n.dramatis-sheet-origin[data-origin='story'] {\n    border-style: dashed;\n}\n\n.dramatis-sheet-lock,\n.dramatis-sheet-quotes-toggle {\n    min-width: 28px;\n    padding: 2px 6px;\n    color: var(--dramatis-muted);\n}\n\n.dramatis-sheet-locked {\n    color: var(--dramatis-accent);\n}\n\n.dramatis-sheet-quotes {\n    display: flex;\n    flex-direction: column;\n    gap: 2px;\n    padding: 4px 8px;\n    border-left: 2px solid var(--dramatis-accent);\n    font-style: italic;\n    overflow-wrap: anywhere;\n}\n\n.dramatis-sheet-field {\n    display: grid;\n    grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.4fr);\n    align-items: center;\n    gap: 2px var(--dramatis-gap-sm);\n    min-width: 0;\n}\n\n.dramatis-sheet-label {\n    min-width: 0;\n    color: var(--dramatis-muted);\n    font-size: 0.92em;\n    overflow-wrap: anywhere;\n}\n\n.dramatis-sheet-control {\n    min-width: 0;\n}\n\n.dramatis-sheet-control > .dramatis-select,\n.dramatis-sheet-unit-body > .dramatis-select {\n    width: 100%;\n    margin: 0;\n}\n\n.dramatis-sheet-field > .dramatis-field-hint {\n    grid-column: 1 / -1;\n}\n\n/* Lists, sub-lists and groups of small fields need the full width: label on top. */\n.dramatis-sheet-field:has(> .dramatis-sheet-control > .dramatis-sheet-sublist),\n.dramatis-sheet-field:has(> .dramatis-sheet-control > .dramatis-list),\n.dramatis-sheet-field:has(> .dramatis-sheet-control > .dramatis-chips),\n.dramatis-sheet-field:has(> .dramatis-sheet-control > .dramatis-sheet-inline),\n.dramatis-sheet-field:has(> .dramatis-sheet-control > .dramatis-sheet-shares),\n.dramatis-sheet-field:has(> .dramatis-sheet-control > .dramatis-sheet-styles) {\n    grid-template-columns: minmax(0, 1fr);\n}\n\n.dramatis-sheet-check {\n    margin: 2px 0;\n}\n\n.dramatis-sheet-inline {\n    display: flex;\n    flex-wrap: wrap;\n    align-items: center;\n    gap: 4px var(--dramatis-gap-sm);\n    min-width: 0;\n}\n\n.dramatis-sheet-inline > .dramatis-select {\n    width: auto;\n    margin: 0;\n}\n\n.dramatis-sheet-inline > .dramatis-input:not(.dramatis-number) {\n    flex: 1 1 8em;\n    width: auto;\n}\n\n.dramatis-sheet-item,\n.dramatis-sheet-subitem {\n    display: flex;\n    flex-direction: column;\n    gap: 4px;\n    padding: 6px;\n    border: 1px dashed var(--dramatis-border);\n    border-radius: var(--dramatis-radius-sm);\n}\n\n.dramatis-sheet-item-title {\n    font-weight: 600;\n}\n\n/* The Russian of an English field value (the field keeps the stored text): under the field, or under a list row. */\n.dramatis-translation {\n    flex: 1 1 100%;\n    min-width: 0;\n    margin: 0 0 2px;\n    color: var(--dramatis-muted);\n    font-size: 0.85em;\n    font-style: italic;\n    line-height: 1.3;\n    overflow-wrap: anywhere;\n}\n\n.dramatis-sheet-item-remove {\n    align-self: flex-start;\n}\n\n.dramatis-sheet-sublist {\n    display: flex;\n    flex-direction: column;\n    gap: 4px;\n    min-width: 0;\n}\n\n.dramatis-sheet-now {\n    display: flex;\n    flex-direction: column;\n    gap: 4px;\n    padding-left: 8px;\n    border-left: 2px solid var(--dramatis-accent);\n}\n\n.dramatis-sheet-reason {\n    display: flex;\n    flex-wrap: wrap;\n    align-items: baseline;\n    gap: 2px var(--dramatis-gap-sm);\n}\n\n.dramatis-sheet-reason-delta {\n    min-width: 2.5em;\n    font-variant-numeric: tabular-nums;\n    font-weight: 600;\n}\n\n.dramatis-sheet-reason-text {\n    flex: 1 1 10em;\n    min-width: 0;\n    overflow-wrap: anywhere;\n}\n\n.dramatis-sheet-shares,\n.dramatis-sheet-styles {\n    display: flex;\n    flex-wrap: wrap;\n    gap: 4px var(--dramatis-gap);\n}\n\n.dramatis-sheet-shares {\n    flex-direction: column;\n}\n\n.dramatis-sheet-share {\n    display: inline-flex;\n    align-items: center;\n    gap: 4px;\n    margin: 0;\n}\n\n.dramatis-sheet-share > .dramatis-number {\n    width: 5em;\n}\n\n.dramatis-sheet-sum-error {\n    font-weight: 600;\n}\n\n.dramatis-sheet-log {\n    display: flex;\n    flex-direction: column;\n    gap: 4px;\n}\n\n.dramatis-sheet-log-line {\n    display: flex;\n    gap: var(--dramatis-gap-sm);\n    overflow-wrap: anywhere;\n}\n\n.dramatis-sheet-log-turn {\n    flex: 0 0 auto;\n    color: var(--dramatis-muted);\n    font-size: 0.85em;\n    font-variant-numeric: tabular-nums;\n}\n\n/* ------------------------------------------------------------------ secrets */\n\n.dramatis-spoiler {\n    position: relative;\n    min-height: 2.4em;\n    border-radius: var(--dramatis-radius-sm);\n}\n\n.dramatis-spoiler:not(.dramatis-spoiler-open) > .dramatis-spoiler-content {\n    max-height: 6em;\n    overflow: hidden;\n    filter: blur(6px);\n    opacity: 0.6;\n    pointer-events: none;\n    user-select: none;\n}\n\n.dramatis-spoiler-reveal {\n    position: absolute;\n    inset: 0;\n    margin: auto;\n    width: fit-content;\n    height: fit-content;\n    background: var(--dramatis-surface);\n    border: 1px dashed var(--dramatis-accent);\n}\n\n.dramatis-sheet-row-facts .dramatis-spoiler {\n    display: inline-block;\n    min-height: 0;\n}\n\n.dramatis-sheet-row-facts .dramatis-spoiler:not(.dramatis-spoiler-open) > .dramatis-spoiler-content {\n    filter: blur(4px);\n}\n\n.dramatis-sheet-row-facts .dramatis-spoiler-reveal {\n    position: static;\n    padding: 0 6px;\n    font-size: 0.85em;\n}\n\n.dramatis-sheet-row-facts .dramatis-spoiler:not(.dramatis-spoiler-open) > .dramatis-spoiler-content {\n    display: none;\n}\n\n/* ------------------------------------------------------------------ keyboard */\n\n.dramatis-sheet .dramatis-btn:focus-visible,\n.dramatis-sheet select:focus-visible {\n    outline: 2px solid var(--dramatis-accent);\n    outline-offset: 1px;\n}\n\n/* ------------------------------------------------------------------ phones */\n\n@media (max-width: 767px) {\n    .dramatis-sheet-field {\n        grid-template-columns: minmax(0, 1fr);\n    }\n\n    .dramatis-sheet-row-open,\n    .dramatis-sheet-filter .dramatis-btn,\n    .dramatis-sheet-links .dramatis-btn,\n    .dramatis-sheet-lock,\n    .dramatis-sheet-quotes-toggle {\n        min-height: var(--dramatis-tap);\n    }\n\n    .dramatis-sheet-diff-values {\n        grid-template-columns: minmax(0, 1fr);\n    }\n}\n";
+var sheet_default = "/*\n * The intent sheet («Состав / Лист замысла»), added by the `sheet` module through app.ui.style and removed with it.\n * Colours come from the ST theme (SmartTheme variables via the --dramatis-* tokens of src/ui/style.css; hostile and\n * friendly from ST's --warning and --active). Phones (< 768px): one column, sections as an accordion.\n */\n\n.dramatis-sheet {\n    --dramatis-hostile: var(--warning, rgb(225, 80, 80));\n    --dramatis-friendly: var(--active, rgb(88, 182, 0));\n    display: flex;\n    flex-direction: column;\n    gap: var(--dramatis-gap);\n    min-width: 0;\n}\n\n.dramatis-sheet h3,\n.dramatis-sheet h4 {\n    margin: 0;\n}\n\n.dramatis-sheet-title {\n    flex: 1 1 auto;\n    min-width: 0;\n    overflow-wrap: anywhere;\n}\n\n.dramatis-sheet-heading {\n    margin-top: var(--dramatis-gap-sm);\n    color: var(--dramatis-muted);\n    font-size: 0.95em;\n    font-weight: 600;\n    text-transform: none;\n}\n\n.dramatis-sheet-empty {\n    display: flex;\n    flex-direction: column;\n    align-items: center;\n    gap: var(--dramatis-gap-sm);\n    padding: var(--dramatis-gap) var(--dramatis-gap-sm);\n    text-align: center;\n}\n\n.dramatis-sheet-big {\n    min-height: var(--dramatis-tap);\n    padding: 8px 20px;\n    font-size: 1.1em;\n}\n\n/* ------------------------------------------------------------------ header and list */\n\n.dramatis-sheet-header,\n.dramatis-sheet-page-head {\n    display: flex;\n    flex-direction: column;\n    gap: var(--dramatis-gap-sm);\n}\n\n.dramatis-sheet-header-top {\n    display: flex;\n    align-items: center;\n    gap: var(--dramatis-gap-sm);\n    min-width: 0;\n}\n\n.dramatis-sheet-back {\n    align-self: flex-start;\n}\n\n.dramatis-sheet-intent {\n    display: flex;\n    flex-direction: column;\n    gap: var(--dramatis-gap-sm);\n    padding: var(--dramatis-gap-sm) var(--dramatis-gap);\n    border: 1px solid var(--dramatis-border);\n    border-left: 3px solid var(--dramatis-accent);\n    border-radius: var(--dramatis-radius-sm);\n    background: var(--dramatis-raised);\n}\n\n.dramatis-sheet-intent > .dramatis-btn {\n    align-self: flex-end;\n}\n\n.dramatis-sheet-warnings,\n.dramatis-sheet-diff,\n.dramatis-sheet-quotes,\n.dramatis-sheet-reasons,\n.dramatis-sheet-list,\n.dramatis-sheet-log {\n    margin: 0;\n    padding: 0;\n    list-style: none;\n}\n\n.dramatis-sheet-warnings li {\n    padding-left: 1em;\n    text-indent: -1em;\n}\n\n.dramatis-sheet-warnings li::before {\n    content: '• ';\n}\n\n.dramatis-sheet-diff {\n    display: flex;\n    flex-direction: column;\n    gap: var(--dramatis-gap-sm);\n}\n\n.dramatis-sheet-diff-item {\n    display: flex;\n    flex-direction: column;\n    gap: 2px;\n    padding: 6px 8px;\n    border: 1px solid var(--dramatis-border);\n    border-radius: var(--dramatis-radius-sm);\n}\n\n.dramatis-sheet-diff-head {\n    display: flex;\n    flex-wrap: wrap;\n    align-items: baseline;\n    gap: var(--dramatis-gap-sm);\n}\n\n.dramatis-sheet-diff-values {\n    display: grid;\n    grid-template-columns: auto minmax(0, 1fr);\n    gap: 2px var(--dramatis-gap-sm);\n    overflow-wrap: anywhere;\n}\n\n.dramatis-sheet-take {\n    align-self: flex-start;\n}\n\n.dramatis-sheet-links,\n.dramatis-sheet-filter {\n    display: flex;\n    flex-wrap: wrap;\n    gap: 4px;\n}\n\n.dramatis-sheet-filter .dramatis-btn[aria-pressed='true'] {\n    background: color-mix(in srgb, var(--dramatis-accent) 16%, transparent);\n}\n\n.dramatis-sheet-list {\n    display: flex;\n    flex-direction: column;\n    gap: 4px;\n}\n\n.dramatis-sheet-row {\n    display: flex;\n    flex-direction: column;\n    gap: 2px;\n    padding: 6px 8px;\n    border: 1px solid var(--dramatis-border);\n    border-radius: var(--dramatis-radius-sm);\n}\n\n.dramatis-sheet-row-present {\n    border-left: 3px solid var(--dramatis-accent);\n}\n\n.dramatis-sheet-row-main {\n    display: flex;\n    flex-wrap: wrap;\n    align-items: center;\n    gap: var(--dramatis-gap-sm);\n}\n\n.dramatis-sheet-row-open {\n    padding: 2px 4px;\n    font-weight: 600;\n    text-align: left;\n    white-space: normal;\n}\n\n.dramatis-sheet-row-facts {\n    display: flex;\n    flex-wrap: wrap;\n    gap: 4px var(--dramatis-gap);\n}\n\n.dramatis-sheet-fact {\n    display: inline-flex;\n    flex-wrap: wrap;\n    align-items: baseline;\n    gap: 4px;\n}\n\n.dramatis-sheet-tags {\n    display: inline-flex;\n    flex-wrap: wrap;\n    align-items: center;\n    gap: 4px;\n}\n\n.dramatis-sheet-tag {\n    display: inline-block;\n    padding: 0 6px;\n    border: 1px solid var(--dramatis-border);\n    border-radius: 999px;\n    color: var(--dramatis-muted);\n    font-size: 0.82em;\n    line-height: 1.6;\n    white-space: nowrap;\n}\n\n.dramatis-sheet-tag-on {\n    border-color: var(--dramatis-accent);\n    color: var(--dramatis-text);\n}\n\n.dramatis-sheet-tag[data-band='focus'] {\n    border-color: var(--dramatis-accent);\n    color: var(--dramatis-accent);\n}\n\n.dramatis-sheet-lod {\n    width: auto;\n    max-width: 12em;\n    margin: 0;\n    padding: 0 4px;\n    font-size: 0.85em;\n}\n\n.dramatis-stance {\n    font-weight: 600;\n}\n\n.dramatis-stance[data-stance='-3'],\n.dramatis-stance[data-stance='-2'] {\n    color: var(--dramatis-hostile);\n}\n\n.dramatis-stance[data-stance='-1'] {\n    color: color-mix(in srgb, var(--dramatis-hostile) 60%, var(--dramatis-text));\n}\n\n.dramatis-stance[data-stance='0'] {\n    color: var(--dramatis-muted);\n}\n\n.dramatis-stance[data-stance='1'] {\n    color: color-mix(in srgb, var(--dramatis-friendly) 60%, var(--dramatis-text));\n}\n\n.dramatis-stance[data-stance='2'],\n.dramatis-stance[data-stance='3'] {\n    color: var(--dramatis-friendly);\n}\n\n.dramatis-sheet-pressure {\n    font-style: italic;\n}\n\n.dramatis-sheet-add {\n    display: flex;\n    flex-wrap: wrap;\n    align-items: center;\n    gap: var(--dramatis-gap-sm);\n}\n\n.dramatis-sheet-add > .dramatis-input,\n.dramatis-sheet-add > .dramatis-select {\n    flex: 1 1 10em;\n    width: auto;\n    margin: 0;\n}\n\n/* ------------------------------------------------------------------ sections: tabs and accordion */\n\n.dramatis-sheet-tabs {\n    display: flex;\n    flex-wrap: wrap;\n    gap: 2px;\n    border-bottom: 1px solid var(--dramatis-border);\n}\n\n.dramatis-sheet-tab {\n    border-bottom: 2px solid transparent;\n    border-radius: var(--dramatis-radius-sm) var(--dramatis-radius-sm) 0 0;\n}\n\n.dramatis-sheet-tab[aria-selected='true'] {\n    border-bottom-color: var(--dramatis-accent);\n    color: var(--dramatis-accent);\n}\n\n.dramatis-sheet-panel {\n    display: flex;\n    flex-direction: column;\n    gap: var(--dramatis-gap-sm);\n    padding-top: var(--dramatis-gap-sm);\n}\n\n.dramatis-sheet-accordion {\n    display: flex;\n    flex-direction: column;\n    gap: 4px;\n}\n\n.dramatis-sheet-acc {\n    border: 1px solid var(--dramatis-border);\n    border-radius: var(--dramatis-radius-sm);\n}\n\n.dramatis-sheet-acc-head {\n    justify-content: flex-start;\n    width: 100%;\n    min-height: var(--dramatis-tap);\n    font-weight: 600;\n}\n\n.dramatis-sheet-acc > .dramatis-sheet-panel {\n    padding: 0 8px 8px;\n}\n\n/* ------------------------------------------------------------------ units, fields, items */\n\n.dramatis-sheet-unit {\n    display: flex;\n    flex-direction: column;\n    gap: 4px;\n    min-width: 0;\n    padding: 6px 0;\n    border-bottom: 1px solid color-mix(in srgb, var(--dramatis-border) 60%, transparent);\n}\n\n.dramatis-sheet-card {\n    padding: 8px;\n    border: 1px solid var(--dramatis-border);\n    border-radius: var(--dramatis-radius-sm);\n    background: var(--dramatis-raised);\n}\n\n.dramatis-sheet-unit-head {\n    display: flex;\n    flex-wrap: wrap;\n    align-items: center;\n    gap: 4px;\n    min-width: 0;\n}\n\n.dramatis-sheet-unit-title {\n    flex: 1 1 auto;\n    min-width: 0;\n    font-weight: 600;\n    overflow-wrap: anywhere;\n}\n\n.dramatis-sheet-unit-actions {\n    display: inline-flex;\n    gap: 2px;\n}\n\n.dramatis-sheet-unit-body {\n    display: flex;\n    flex-direction: column;\n    gap: 4px;\n    min-width: 0;\n}\n\n.dramatis-sheet-origin {\n    padding: 0 6px;\n    border-radius: 999px;\n    font-size: 0.78em;\n    line-height: 1.6;\n    white-space: nowrap;\n    border: 1px solid var(--dramatis-border);\n    color: var(--dramatis-muted);\n}\n\n.dramatis-sheet-origin[data-origin='author'] {\n    border-color: var(--dramatis-accent);\n    color: var(--dramatis-accent);\n}\n\n.dramatis-sheet-origin[data-origin='card'] {\n    border-color: var(--dramatis-accent);\n    background: color-mix(in srgb, var(--dramatis-accent) 18%, transparent);\n    color: var(--dramatis-accent);\n}\n\n.dramatis-sheet-origin[data-origin='inferred'] {\n    border-style: dotted;\n    border-color: var(--dramatis-accent);\n    color: var(--dramatis-accent);\n}\n\n.dramatis-sheet-origin[data-origin='user'] {\n    border-color: var(--dramatis-friendly);\n    color: var(--dramatis-friendly);\n}\n\n.dramatis-sheet-origin[data-origin='story'] {\n    border-style: dashed;\n}\n\n.dramatis-sheet-lock,\n.dramatis-sheet-quotes-toggle {\n    min-width: 28px;\n    padding: 2px 6px;\n    color: var(--dramatis-muted);\n}\n\n.dramatis-sheet-locked {\n    color: var(--dramatis-accent);\n}\n\n.dramatis-sheet-quotes {\n    display: flex;\n    flex-direction: column;\n    gap: 2px;\n    padding: 4px 8px;\n    border-left: 2px solid var(--dramatis-accent);\n    font-style: italic;\n    overflow-wrap: anywhere;\n}\n\n.dramatis-sheet-field {\n    display: grid;\n    grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.4fr);\n    align-items: center;\n    gap: 2px var(--dramatis-gap-sm);\n    min-width: 0;\n}\n\n.dramatis-sheet-label {\n    min-width: 0;\n    color: var(--dramatis-muted);\n    font-size: 0.92em;\n    overflow-wrap: anywhere;\n}\n\n.dramatis-sheet-control {\n    min-width: 0;\n}\n\n.dramatis-sheet-control > .dramatis-select,\n.dramatis-sheet-unit-body > .dramatis-select {\n    width: 100%;\n    margin: 0;\n}\n\n.dramatis-sheet-field > .dramatis-field-hint {\n    grid-column: 1 / -1;\n}\n\n/* Lists, sub-lists and groups of small fields need the full width: label on top. */\n.dramatis-sheet-field:has(> .dramatis-sheet-control > .dramatis-sheet-sublist),\n.dramatis-sheet-field:has(> .dramatis-sheet-control > .dramatis-list),\n.dramatis-sheet-field:has(> .dramatis-sheet-control > .dramatis-chips),\n.dramatis-sheet-field:has(> .dramatis-sheet-control > .dramatis-sheet-inline),\n.dramatis-sheet-field:has(> .dramatis-sheet-control > .dramatis-sheet-shares),\n.dramatis-sheet-field:has(> .dramatis-sheet-control > .dramatis-sheet-styles) {\n    grid-template-columns: minmax(0, 1fr);\n}\n\n.dramatis-sheet-check {\n    margin: 2px 0;\n}\n\n.dramatis-sheet-inline {\n    display: flex;\n    flex-wrap: wrap;\n    align-items: center;\n    gap: 4px var(--dramatis-gap-sm);\n    min-width: 0;\n}\n\n.dramatis-sheet-inline > .dramatis-select {\n    width: auto;\n    margin: 0;\n}\n\n.dramatis-sheet-inline > .dramatis-input:not(.dramatis-number) {\n    flex: 1 1 8em;\n    width: auto;\n}\n\n.dramatis-sheet-item,\n.dramatis-sheet-subitem {\n    display: flex;\n    flex-direction: column;\n    gap: 4px;\n    padding: 6px;\n    border: 1px dashed var(--dramatis-border);\n    border-radius: var(--dramatis-radius-sm);\n}\n\n.dramatis-sheet-item-title {\n    font-weight: 600;\n}\n\n/* The Russian of an English field value (the field keeps the stored text): under the field, or under a list row. */\n.dramatis-translation {\n    flex: 1 1 100%;\n    min-width: 0;\n    margin: 0 0 2px;\n    color: var(--dramatis-muted);\n    font-size: 0.85em;\n    font-style: italic;\n    line-height: 1.3;\n    overflow-wrap: anywhere;\n}\n\n.dramatis-sheet-item-remove {\n    align-self: flex-start;\n}\n\n.dramatis-sheet-sublist {\n    display: flex;\n    flex-direction: column;\n    gap: 4px;\n    min-width: 0;\n}\n\n.dramatis-sheet-now {\n    display: flex;\n    flex-direction: column;\n    gap: 4px;\n    padding-left: 8px;\n    border-left: 2px solid var(--dramatis-accent);\n}\n\n.dramatis-sheet-reason {\n    display: flex;\n    flex-wrap: wrap;\n    align-items: baseline;\n    gap: 2px var(--dramatis-gap-sm);\n}\n\n.dramatis-sheet-reason-delta {\n    min-width: 2.5em;\n    font-variant-numeric: tabular-nums;\n    font-weight: 600;\n}\n\n.dramatis-sheet-reason-text {\n    flex: 1 1 10em;\n    min-width: 0;\n    overflow-wrap: anywhere;\n}\n\n.dramatis-sheet-shares,\n.dramatis-sheet-styles {\n    display: flex;\n    flex-wrap: wrap;\n    gap: 4px var(--dramatis-gap);\n}\n\n.dramatis-sheet-shares {\n    flex-direction: column;\n}\n\n.dramatis-sheet-share {\n    display: inline-flex;\n    align-items: center;\n    gap: 4px;\n    margin: 0;\n}\n\n.dramatis-sheet-share > .dramatis-number {\n    width: 5em;\n}\n\n.dramatis-sheet-sum-error {\n    font-weight: 600;\n}\n\n.dramatis-sheet-log {\n    display: flex;\n    flex-direction: column;\n    gap: 4px;\n}\n\n.dramatis-sheet-log-line {\n    display: flex;\n    gap: var(--dramatis-gap-sm);\n    overflow-wrap: anywhere;\n}\n\n.dramatis-sheet-log-turn {\n    flex: 0 0 auto;\n    color: var(--dramatis-muted);\n    font-size: 0.85em;\n    font-variant-numeric: tabular-nums;\n}\n\n/* ------------------------------------------------------------------ secrets */\n\n.dramatis-spoiler {\n    position: relative;\n    min-height: 2.4em;\n    border-radius: var(--dramatis-radius-sm);\n}\n\n.dramatis-spoiler:not(.dramatis-spoiler-open) > .dramatis-spoiler-content {\n    max-height: 6em;\n    overflow: hidden;\n    filter: blur(6px);\n    opacity: 0.6;\n    pointer-events: none;\n    user-select: none;\n}\n\n.dramatis-spoiler-reveal {\n    position: absolute;\n    inset: 0;\n    margin: auto;\n    width: fit-content;\n    height: fit-content;\n    background: var(--dramatis-surface);\n    border: 1px dashed var(--dramatis-accent);\n}\n\n.dramatis-sheet-row-facts .dramatis-spoiler {\n    display: inline-block;\n    min-height: 0;\n}\n\n.dramatis-sheet-row-facts .dramatis-spoiler:not(.dramatis-spoiler-open) > .dramatis-spoiler-content {\n    filter: blur(4px);\n}\n\n.dramatis-sheet-row-facts .dramatis-spoiler-reveal {\n    position: static;\n    padding: 0 6px;\n    font-size: 0.85em;\n}\n\n.dramatis-sheet-row-facts .dramatis-spoiler:not(.dramatis-spoiler-open) > .dramatis-spoiler-content {\n    display: none;\n}\n\n/* ------------------------------------------------------------------ keyboard */\n\n.dramatis-sheet .dramatis-btn:focus-visible,\n.dramatis-sheet select:focus-visible {\n    outline: 2px solid var(--dramatis-accent);\n    outline-offset: 1px;\n}\n\n/* ------------------------------------------------------------------ phones */\n\n@media (max-width: 767px) {\n    .dramatis-sheet-field {\n        grid-template-columns: minmax(0, 1fr);\n    }\n\n    .dramatis-sheet-row-open,\n    .dramatis-sheet-filter .dramatis-btn,\n    .dramatis-sheet-links .dramatis-btn,\n    .dramatis-sheet-lock,\n    .dramatis-sheet-quotes-toggle {\n        min-height: var(--dramatis-tap);\n    }\n\n    .dramatis-sheet-diff-values {\n        grid-template-columns: minmax(0, 1fr);\n    }\n}\n";
 //#endregion
 //#region src/features/sheet/strings.ts
 var SHEET_STRINGS = {
@@ -25401,6 +26789,8 @@ var SHEET_STRINGS = {
 		"sheet.origin.generated.hint": "Written by the generator: tentative until you lock it.",
 		"sheet.origin.story.hint": "Changed by the story.",
 		"sheet.origin.user.hint": "Your edit: a new reading of the intent will not touch it.",
+		"sheet.origin.card": "author · in the card",
+		"sheet.origin.card.hint": "Written by the author into the card itself (its structured intent): taken as is, without guessing or a quote. Reading the card’s text never rewrites it; your edit or lock still wins.",
 		"sheet.lock.on": "Locked: the generator and the story do not change it. Click to unlock.",
 		"sheet.lock.off": "Not locked. Click to lock.",
 		"sheet.quotes.show": "Show the quotes",
@@ -25907,6 +27297,8 @@ var SHEET_STRINGS = {
 		"sheet.origin.generated.hint": "Дописано генератором: пробное, пока ты не закрепишь.",
 		"sheet.origin.story.hint": "Изменено ходом истории.",
 		"sheet.origin.user.hint": "Твоя правка: новое чтение замысла её не тронет.",
+		"sheet.origin.card": "автор · в карточке",
+		"sheet.origin.card.hint": "Записано автором прямо в карточке (структурный замысел): взято как есть, без угадывания и без цитаты. Чтение текста карточки это не переписывает; твоя правка или замок — сильнее.",
 		"sheet.lock.on": "Закреплено: генератор и сюжет это не меняют. Нажми, чтобы снять.",
 		"sheet.lock.off": "Не закреплено. Нажми, чтобы закрепить.",
 		"sheet.quotes.show": "Показать цитаты",
@@ -26801,14 +28193,17 @@ function removeChatRule(engine, ruleId) {
 		state.rules = state.rules.filter((rule) => rule.id !== ruleId);
 	});
 }
-/** Drops the meta of a path and everything below it, then marks the path as the author's (unlocked). */
-function authorAgain(holder, path) {
+/**
+* Drops the meta of a path and everything below it, then marks the path as the author's (unlocked) — as the card's
+* structured intent when the value came from it.
+*/
+function authorAgain(holder, path, fromCard) {
 	const meta = {};
 	for (const [key, value] of Object.entries(holder.meta)) {
 		if (key === path || key.startsWith(`${path}.`)) continue;
 		meta[key] = value;
 	}
-	meta[path] = { origin: "author" };
+	meta[path] = fromCard ? cardIntentMeta() : { origin: "author" };
 	return {
 		...holder,
 		meta
@@ -26820,7 +28215,7 @@ function authorAgain(holder, path) {
 */
 function takeAuthor(engine, entry) {
 	const value = entry.after === void 0 ? void 0 : structuredClone(entry.after);
-	const apply = (holder) => authorAgain(setPath(holder, entry.path, value), entry.path);
+	const apply = (holder) => authorAgain(setPath(holder, entry.path, value), entry.path, entry.fromCard === true);
 	if (entry.character) return updateProfile(engine, entry.character, apply);
 	return engine.updateProfiles((card) => apply(card));
 }
@@ -26936,7 +28331,7 @@ function unitBlock(ctx, options, children) {
 		class: "dramatis-sheet-unit-title",
 		text: options.title
 	})];
-	if (meta) head.push(originBadge(ctx, meta.origin));
+	if (meta) head.push(originBadge(ctx, meta.origin, isCardMeta(meta)));
 	const lock = keyed(button({
 		icon: locked ? "fa-lock" : "fa-lock-open",
 		kind: "ghost",
@@ -26983,12 +28378,17 @@ function unitBlock(ctx, options, children) {
 		el("div", { class: "dramatis-sheet-unit-body" }, children)
 	]);
 }
-function originBadge(ctx, origin) {
+/**
+* The provenance badge; `fromCard`: the author wrote it into the card's structured intent («автор · в карточке»), not
+* read from the text.
+*/
+function originBadge(ctx, origin, fromCard = false) {
+	const key = fromCard ? "card" : origin;
 	return el("span", {
 		class: "dramatis-sheet-origin",
-		data: { origin },
-		text: ctx.t(`sheet.origin.${origin}`),
-		title: ctx.t(`sheet.origin.${origin}.hint`)
+		data: { origin: key },
+		text: ctx.t(`sheet.origin.${key}`),
+		title: ctx.t(`sheet.origin.${key}.hint`)
 	});
 }
 function bindProfile(ctx, profile) {

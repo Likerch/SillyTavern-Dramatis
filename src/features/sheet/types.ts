@@ -18,6 +18,8 @@ export interface IntentDiffEntry {
     status: string;
     before?: unknown;
     after?: unknown;
+    /** The new value is the card's structured intent: «Взять авторское» marks it so. */
+    fromCard?: boolean;
 }
 
 export interface IntentReadResult {

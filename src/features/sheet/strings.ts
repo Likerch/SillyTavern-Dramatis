@@ -125,6 +125,9 @@ export const SHEET_STRINGS: I18nParts = {
         'sheet.origin.generated.hint': 'Written by the generator: tentative until you lock it.',
         'sheet.origin.story.hint': 'Changed by the story.',
         'sheet.origin.user.hint': 'Your edit: a new reading of the intent will not touch it.',
+        'sheet.origin.card': 'author · in the card',
+        'sheet.origin.card.hint':
+            'Written by the author into the card itself (its structured intent): taken as is, without guessing or a quote. Reading the card’s text never rewrites it; your edit or lock still wins.',
         'sheet.lock.on': 'Locked: the generator and the story do not change it. Click to unlock.',
         'sheet.lock.off': 'Not locked. Click to lock.',
         'sheet.quotes.show': 'Show the quotes',
@@ -654,6 +657,9 @@ export const SHEET_STRINGS: I18nParts = {
         'sheet.origin.generated.hint': 'Дописано генератором: пробное, пока ты не закрепишь.',
         'sheet.origin.story.hint': 'Изменено ходом истории.',
         'sheet.origin.user.hint': 'Твоя правка: новое чтение замысла её не тронет.',
+        'sheet.origin.card': 'автор · в карточке',
+        'sheet.origin.card.hint':
+            'Записано автором прямо в карточке (структурный замысел): взято как есть, без угадывания и без цитаты. Чтение текста карточки это не переписывает; твоя правка или замок — сильнее.',
         'sheet.lock.on': 'Закреплено: генератор и сюжет это не меняют. Нажми, чтобы снять.',
         'sheet.lock.off': 'Не закреплено. Нажми, чтобы закрепить.',
         'sheet.quotes.show': 'Показать цитаты',

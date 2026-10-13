@@ -15,7 +15,9 @@ export const PLAYER_ID = '@player';
 /**
  * Where a value came from: the card/lore with a verbatim quote ('author'), the card/lore read without a quote the code
  * could verify ('inferred': the reading drew it from the sources, nothing was invented on top), the generator, the
- * story (turn/scene passes) or the user's own edit. Only 'generated' values are open to the generator.
+ * story (turn/scene passes) or the user's own edit. Only 'generated' values are open to the generator. What the author
+ * wrote into the card itself as a structured intent (`extensions.dramatis.intent`) is 'author' with the source
+ * `card.intent` and no quote: the reading of the card's text never overwrites it.
  */
 export type Origin = 'author' | 'inferred' | 'generated' | 'story' | 'user';
 
@@ -517,8 +519,11 @@ export interface CardProfiles {
     characters: CharacterProfile[];
     rules: AppetiteRule[];
     reputation: ReputationSeed[];
-    /** When and from what the intent was read (hash of the sources), for re-read diffs. */
-    intent?: { at: number; sourcesHash: string; model?: string };
+    /**
+     * When and from what the intent was read (hash of the sources), for re-read diffs; `fromCard`: the version of the
+     * card's own structured intent (`extensions.dramatis.intent`) the reading took, when the card had one.
+     */
+    intent?: { at: number; sourcesHash: string; model?: string; fromCard?: number };
     meta: Record<string, FieldMeta>;
 }
 
