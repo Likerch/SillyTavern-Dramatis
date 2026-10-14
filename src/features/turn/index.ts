@@ -11,9 +11,15 @@
 // engine's present plus the reply's DES tracker — but a tracker that still lists someone who left earlier does not put
 // them back (only a change of place, the narration or the player's message do). With Maestro's scene split active the
 // commit also picks the absent characters of the next card's «Elsewhere» line.
+//
+// Newcomers (docs/model.md §10.2): the same pass reports what the reply shows about present faces without a profile or
+// with only a guessed sketch — who they are to the player, role, kind, the world's groups — and the commit keeps it for
+// the generator (no extra request).
 import { desSwipeRecord, parseDesScene } from '../../adapters/des/parse';
+import { needsGrounding } from '../../domain/generator';
 import { PLAYER_ID } from '../../domain/model';
 import type { ChatState, Tie } from '../../domain/model';
+import { isProvisional, worldGroups } from '../../domain/newcomers';
 import { sceneDepartures } from '../../domain/departures';
 import { matchName, presentFromDes } from '../../domain/presence';
 import { sceneBreak } from '../../domain/scene';
@@ -285,6 +291,18 @@ export function createTurnController(app: App, settings: TurnSettings, log: Logg
         }
         const fromDes = presentFromDes(app.readers.des.castAt(index), view.profiles);
         const desScene = app.readers.des.scene();
+        // Faces to report as newcomers: no profile, or a generated one whose tie to the player is still a guess.
+        const extras = new Set(view.state.extras.map((profile) => profile.id));
+        const guessed = presentAt(index, view)
+            .map((id) => view.byId.get(id))
+            .filter(
+                (profile) =>
+                    !!profile &&
+                    extras.has(profile.id) &&
+                    isProvisional(profile, `ties.${PLAYER_ID}`, needsGrounding(profile)),
+            )
+            .map((profile) => profile!.name);
+        const newcomers = [...new Set([...fromDes.unknown, ...guessed])];
         const controller = new AbortController();
         const run = async () => {
             let pass: TurnPass | null = null;
@@ -302,10 +320,12 @@ export function createTurnController(app: App, settings: TurnSettings, log: Logg
                         ids,
                         present: presentAt(index, view),
                         others: fromDes.unknown,
+                        newcomers,
+                        groups: worldGroups(view.state.rules, view.state.reputation, view.profiles),
                     }),
                     maxTokens: settings.maxTokens,
                     temperature: settings.temperature,
-                    schema: turnSchema(ids),
+                    schema: turnSchema(ids, newcomers),
                     background: true,
                     signal: controller.signal,
                 });
@@ -743,7 +763,7 @@ export const turnModule: DramatisModule<TurnSettings> = {
     titleKey: 'turn.title',
     enabledByDefault: true,
     needsMaestro: true,
-    defaults: () => ({ maxTokens: 1600, temperature: 0.2 }),
+    defaults: () => ({ maxTokens: 1800, temperature: 0.2 }),
     i18n: TURN_STRINGS,
     init(ctx: ModuleContext<TurnSettings>) {
         const { app, own, log } = ctx;

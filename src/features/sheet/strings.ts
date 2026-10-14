@@ -94,6 +94,17 @@ export const SHEET_STRINGS: I18nParts = {
         'sheet.present.no': 'not in the scene',
         'sheet.extra': 'from this chat',
         'sheet.extraHint': 'Appeared in this chat: kept with the chat, not with the card.',
+        'sheet.guessed': 'dice-made',
+        'sheet.guessedHint':
+            'An older version drew this face from dice: it will be rebuilt on the story by itself after a reply, or now with «Rebuild on the story».',
+        'sheet.reground': 'Rebuild on the story',
+        'sheet.reground.hint':
+            'Rebuild this personality on what the story showed and on the card’s world: what the dice and templates made up is replaced, your edits and locked fields stay, the level stays.',
+        'sheet.reground.all': 'Rebuild new faces',
+        'sheet.reground.allHint':
+            'Rebuild on the story every face the generator made in this chat (a few per request): what the dice made up is replaced, your edits stay.',
+        'sheet.reground.running': 'Rebuilding…',
+        'sheet.reground.failed': 'Could not rebuild: {error}',
         'sheet.add.name': 'Name',
         'sheet.add.character': 'Add a character',
         'sheet.add.group': 'Add a group',
@@ -124,6 +135,9 @@ export const SHEET_STRINGS: I18nParts = {
             'Read from the card or the lorebook without a quote to show: drawn from the text, nothing invented on top. The generator never rewrites it.',
         'sheet.origin.generated.hint': 'Written by the generator: tentative until you lock it.',
         'sheet.origin.story.hint': 'Changed by the story.',
+        'sheet.origin.guess': '✎ guess',
+        'sheet.origin.guess.hint':
+            'Drawn by the dice or taken from a role template: a guess the story and a promotion may replace.',
         'sheet.origin.user.hint': 'Your edit: a new reading of the intent will not touch it.',
         'sheet.origin.card': 'author · in the card',
         'sheet.origin.card.hint':
@@ -626,6 +640,17 @@ export const SHEET_STRINGS: I18nParts = {
         'sheet.present.no': 'не в сцене',
         'sheet.extra': 'из этого чата',
         'sheet.extraHint': 'Появился в этом чате: хранится вместе с чатом, а не с карточкой.',
+        'sheet.guessed': 'по костям',
+        'sheet.guessedHint':
+            'Это лицо старая версия придумала бросками костей: оно само пересоберётся по истории после ответа — или сразу кнопкой «Пересобрать по истории».',
+        'sheet.reground': 'Пересобрать по истории',
+        'sheet.reground.hint':
+            'Пересобрать личность по тому, что показала история, и по миру карточки: придуманное костями и шаблонами заменится, твои правки и закреплённое останутся, уровень детализации тоже.',
+        'sheet.reground.all': 'Пересобрать новых лиц',
+        'sheet.reground.allHint':
+            'Пересобрать по истории всех, кого генератор придумал в этом чате (по несколько за запрос): придуманное костями заменится, твои правки останутся.',
+        'sheet.reground.running': 'Пересобираю…',
+        'sheet.reground.failed': 'Не удалось пересобрать: {error}',
         'sheet.add.name': 'Имя',
         'sheet.add.character': 'Добавить персонажа',
         'sheet.add.group': 'Добавить группу',
@@ -656,6 +681,9 @@ export const SHEET_STRINGS: I18nParts = {
             'Прочитано из карточки или лора, но без дословной цитаты: выведено из текста, ничего сверху не придумано. Генератор это не переписывает.',
         'sheet.origin.generated.hint': 'Дописано генератором: пробное, пока ты не закрепишь.',
         'sheet.origin.story.hint': 'Изменено ходом истории.',
+        'sheet.origin.guess': '✎ догадка',
+        'sheet.origin.guess.hint':
+            'Брошено костями или взято из шаблона роли: догадка, которую история и повышение могут заменить.',
         'sheet.origin.user.hint': 'Твоя правка: новое чтение замысла её не тронет.',
         'sheet.origin.card': 'автор · в карточке',
         'sheet.origin.card.hint':

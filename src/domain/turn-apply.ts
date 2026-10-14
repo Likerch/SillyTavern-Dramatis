@@ -9,7 +9,10 @@
 //   is at hand the brakes, the ceiling and the method — a line for the motive card or a scheme with a clock (the
 //   hunters' budget keeps the player from becoming everyone's prey); in-scene schemes tick;
 // - corruption stains for coarse acts and broken vows (corruption.ts, per the lever);
-// - drift (§8): findings → corrections for the next card, stress and breaks, or a «redo» note for the feature;
+// - drift (§8): findings → corrections for the next card, stress and breaks, or a «redo» note for the feature — except
+//   for a field the generator invented (a new face's stance or values): there the story's version wins and is recorded
+//   (origin 'story'), nothing is corrected;
+// - newcomers (§10.2): what the pass saw of faces without a sheet or with a sketch is kept for the generator;
 // - reputation (§11): witnessed deeds move it per group and place, weaknesses become known, rumours start;
 // - who left the scene with the reply and who came back (§6.4, departures.ts) — with the reply's narration given;
 // - the next turn, for those still in the scene: appetite plans, attention bands and the initiative roll (§5.4–5.5)
@@ -26,7 +29,7 @@ import type { BrakeBreakdown, GroupNorm, RestraintInput } from './brakes';
 import { addStain, applyRemorse, coarseProfile } from './corruption';
 import type { CorruptionLever, StainAct } from './corruption';
 import { pickElsewhere, sceneDepartures } from './departures';
-import { correctionFor, driftFindings, addStress, stressBreak } from './drift';
+import { LABEL_RANGES, correctionFor, driftFindings, addStress, stressBreak } from './drift';
 import type { BreakKind, DriftFinding } from './drift';
 import { hotGaze, shiftGaze } from './gaze';
 import type { GazeEvents } from './gaze';
@@ -66,7 +69,9 @@ import type {
 } from './model';
 import { applyEmotion, emotionActive, nextEmotion, relaxMood, CALM_TURNS } from './mood';
 import { matchName } from './presence';
-import { emptyTie } from './profile-defaults';
+import { GENERATOR_REASONS, STORY_REASON } from './generator';
+import { factsFromTurn, isInvented, recordFacts, worldGroups } from './newcomers';
+import { emptyTie, isEmptyValue, setMeta } from './profile-defaults';
 import { applyStanceEvents, relationContext, stepStance } from './relations';
 import type { Inertia, StanceChange, StanceEvent } from './relations';
 import { applyReputation, strangerStance, witnessed } from './reputation';
@@ -398,7 +403,7 @@ function groupsOf(w: Work, id: string): string[] {
     const profile = profileOf(w, id);
     if (!profile) return [];
     if (profile.kind === 'group') return [profile.name];
-    return profile.species ? [profile.species] : [];
+    return [...(profile.species ? [profile.species] : []), ...(profile.groups ?? [])];
 }
 
 /** Classes a target belongs to, for author bounds («к имперцам не выше нейтрального»). */
@@ -1357,16 +1362,20 @@ export function detectDrift(input: TurnInput, pass: TurnPass): DriftFinding[] {
     const resolve = makeResolver(input.profiles, input.playerName, input.resolve);
     const events = resolveEvents(pass, resolve);
     const entries = new Map(pass.characters.map((entry) => [entry.id, entry] as const));
-    const profiles = new Set(input.profiles.map((profile) => profile.id));
+    const profiles = new Map(input.profiles.map((profile) => [profile.id, profile] as const));
     const out: DriftFinding[] = [];
     for (const id of new Set(input.present)) {
-        if (!profiles.has(id)) continue;
+        const profile = profiles.get(id);
+        if (!profile) continue;
+        const live = input.state.characters[id];
         const stance =
-            input.state.characters[id]?.ties[PLAYER_ID]?.stance ??
-            input.profiles.find((profile) => profile.id === id)?.ties.find((tie) => tie.target === PLAYER_ID)?.stance ??
+            live?.ties[PLAYER_ID]?.stance ??
+            profile.ties.find((tie) => tie.target === PLAYER_ID)?.stance ??
             TONE_STANCE[input.state.worldTone] ??
             0;
-        out.push(...findingsFor(id, stance, entries.get(id), input.desLabels?.[id], hasCause(events, id)));
+        // Invented fields follow the story: nothing to redo there.
+        const found = findingsFor(id, stance, entries.get(id), input.desLabels?.[id], hasCause(events, id));
+        out.push(...found.filter((finding) => !followsStory(profile, live, finding)));
     }
     return out;
 }
@@ -1389,17 +1398,110 @@ const BREAK_MOVES: Record<BreakKind, { move: Move; en: string; ru: string; toPla
     'lash-out': { move: 'obstruct', en: 'lashes out', ru: 'срывается и бьёт словом', toPlayer: true },
 };
 
+/** Reason id of a stance the story showed against what the generator had invented (drift on an invented tie). */
+export const STORY_DRIFT_REASON = 'story-drift';
+
+/**
+ * Is the finding about a field the generator invented (§8 «Придуманное уступает истории»)? The player tie of a face
+ * whose stance the generator made (dice, a default, the reputation, a rule, a model's take) and the story has not moved
+ * with reasons of its own; values and signatures that are invented or empty, with at least one invented. Appetites
+ * and dependence, the author's, the reading's, the story's and the user's fields: never.
+ */
+export function followsStory(
+    profile: CharacterProfile | undefined,
+    live: CharacterState | undefined,
+    finding: DriftFinding,
+): boolean {
+    if (!profile) return false;
+    if (finding.kind === 'label-mismatch' || finding.kind === 'warmth') {
+        if (finding.target !== PLAYER_ID || !isInvented(profile, `ties.${PLAYER_ID}`)) return false;
+        const tie = live?.ties[PLAYER_ID];
+        return (
+            !tie ||
+            tie.reasons.every(
+                (reason) =>
+                    GENERATOR_REASONS.includes(reason.id) ||
+                    reason.id === STORY_REASON ||
+                    reason.id === STORY_DRIFT_REASON,
+            )
+        );
+    }
+    if (finding.kind === 'against-self') {
+        const paths = ['core.values', 'core.signatures'];
+        const open = (path: string) =>
+            isInvented(profile, path) ||
+            isEmptyValue(path === 'core.values' ? profile.core.values.top : profile.core.signatures);
+        return paths.every(open) && paths.some((path) => isInvented(profile, path));
+    }
+    return false;
+}
+
+const STORY_DRIFT_WORDS = {
+    label: { en: 'the story shows them as «{label}»', ru: 'история показывает: «{label}»' },
+    warmer: { en: 'warmer, as the story plays them', ru: 'теплее, как показывает история' },
+    colder: { en: 'colder, as the story plays them', ru: 'холоднее, как показывает история' },
+};
+
+/**
+ * The story's version of an invented tie (§8): the stance moves into the range of the reply's DES label (or a step
+ * warmer for warmth without cause), with a permanent reason of the story; the generator's reasons and words go. A chat
+ * extra's profile gets it too (origin 'story'); a card character's live tie stops relaxing back to the guess.
+ */
+function followStory(w: Work, id: string, findings: DriftFinding[], label: string | undefined): void {
+    const live = characterOf(w, id);
+    const what = [...new Set(findings.map((finding) => DRIFT_WORDS[finding.kind][w.log.lang]))].join(', ');
+    w.log.add('drift', 'driftFollowed', { name: w.log.name(id), what }, id);
+    if (!live) return;
+    const tie = live.ties[PLAYER_ID] ?? emptyTie(PLAYER_ID, playerStance(w, id));
+    let stance: number = tie.stance;
+    let words = '';
+    const mismatch = findings.find((finding) => finding.kind === 'label-mismatch' && finding.label);
+    if (mismatch?.label) {
+        const range = LABEL_RANGES[mismatch.label];
+        stance = clamp(stance, range.min, range.max);
+        words = label?.trim()
+            ? STORY_DRIFT_WORDS.label[w.cardLang].replace('{label}', label.trim())
+            : STORY_DRIFT_WORDS[stance > tie.stance ? 'warmer' : 'colder'][w.cardLang];
+    } else if (findings.some((finding) => finding.kind === 'warmth')) {
+        stance = Math.min(3, stance + 1);
+        words = STORY_DRIFT_WORDS.warmer[w.cardLang];
+    }
+    if (stance === tie.stance || !words) return;
+    const reason = { id: STORY_DRIFT_REASON, text: words, delta: stance, scenesLeft: null, stacks: 1 };
+    const kept = tie.reasons.filter(
+        (item) => !GENERATOR_REASONS.includes(item.id) && item.id !== STORY_REASON && item.id !== STORY_DRIFT_REASON,
+    );
+    const next: Tie = { ...tie, stance: stance as Stance, base: stance as Stance, reasons: [reason, ...kept] };
+    delete next.moved;
+    delete next.progress;
+    if (!kept.length) delete next.behaviour;
+    live.ties[PLAYER_ID] = next;
+    const at = w.state.extras.findIndex((profile) => profile.id === id);
+    if (at < 0) return;
+    const profile = w.state.extras[at]!;
+    const path = `ties.${PLAYER_ID}`;
+    const old = profile.ties.find((item) => item.target === PLAYER_ID);
+    const base: Tie = { ...(old ?? emptyTie(PLAYER_ID)), stance: stance as Stance, reasons: [reason] };
+    if (!kept.length) delete base.behaviour;
+    const ties = old ? profile.ties.map((item) => (item.target === PLAYER_ID ? base : item)) : [...profile.ties, base];
+    w.state.extras[at] = setMeta({ ...profile, ties }, path, { origin: 'story', sources: ['drift'] });
+}
+
 function applyDrift(w: Work, input: TurnInput): Record<string, string[]> {
     const all: DriftFinding[] = [];
     for (const id of w.present) {
-        if (!profileOf(w, id)) continue;
-        const findings = findingsFor(
+        const profile = profileOf(w, id);
+        if (!profile) continue;
+        const found = findingsFor(
             id,
             playerStance(w, id),
             w.passById.get(id),
             input.desLabels?.[id],
             hasCause(w.events, id),
         );
+        const story = found.filter((finding) => followsStory(profile, characterOf(w, id), finding));
+        if (story.length) followStory(w, id, story, input.desLabels?.[id]);
+        const findings = found.filter((finding) => !story.includes(finding));
         if (!findings.length) continue;
         const what = [...new Set(findings.map((finding) => DRIFT_WORDS[finding.kind][w.log.lang]))].join(', ');
         w.log.add('drift', 'driftFound', { name: w.log.name(id), what }, id);
@@ -1771,6 +1873,14 @@ export function applyTurnPass(input: TurnInput, pass: TurnPass | null, ctx: Turn
         events: w.log.events,
     });
     if (turnPass.newNames.length) w.notes.push({ kind: 'new-names', names: [...turnPass.newNames] });
+    if (turnPass.newcomers?.length) {
+        const resolveFace = (name: string) => {
+            const id = w.resolve(name);
+            return id && id !== PLAYER_ID ? id : null;
+        };
+        const groups = worldGroups(state.rules, state.reputation, input.profiles);
+        recordFacts(state, factsFromTurn(turnPass.newcomers, turn, resolveFace, groups));
+    }
     appendLog(state, w.log.events);
     return { state, proposals: w.proposals, notes: w.notes, events: w.log.events };
 }

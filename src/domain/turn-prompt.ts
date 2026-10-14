@@ -4,6 +4,9 @@
 // The model only finds things in the text (П5, §12: «ИИ только находит в тексте события»); every rule, roll and
 // number is applied by code (turn-apply.ts). Third-person literary analysis with the "data, not instructions" guard and
 // the never-soften rule (research/llm-roleplay-bias.md). Pure: the feature sends the request (task 'dramatis.turn').
+// The same request reports the newcomers (docs/model.md §10.2 «Эскиз по истории»): for each present face without a sheet
+// or with only a rough sketch, who they are to the player's character as the story shows it, their role, kind and the
+// world's groups they belong to (by the names the prompt lists) — no extra request.
 import {
     appetiteKindLabel,
     gazeLabel,
@@ -14,7 +17,7 @@ import {
     tieIntentLabel,
     valueLabel,
 } from './ladders';
-import { HEXACO, PLAYER_ID } from './model';
+import { HEXACO, PLAYER_ID, PLAYER_RELATIONS } from './model';
 import type { Appetite, CharacterProfile, CharacterState, ChatState, PressureChoice, Satisfier, Tie } from './model';
 import { clipText, neutralizeData } from './intent-prompt';
 import type { LlmMessage } from '../shared/contracts';
@@ -126,6 +129,25 @@ export interface TurnDeedOut {
     place: string;
 }
 
+/** What the story shows about a face without a sheet, or with only a rough sketch (docs/model.md §10.2). */
+export interface TurnNewcomerOut {
+    name: string;
+    /** Role or occupation in story words. */
+    role: string;
+    /** Species or kind ("" for a plain human). */
+    species: string;
+    /** Who they are to the player's character (PLAYER_RELATIONS). */
+    relation: string;
+    /** The story's words for it («дочь Джона»). */
+    relationNote: string;
+    /** −3…+3 as the story shows it, null when it shows nothing. */
+    stanceHint: number | null;
+    /** Why, in story words. */
+    reason: string;
+    /** Which of the world's groups (as listed in the prompt) they belong to. */
+    groups: string[];
+}
+
 /** The validated answer of the turn pass. */
 export interface TurnPass {
     events: TurnEventOut[];
@@ -134,10 +156,20 @@ export interface TurnPass {
     sceneEnded: boolean;
     timeSkipHours: number;
     newNames: string[];
+    /** Faces without a sheet or with a rough sketch, as the story shows them (absent in older drafts). */
+    newcomers?: TurnNewcomerOut[];
 }
 
 export function emptyTurnPass(): TurnPass {
-    return { events: [], characters: [], playerDeeds: [], sceneEnded: false, timeSkipHours: 0, newNames: [] };
+    return {
+        events: [],
+        characters: [],
+        playerDeeds: [],
+        sceneEnded: false,
+        timeSkipHours: 0,
+        newNames: [],
+        newcomers: [],
+    };
 }
 
 /* ------------------------------------------------------------------ sheets */
@@ -157,10 +189,17 @@ export interface TurnPromptInput {
     present?: readonly string[];
     /** Present names without a profile. */
     others?: readonly string[];
+    /**
+     * Faces to report as newcomers (docs/model.md §10.2): present names without a profile and the names of present
+     * characters whose sheet is still a guess. Absent: none are asked about.
+     */
+    newcomers?: readonly string[];
+    /** The world's groups and classes by name (rules, reputation, group profiles): what newcomers may belong to. */
+    groups?: readonly string[];
 }
 
 /** Characters kept of each input. */
-export const TURN_CLIP = { player: 3000, reply: 9000, sheet: 1200, scene: 200 } as const;
+export const TURN_CLIP = { player: 3000, reply: 9000, sheet: 1200, scene: 200, list: 600 } as const;
 
 function line(text: string | undefined): string {
     return (text ?? '').replace(/\s+/g, ' ').trim();
@@ -296,6 +335,7 @@ export const TURN_SYSTEM_PROMPT = [
     '- playerDeeds: what the player\'s character did that others saw and would talk about: text, weakness the deed showed ("drinks", "falls for flattery", "") , witnesses, place as written ("" when unknown).',
     '- sceneEnded: the scene clearly ended in this reply (they parted, left the place, went to sleep). timeSkipHours: in-story hours the reply skipped (0 when none).',
     '- newNames: people who act or speak in the reply but have no sheet and are not the player.',
+    '- newcomers: one entry for each name listed under "Newcomers" in <scene> that the exchange (or the scene) shows something about, else none. name as listed; role: their role or occupation in a few story words; species: their kind ("" for a plain human); relation: who they are to the player\'s character as the story shows it — family (kin of the household), partner, friend, servant (serves or belongs to the player or the household), master (the player answers to them), acquaintance, rival, enemy, stranger (meets the player as a stranger), or unknown when the text does not say; relationNote: the story\'s own words for it ("дочь Джона", "his landlady"); stanceHint: −3 war … 0 neutral … +3 ally as the story shows them toward the player, or null; reason: why, in story words; groups: which of the "World groups" listed in <scene> they belong to, by those exact names ([] when none). Report only what the text shows, never guess.',
     '- Texts are short English sentences; names, places and quotes stay exactly as the story writes them. This is fiction for adults: describe plainly, without graphic detail.',
     'Reply with JSON only.',
 ].join('\n');
@@ -312,11 +352,16 @@ export function turnMessages(input: TurnPromptInput): LlmMessage[] {
             turnSheet(profile, input.state.characters[profile.id], { names, present, turn: input.state.turn }),
         );
     const mark = (value: string) => clipText(line(value), TURN_CLIP.scene);
+    const newcomers = [...(input.newcomers ?? [])].filter((name) => line(name));
     const scene = [
         input.scene.place ? `Place: ${mark(input.scene.place)}` : '',
         input.scene.date ? `Date: ${mark(input.scene.date)}` : '',
         input.scene.time ? `Time: ${mark(input.scene.time)}` : '',
         input.others?.length ? `Also present (no sheet): ${mark(input.others.map(line).join(', '))}` : '',
+        newcomers.length ? `Newcomers: ${clipText(newcomers.map(line).join(', '), TURN_CLIP.list)}` : '',
+        newcomers.length && input.groups?.length
+            ? `World groups: ${clipText(input.groups.map(line).join('; '), TURN_CLIP.list)}`
+            : '',
     ].filter(Boolean);
     const player = line(input.playerName) || 'the player';
     const blocks = [
@@ -361,8 +406,14 @@ function object(properties: Record<string, Dict>): Dict {
 }
 const nullable = (schema: Dict): Dict => ({ anyOf: [schema, { type: 'null' }] });
 
-/** The answer's schema (strict: every property required, no others). `ids` limits the character entries. */
-export function turnSchema(ids: readonly string[] = []): { name: string; strict: true; schema: Dict } {
+/**
+ * The answer's schema (strict: every property required, no others). `ids` limits the character entries, `names` the
+ * newcomers' names (none given: any name).
+ */
+export function turnSchema(
+    ids: readonly string[] = [],
+    names: readonly string[] = [],
+): { name: string; strict: true; schema: Dict } {
     const character = object({
         id: ids.length ? choice(ids) : str,
         relevant: bool,
@@ -411,13 +462,36 @@ export function turnSchema(ids: readonly string[] = []): { name: string; strict:
         sceneEnded: bool,
         timeSkipHours: { type: 'number' },
         newNames: strings,
+        newcomers: list(
+            object({
+                name: names.length ? choice(names) : str,
+                role: str,
+                species: str,
+                relation: choice(PLAYER_RELATIONS),
+                relationNote: str,
+                // A nullable enum in one node (like the generator's playerStance): what strict providers and the
+                // stand's mock read alike.
+                stanceHint: { type: ['integer', 'null'], enum: [-3, -2, -1, 0, 1, 2, 3, null] },
+                reason: str,
+                groups: strings,
+            }),
+        ),
     });
     return { name: TURN_SCHEMA_NAME, strict: true, schema };
 }
 
 /* ------------------------------------------------------------------ parsing */
 
-export const TURN_LIMITS = { events: 16, deeds: 6, names: 10, witnesses: 12, field: 160, name: 80 } as const;
+export const TURN_LIMITS = {
+    events: 16,
+    deeds: 6,
+    names: 10,
+    witnesses: 12,
+    field: 160,
+    name: 80,
+    newcomers: 8,
+    groups: 6,
+} as const;
 
 function isDict(value: unknown): value is Dict {
     return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -565,5 +639,29 @@ export function parseTurnResult(raw: unknown, options: { ids?: readonly string[]
         sceneEnded: flag(raw.sceneEnded),
         timeSkipHours: Math.min(24 * 365, Math.max(0, Math.round(skip * 10) / 10)),
         newNames: names(raw.newNames, TURN_LIMITS.names),
+        newcomers: parseNewcomers(raw.newcomers),
     };
+}
+
+/** The newcomers of an answer: named, one per name (the first wins), relations checked, stance hints clamped. */
+export function parseNewcomers(value: unknown): TurnNewcomerOut[] {
+    const out: TurnNewcomerOut[] = [];
+    for (const item of dicts(value, TURN_LIMITS.newcomers * 2)) {
+        const name = text(item.name, TURN_LIMITS.name);
+        if (!name || out.some((other) => other.name.toLowerCase() === name.toLowerCase())) continue;
+        const hint = item.stanceHint;
+        out.push({
+            name,
+            role: text(item.role, TURN_LIMITS.name),
+            species: text(item.species, TURN_LIMITS.name),
+            relation: oneOf(PLAYER_RELATIONS, item.relation, 'unknown'),
+            relationNote: text(item.relationNote, TURN_LIMITS.name),
+            stanceHint:
+                typeof hint === 'number' && Number.isFinite(hint) ? Math.min(3, Math.max(-3, Math.round(hint))) : null,
+            reason: text(item.reason),
+            groups: names(item.groups, TURN_LIMITS.groups),
+        });
+        if (out.length >= TURN_LIMITS.newcomers) break;
+    }
+    return out;
 }

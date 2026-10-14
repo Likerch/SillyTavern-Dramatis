@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createBus } from '../../src/core/bus';
 import { createI18n } from '../../src/core/i18n';
 import { Settings } from '../../src/core/settings';
+import { sampleParams, sketchProfile } from '../../src/domain/generator';
 import { PLAYER_ID } from '../../src/domain/model';
 import type { CardProfiles, CharacterProfile, ChatState } from '../../src/domain/model';
 import { matchName } from '../../src/domain/presence';
@@ -727,5 +728,61 @@ describe('turn module — departures (§6.4)', () => {
         await send(plain);
         expect(plain.engine.box.state.away?.ilva).toBeDefined();
         expect(plain.engine.box.state.next?.elsewhere).toBeUndefined();
+    });
+});
+
+describe('turn module — newcomers (docs/model.md §10.2)', () => {
+    it('asks about faces without a sheet or with a guessed one, and keeps what the reply showed for the generator', async () => {
+        const pass = turnPass({
+            newcomers: [
+                {
+                    name: 'Лиза',
+                    role: 'daughter',
+                    species: '',
+                    relation: 'family',
+                    relationNote: 'дочь Ильвы',
+                    stanceHint: null,
+                    reason: '',
+                    groups: ['the household'],
+                },
+            ],
+        });
+        const s = await setup({
+            pass,
+            patch: (profiles, state) => {
+                const kira = sketchProfile(
+                    'Кира',
+                    sampleParams('unknown', 'indifferent', [], seeded(2), 'even', { grounded: true, facts: null }),
+                );
+                profiles.push(kira);
+                state.extras = [kira];
+                state.rules = [];
+                state.reputation = [
+                    { among: 'the household', label: 'one of us', stance: 1, weaknesses: [], reasons: [] },
+                ];
+            },
+        });
+        s.des = [
+            { name: 'Ильва', present: true, details: {} },
+            { name: 'Лиза', present: true, details: {} },
+            { name: 'Кира', present: true, details: {} },
+        ];
+        await reply(s);
+        const request = s.maestro.requests[0]!;
+        expect(request.messages[1]!.content).toContain('Newcomers: Лиза, Кира');
+        expect(request.messages[1]!.content).toContain('World groups: the household');
+        expect(JSON.stringify(request.schema)).toContain('"enum":["Лиза","Кира"]');
+        await send(s);
+        expect(s.engine.box.state.generator?.facts).toEqual([
+            {
+                name: 'Лиза',
+                relation: 'family',
+                source: 'turn',
+                turn: 1,
+                role: 'daughter',
+                relationNote: 'дочь Ильвы',
+                groups: ['the household'],
+            },
+        ]);
     });
 });

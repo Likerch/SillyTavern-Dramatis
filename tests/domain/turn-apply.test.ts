@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { PLAYER_ID } from '../../src/domain/model';
-import type { CharacterProfile, ChatState } from '../../src/domain/model';
+import type { CharacterProfile, ChatState, Tie } from '../../src/domain/model';
 import { emptyProfile } from '../../src/domain/profile-defaults';
 import {
     ACT_EFFECTS,
@@ -888,5 +888,169 @@ describe('applyTurnPass — schemes, gaze and rivalry in the scene', () => {
         );
         expect(result.state.characters.sota!.ties.bram!.stance).toBe(1);
         expect(result.state.characters.sota!.ties.bram!.gaze).toBe('person');
+    });
+});
+
+describe('applyTurnPass — drift on invented profiles follows the story (§8)', () => {
+    /** The tavern with Ильва's tie to the player made by the generator (a guess), not by the author. */
+    function invented(patch: Partial<TurnInput> = {}): TurnInput {
+        const input = tavernInput(patch);
+        const ilva = input.profiles.find((profile) => profile.id === 'ilva')!;
+        ilva.meta = { [`ties.${PLAYER_ID}`]: { origin: 'generated', sources: ['dice', 'template'] } };
+        const tieOf = (reasons: Tie['reasons']): Tie => ({ ...ilva.ties[0]!, reasons });
+        const stranger = [reason('чужак, а от чужаков одни беды', -2, null, 'gen-stranger')];
+        ilva.ties = [tieOf(stranger), ...ilva.ties.slice(1)];
+        input.state.characters.ilva!.ties[PLAYER_ID] = tieOf(stranger);
+        return input;
+    }
+
+    it('records the story’s version of an invented tie instead of correcting the story', () => {
+        const input = invented({ desLabels: { ilva: 'Подруга' } });
+        input.state.extras = [input.profiles.find((profile) => profile.id === 'ilva')!];
+        const result = applyTurnPass(input, turnPass(), ctx({ cardLang: 'ru', uiLang: 'ru' }));
+        expect(result.state.next?.corrections).toBeUndefined();
+        const tie = result.state.characters.ilva!.ties[PLAYER_ID]!;
+        expect(tie.stance).toBe(1);
+        expect(tie.base).toBe(1);
+        expect(tie.reasons).toEqual([
+            { id: 'story-drift', text: 'история показывает: «Подруга»', delta: 1, scenesLeft: null, stacks: 1 },
+        ]);
+        expect(tie.behaviour).toBeUndefined();
+        // The chat's own face: its profile takes the story's version (origin story).
+        const extra = result.state.extras.find((profile) => profile.id === 'ilva')!;
+        expect(extra.ties.find((item) => item.target === PLAYER_ID)!.stance).toBe(1);
+        expect(extra.meta[`ties.${PLAYER_ID}`]).toEqual({ origin: 'story', sources: ['drift'] });
+        expect(result.events.some((line) => line.kind === 'drift' && /придуманное уступает/.test(line.text))).toBe(
+            true,
+        );
+        // Nothing to redo either.
+        expect(detectDrift(invented({ desLabels: { ilva: 'Подруга' } }), turnPass())).toEqual([]);
+    });
+
+    it('a step warmer for warmth without cause; no stress, no redo for invented fields', () => {
+        const flags = entry('ilva', {
+            drift: {
+                warmthWithoutCause: true,
+                appetiteBecameLove: false,
+                dependenceVanished: false,
+                actedAgainstValues: false,
+            },
+        });
+        for (const driftResponse of ['stress', 'redo'] as const) {
+            const input = invented();
+            input.state.characters.ilva!.stress = 55;
+            const result = applyTurnPass(input, turnPass({ characters: [flags] }), ctx({}, { driftResponse }));
+            expect(result.state.characters.ilva!.ties[PLAYER_ID]!.stance).toBe(-1);
+            expect(result.state.characters.ilva!.stress).toBe(55);
+            expect(result.notes.some((note) => note.kind === 'redo' || note.kind === 'break')).toBe(false);
+        }
+    });
+
+    it('keeps correcting the author’s tie and a tie the story already moved', () => {
+        const authored = tavernInput({ desLabels: { ilva: 'Подруга' } });
+        authored.profiles.find((profile) => profile.id === 'ilva')!.meta = {
+            [`ties.${PLAYER_ID}`]: { origin: 'author', evidence: ['ненавидит имперцев'] },
+        };
+        const corrected = applyTurnPass(authored, turnPass(), ctx({ cardLang: 'en' }));
+        expect(corrected.state.next?.corrections?.ilva?.[0]).toContain('still hostile toward Курьер');
+        expect(corrected.state.characters.ilva!.ties[PLAYER_ID]!.stance).toBe(-2);
+        // Invented, but the story moved it with reasons of its own since: drift from there is real drift.
+        const moved = invented({ desLabels: { ilva: 'Подруга' } });
+        moved.state.characters.ilva!.ties[PLAYER_ID]!.reasons.push(reason('he threatened her', -1, 3, 'r9'));
+        expect(applyTurnPass(moved, turnPass(), ctx()).state.next?.corrections?.ilva?.length).toBeGreaterThan(0);
+    });
+
+    it('skips the correction for acting against invented values, keeps it for the author’s', () => {
+        const flags = entry('ilva', {
+            drift: {
+                warmthWithoutCause: false,
+                appetiteBecameLove: false,
+                dependenceVanished: false,
+                actedAgainstValues: true,
+            },
+        });
+        const input = tavernInput();
+        const ilva = input.profiles.find((profile) => profile.id === 'ilva')!;
+        ilva.meta = {
+            'core.values': { origin: 'generated', sources: ['dice'] },
+            'core.signatures': { origin: 'generated', sources: ['template'] },
+        };
+        expect(applyTurnPass(input, turnPass({ characters: [flags] }), ctx()).state.next?.corrections).toBeUndefined();
+        ilva.meta = { 'core.values': { origin: 'author' }, 'core.signatures': { origin: 'generated' } };
+        expect(
+            applyTurnPass(input, turnPass({ characters: [flags] }), ctx()).state.next?.corrections?.ilva?.length,
+        ).toBeGreaterThan(0);
+    });
+});
+
+describe('applyTurnPass — newcomers (§10.2)', () => {
+    it('keeps what the pass saw of new faces for the generator, names resolved, groups as the world lists them', () => {
+        const input = tavernInput();
+        input.state.rules = [
+            {
+                id: 'family',
+                holders: 'family members',
+                kind: 'flesh',
+                source: 'culture',
+                target: { mode: 'class', class: 'family members' },
+                intensity: { zero: 0, low: 0, mid: 0, high: 1 },
+                styles: { honest: 1 },
+                choosiness: 0,
+                exclusivity: 'shared',
+                affectionOnset: 'common',
+                groupMode: 'tribe',
+            },
+        ];
+        const result = applyTurnPass(
+            input,
+            turnPass({
+                newcomers: [
+                    {
+                        name: 'Лиза',
+                        role: 'daughter',
+                        species: '',
+                        relation: 'family',
+                        relationNote: 'дочь Джона',
+                        stanceHint: null,
+                        reason: '',
+                        groups: ['Family members', 'pirates'],
+                    },
+                    {
+                        name: 'Брам',
+                        role: 'mercenary',
+                        species: '',
+                        relation: 'acquaintance',
+                        relationNote: '',
+                        stanceHint: 0,
+                        reason: 'met at the gate',
+                        groups: [],
+                    },
+                ],
+            }),
+            ctx({ turn: 7 }),
+        );
+        expect(result.state.generator?.facts).toEqual([
+            {
+                name: 'Лиза',
+                relation: 'family',
+                source: 'turn',
+                turn: 7,
+                role: 'daughter',
+                relationNote: 'дочь Джона',
+                groups: ['family members'],
+            },
+            {
+                name: 'Брам',
+                id: 'bram',
+                relation: 'acquaintance',
+                source: 'turn',
+                turn: 7,
+                role: 'mercenary',
+                stanceHint: 0,
+                reason: 'met at the gate',
+            },
+        ]);
+        // No newcomers: nothing kept.
+        expect(applyTurnPass(tavernInput(), turnPass(), ctx()).state.generator).toBeUndefined();
     });
 });

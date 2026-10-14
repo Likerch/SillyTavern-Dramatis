@@ -4,6 +4,7 @@ import { STANCES } from '../../domain/model';
 import type { CharacterProfile, CharacterState, ChatState, FieldMeta, Origin, Stance } from '../../domain/model';
 import { stanceBehaviour, stanceLabel } from '../../domain/ladders';
 import type { Gender } from '../../domain/ladders';
+import { PROVISIONAL_SOURCES } from '../../domain/newcomers';
 import { LIMITS, cleanList, cleanText, getPath, isCardMeta, isLocked, metaAt } from '../../domain/profile-defaults';
 import { select } from '../../ui/controls';
 import type { SelectOption } from '../../ui/controls';
@@ -135,7 +136,7 @@ export function unitBlock(ctx: SheetCtx, options: UnitOptions, children: Child[]
     const open = ctx.session.expanded.has(quotesKey);
 
     const head: Child[] = [el('div', { class: 'dramatis-sheet-unit-title', text: options.title })];
-    if (meta) head.push(originBadge(ctx, meta.origin, isCardMeta(meta)));
+    if (meta) head.push(originBadge(ctx, meta.origin, isCardMeta(meta), isGuess(meta)));
     const lock = keyed(
         button({
             icon: locked ? 'fa-lock' : 'fa-lock-open',
@@ -185,12 +186,17 @@ export function unitBlock(ctx: SheetCtx, options: UnitOptions, children: Child[]
     ]);
 }
 
+/** A generated value the dice drew or a role template gave: a provisional guess the story may replace. */
+export function isGuess(meta: FieldMeta | undefined): boolean {
+    return meta?.origin === 'generated' && !!meta.sources?.some((source) => PROVISIONAL_SOURCES.includes(source));
+}
+
 /**
  * The provenance badge; `fromCard`: the author wrote it into the card's structured intent («автор · в карточке»), not
- * read from the text.
+ * read from the text; `guess`: the dice or a template made it («✎ догадка»).
  */
-export function originBadge(ctx: SheetCtx, origin: Origin, fromCard = false): HTMLElement {
-    const key = fromCard ? 'card' : origin;
+export function originBadge(ctx: SheetCtx, origin: Origin, fromCard = false, guess = false): HTMLElement {
+    const key = fromCard ? 'card' : guess ? 'guess' : origin;
     return el('span', {
         class: 'dramatis-sheet-origin',
         data: { origin: key },

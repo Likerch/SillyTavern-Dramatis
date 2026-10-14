@@ -31,7 +31,12 @@ export interface FieldMeta {
     locked?: boolean;
     /** Short quotes from the sources that support the value (author intent, docs/model.md §7). */
     evidence?: string[];
-    /** Stable ids of the sources the evidence was quoted from ('card.description', 'greeting:1', 'book#12'). */
+    /**
+     * Stable ids of the sources the evidence was quoted from ('card.description', 'greeting:1', 'book#12'). On a
+     * generated field, what it was made from: 'dice', 'template' and 'default' mark a provisional guess that the story
+     * and a promotion may replace (docs/model.md §10.2); 'world' and 'reputation' a value taken from the card's rules or
+     * reputation; 'turn' / 'heuristic' on a story field, who read it.
+     */
     sources?: string[];
 }
 
@@ -491,6 +496,11 @@ export interface CharacterProfile {
     meta: Record<string, FieldMeta>;
     /** Minors are excluded from sexual appetites by the content boundary (Maestro rule, docs/model.md §5.7). */
     minor?: boolean;
+    /**
+     * Groups / classes of the card's rules and reputation this character belongs to, beyond species and role (what the
+     * story showed of a new face: «family members», "Beasts"). Rules and reputation match on them.
+     */
+    groups?: string[];
 }
 
 /** World-level reading of a card (§7). */
@@ -887,10 +897,60 @@ export interface CardWorldBase {
     reputation: ReputationSeed[];
 }
 
+/**
+ * How a new face stands to the player's character as the story shows it (docs/model.md §10.2 «Эскиз по истории»):
+ * kin, a partner, a servant or a master, a friend, a rival or an enemy, someone met before, a stranger — or not clear.
+ */
+export const PLAYER_RELATIONS = [
+    'stranger',
+    'acquaintance',
+    'family',
+    'partner',
+    'friend',
+    'servant',
+    'master',
+    'rival',
+    'enemy',
+    'unknown',
+] as const;
+export type PlayerRelation = (typeof PLAYER_RELATIONS)[number];
+
+/**
+ * What the story showed about a face Dramatis has no profile for, or only a sketch (the turn pass's `newcomers`, or
+ * cheap word heuristics when no pass ran). Story facts: the generator sketches and promotes around them, never against.
+ */
+export interface NewcomerFacts {
+    /** As the story writes it. */
+    name: string;
+    /** Profile id, once the face has one. */
+    id?: string;
+    /** Role or occupation in story words («дочь», "gate guard"). */
+    role?: string;
+    /** Species or kind («ламия», "monster"). */
+    species?: string;
+    relation: PlayerRelation;
+    /** The story's words for the relation («дочь Джона», "his landlady"). */
+    relationNote?: string;
+    /** −3…+3 as the story shows it; absent when it shows nothing. */
+    stanceHint?: Stance;
+    /** Why, in story words. */
+    reason?: string;
+    /** Groups / classes of the card's rules and reputation they belong to (the names the prompt listed). */
+    groups?: string[];
+    /** The turn pass read it, or the word heuristics guessed it. */
+    source: 'turn' | 'heuristic';
+    /** Committed turn it was last seen in. */
+    turn: number;
+}
+
 /** What the generator keeps per chat. */
 export interface GeneratorState {
     /** Names whose generated face the user undid: never sketched again in this chat. */
     dismissed: string[];
+    /** What the story showed about new faces (oldest first, capped); newer facts about a face replace older ones. */
+    facts?: NewcomerFacts[];
+    /** Ids of generated characters rebuilt from the story (repair of dice-made faces): never rebuilt again by itself. */
+    regrounded?: string[];
 }
 
 /** One appetite as it matters this turn (mirrors render.ts AppetiteNow). */

@@ -4,6 +4,7 @@ import {
     GENERAL_TACTICS,
     PROMOTION,
     RULE_TIES,
+    DICE_SOURCE,
     TEMPLATE_SOURCE,
     applyGenerated,
     applyRules,
@@ -268,8 +269,9 @@ describe('sketchProfile', () => {
         });
         expect(player.behaviour).toMatch(/чужак/);
         expect(sketch.meta['core.want']).toEqual({ origin: 'generated', sources: [TEMPLATE_SOURCE] });
-        expect(sketch.meta[`ties.${PLAYER_ID}`]?.sources).toEqual([TEMPLATE_SOURCE]);
-        expect(sketch.meta['core.values']).toEqual({ origin: 'generated' });
+        // The stance of a stranger is the dice's, its words a template's: both a guess (docs/model.md §10.2).
+        expect(sketch.meta[`ties.${PLAYER_ID}`]?.sources).toEqual([DICE_SOURCE, TEMPLATE_SOURCE]);
+        expect(sketch.meta['core.values']).toEqual({ origin: 'generated', sources: [DICE_SOURCE] });
         // The same name gives the same sketch; English templates for an English card.
         expect(sketchProfile('Стражник у ворот', p, { lang: 'ru' })).toEqual(sketch);
         expect(prior.want.en).toContain(sketchProfile('Gate guard', p).core.want);

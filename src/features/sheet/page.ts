@@ -10,6 +10,7 @@ import { renderAppetites } from './section-appetites';
 import { renderCore } from './section-core';
 import { renderHistory, renderNow } from './section-now';
 import { renderTies } from './section-ties';
+import { guessedTag, isGeneratedFace, regroundButton } from './reground';
 import { SECTIONS } from './types';
 import type { SectionId, SheetCtx } from './types';
 
@@ -77,6 +78,7 @@ export function renderCharacterPage(ctx: SheetCtx, id: string, narrow: boolean):
         backButton(ctx),
         el('div', { class: 'dramatis-sheet-header-top' }, [
             el('h3', { class: 'dramatis-sheet-title', text: profile.name }),
+            isGeneratedFace(ctx, profile) ? regroundButton(ctx, id) : null,
             remove,
         ]),
         sub ? el('div', { class: 'dramatis-muted', text: sub }) : null,
@@ -89,6 +91,7 @@ export function renderCharacterPage(ctx: SheetCtx, id: string, narrow: boolean):
             extra
                 ? el('span', { class: 'dramatis-sheet-tag', title: t('sheet.extraHint'), text: t('sheet.extra') })
                 : null,
+            guessedTag(ctx, id),
         ]),
     ]);
 

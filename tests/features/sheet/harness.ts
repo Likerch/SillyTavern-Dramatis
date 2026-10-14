@@ -14,6 +14,7 @@ import { sheetModule } from '../../../src/features/sheet';
 import { SHEET_STRINGS } from '../../../src/features/sheet/strings';
 import type { IntentApi, IntentReadResult, SheetSettings } from '../../../src/features/sheet/types';
 import type { TranslateApi } from '../../../src/features/translate/api';
+import type { GeneratorApi } from '../../../src/features/generator/api';
 import type { App, DramatisSettings, SettingsService, Unsubscribe } from '../../../src/shared/contracts';
 import { UI_STRINGS, createUi } from '../../../src/ui';
 import type { UiImpl } from '../../../src/ui';
@@ -188,6 +189,8 @@ export interface HarnessOptions {
     intent?: FakeIntent | null;
     /** The «translate» module's API (absent: the module is off). */
     translate?: TranslateApi;
+    /** The generator's API (absent: the module is off). */
+    generator?: GeneratorApi;
     secrets?: DramatisSettings['secrets'];
     width?: number;
 }
@@ -251,7 +254,9 @@ export function harness(options: HarnessOptions = {}): Harness {
                       ? intent
                       : key === 'translate'
                         ? options.translate
-                        : undefined) as T | undefined,
+                        : key === 'generator'
+                          ? options.generator
+                          : undefined) as T | undefined,
             expose: (key: string, api: unknown) => void exposed.set(key, api),
         },
         rng: () => 0.5,

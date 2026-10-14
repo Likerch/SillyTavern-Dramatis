@@ -321,7 +321,7 @@ describe('generator module', () => {
             card: (c) => ({ ...c, characters: [ilva()] }),
             cast: [{ name: 'Ильва', present: true, details: {} }],
         });
-        expect(r.tasks).toEqual(['dramatis.generate']);
+        expect(r.tasks).toEqual(['dramatis.generate', 'dramatis.reground']);
         expect(r.api.busy()).toEqual([]);
         expect(r.maestro.requests).toHaveLength(0);
         expect(r.engine.state.extras).toEqual([]);

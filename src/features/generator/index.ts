@@ -1,14 +1,24 @@
 // Module `generator` (stage 3, docs/model.md §10): personalities for the faces the story brings in and for the gaps the
 // author left. Works on the story state only through the engine (`app.modules.api<EngineApi>(ENGINE_API)`).
 // - New faces: a name in the DES cast of a committed reply (the one the user's last message answered) without a profile
-//   gets a sketch — no model: role from DES details, «Мысли» and the name, parameters drawn against those present, role
-//   templates — saved as a chat extra with its live state, group rules applied, a journal record and a notice «Новое
-//   лицо: …». A reply still open to swipes leaves nothing behind (П11): its faces wait for its commit.
+//   gets a sketch — no model — grounded in what the story showed (docs/model.md §10.2 «Эскиз по истории»): the turn
+//   pass's newcomer facts (relation to the player, role, kind, the world's groups), else word heuristics (kinship,
+//   partner, servant, master words next to the name); role from them and DES details, the stance from the story, the
+//   reputation of their groups, a world rule aimed at the player (they want him, not strike him), a mild default — the
+//   tone's dice only for a stranger; values, drives and temperament drawn from the role (provisional guesses), role
+//   templates; saved as a chat extra with its live state, group rules applied (on its groups too), a journal record and
+//   a notice «Новое лицо: …». A reply still open to swipes leaves nothing behind (П11): its faces wait for its commit.
+//   Facts that arrive later ground an existing face without a model (its groups, kind, and a guessed stance).
 // - Promotion: committed turns count scenes and the player's direct address per character (CharacterState.stats);
 //   a character who earned a draft or a portrait gets one from the background model once the next reply is in (leader
 //   tab only, never during a generation; refusals such as 'not-leader' or 'cap' are skipped and retried on a later
-//   turn). Portraits read the character's CK archive as hints, or, without one, give Maestro ready BunnyMo tags
-//   («Оформить», settings.autoArchives); goals go to the canon.
+//   turn). A new face is promoted on the story (newFaceMessages): the card's world, rules and reputation, what the chat
+//   said and the story showed, the facts; the author's, story's and user's values are fixed, the dice's are guesses the
+//   model may replace. Portraits read the character's CK archive as hints, or, without one, give Maestro ready BunnyMo
+//   tags («Оформить», settings.autoArchives); goals go to the canon.
+// - Repair: faces an older build drew from dice (generator.needsGrounding) are rebuilt on the story once, several per
+//   background request (task REGROUND_TASK; leader tab, not in economy mode, after a reply), keeping their level and the
+//   user's edits; the sheet's «Пересобрать по истории» does it for one face or for all at once (interactive).
 // - Gaps: authored characters present in the scene with an empty core get a fill after the intent reading (balanced
 //   and cinema modes; economy skips it; not while a generation runs) — only the empty fields it asks for, never the
 //   author's, the inferred, the user's or locked ones. A card character the reading or the card's text knows is filled
@@ -16,12 +26,13 @@
 //   it) with no dice — values, drives, temperament, tactics and the stance included; promoting one does the same. The
 //   dice stay for the faces the story brings in.
 // - Rules: group / species / world appetite rules are drawn for new faces and again whenever the rules change.
-// - API `generator` (api.ts) for the sheet UI: fillGaps, promote, pin — interactive requests.
+// - API `generator` (api.ts) for the sheet UI: fillGaps, promote, pin, reground — interactive requests.
 // Needs Maestro (background model, journal, notices); sketches themselves are code only.
 import { lodLabel, stanceLabel } from '../../domain/ladders';
 import { chatLevers } from '../../domain/levers';
 import {
     GENERATE_TASK,
+    REGROUND_TASK,
     applyGenerated,
     applyRules,
     applyTagFields,
@@ -37,14 +48,22 @@ import {
     groundedPaths,
     groundedSchema,
     groundedSources,
+    groundWithFacts,
     holderMatches,
     isAuthored,
     maxLod,
     missingFields,
     needsFill,
+    needsGrounding,
+    newFaceMessages,
     paramsFromProfile,
     parseCandidates,
+    parseRegrounds,
     pickCandidate,
+    pickFitting,
+    playerRuleFor,
+    regroundMessages,
+    regroundSchema,
     sampleParams,
     saidAbout,
     sheetTags,
@@ -58,15 +77,22 @@ import type {
     CastMember,
     GenCandidate,
     GenContext,
+    GenParams,
     GenSubject,
     GeneratorKind,
+    RegroundSubject,
     RuleContext,
     RuleGrant,
+    RulePerson,
+    SampleOptions,
     TagFields,
 } from '../../domain/generator';
+import { clipText } from '../../domain/intent-prompt';
 import type { CardBookEntry } from '../../domain/intent-prompt';
 import { PLAYER_ID } from '../../domain/model';
-import type { CharacterProfile, ChatState, Lod, Scale5 } from '../../domain/model';
+import type { CharacterProfile, ChatState, Lod, NewcomerFacts, Scale5 } from '../../domain/model';
+import { factsFor, factsOf, heuristicFacts, mergeFacts, relationGroups, worldGroups } from '../../domain/newcomers';
+import { LIMITS, cleanList } from '../../domain/profile-defaults';
 import { matchName, normalizeName, presentFromDes, presentFromText } from '../../domain/presence';
 import { strangerStance } from '../../domain/reputation';
 import { UNKNOWN_ROLE, detectRole, roleIds } from '../../domain/role-priors';
@@ -107,8 +133,12 @@ const GENDER_KEY_RE = /gender|sex|^пол$|^пол_|_пол$/i;
 const TRANSIENT = new Set(['not-leader', 'cap', 'maestro-stopped', 'workshop']);
 /** Defaulted fields the dice of a fill write when nobody set them (initiative, persistence, resting mood). */
 const DICE_DEFAULTED = ['core.proactivity', 'core.commitment', 'core.baselineMood'];
+/** Faces rebuilt on the story per request (the repair, the sheet's «Пересобрать»). */
+export const REGROUND_BATCH = 4;
+/** Story log lines of a face sent with a promotion or a rebuild. */
+const SEEN_LINES = 8;
 
-type Target = 'fill' | 'draft' | 'portrait';
+type Target = 'fill' | 'draft' | 'portrait' | 'reground';
 
 interface ProfileRef {
     store: 'extras' | 'card';
@@ -260,7 +290,18 @@ function startGenerator({ app, settings, log, own, session }: ModuleContext<Gene
 
     /* ---------------------------------------------------------------- rules */
 
-    function ruleContext(state: ChatState, profiles: readonly CharacterProfile[]): RuleContext {
+    /** The world's groups and classes by name (rules, reputation, group profiles): what new faces may belong to. */
+    function groupsOfWorld(state: Pick<ChatState, 'rules' | 'reputation'>, profiles: readonly CharacterProfile[]) {
+        return worldGroups(state.rules, state.reputation, profiles);
+    }
+
+    /** The player as a rule's class target: in a family scenario he is one of the family. */
+    function playerPerson(world: readonly string[]): RulePerson {
+        const kin = relationGroups('family', world);
+        return kin.length ? { id: PLAYER_ID, groups: kin } : { id: PLAYER_ID };
+    }
+
+    function ruleContext(state: ChatState, profiles: readonly CharacterProfile[], intents = false): RuleContext {
         return {
             population: [
                 ...profiles.map((profile) => ({
@@ -269,12 +310,148 @@ function startGenerator({ app, settings, log, own, session }: ModuleContext<Gene
                     ...(profile.role ? { role: profile.role } : {}),
                     ...(profile.gender ? { gender: profile.gender } : {}),
                     ...(profile.minor ? { minor: true } : {}),
+                    ...(profile.groups?.length ? { groups: [...profile.groups] } : {}),
                 })),
-                { id: PLAYER_ID },
+                playerPerson(groupsOfWorld(state, profiles)),
             ],
             knowsPlayer: (id) => state.characters[id]?.knowsPlayer ?? true,
             strength: leversFor(app.settings.get(), state.overrides).appetiteStrength,
+            ...(intents ? { intents: true } : {}),
         };
+    }
+
+    /* ---------------------------------------------------------------- what the story showed */
+
+    /**
+     * What the story showed about a face: the turn pass's facts kept in the chat, completed (never overruled) by the
+     * word heuristics over the recent chat and its DES details. Null when nothing is known.
+     */
+    function factsAbout(
+        view: EngineView,
+        who: { id?: string; name: string; aliases?: string[] },
+        details: readonly string[] = [],
+    ): NewcomerFacts | null {
+        const stored = factsFor(factsOf(view.state), who);
+        if (stored && stored.relation !== 'unknown') return stored;
+        const guess = heuristicFacts(who.name, [...details, ...recentMessages(SAID_MESSAGES)], {
+            playerName: view.playerName,
+            groups: groupsOfWorld(view.state, view.profiles),
+            lang: lang(),
+        });
+        if (!guess) return stored ?? null;
+        return mergeFacts(stored, { ...guess, turn: view.state.turn });
+    }
+
+    /** The groups a face belongs to: its own, the story's and those its relation implies in this world. */
+    function groupsFor(view: EngineView, own: readonly string[], facts: NewcomerFacts | null): string[] {
+        const world = groupsOfWorld(view.state, view.profiles);
+        return cleanList(
+            [...own, ...(facts?.groups ?? []), ...relationGroups(facts?.relation, world)],
+            LIMITS.aliases,
+            LIMITS.name,
+        );
+    }
+
+    /** A profile's role as a role prior id: the id itself, else detected in its role words and name. */
+    function priorRole(profile: Pick<CharacterProfile, 'role' | 'name'>): string {
+        const role = profile.role?.trim();
+        if (role && roleIds().includes(role)) return role;
+        return detectRole([...(role ? [{ text: role, weight: 3 }] : []), profile.name]);
+    }
+
+    /**
+     * How a grounded draw meets the player (generator.sampleParams): the facts, the reputation among the face's groups
+     * (or everyone's), an appetite rule of theirs aimed at the player.
+     */
+    function groundingOf(
+        view: EngineView,
+        person: Pick<CharacterProfile, 'species' | 'role' | 'groups' | 'minor'>,
+        role: string,
+        facts: NewcomerFacts | null,
+    ): SampleOptions {
+        const labels = [
+            ...(person.groups ?? []),
+            ...(person.species ? [person.species] : []),
+            ...(role !== UNKNOWN_ROLE ? [role] : []),
+        ];
+        const repute = strangerStance(view.state.reputation, labels);
+        const rule = settings.rules
+            ? playerRuleFor(view.state.rules, person, playerPerson(groupsOfWorld(view.state, view.profiles)))
+            : null;
+        return {
+            grounded: true,
+            facts,
+            rule,
+            lang: lang(),
+            ...(repute
+                ? {
+                      reputation: repute.stance,
+                      ...(repute.label ? { reputationLabel: repute.label } : {}),
+                      reputationGeneral: repute.among.trim() === '*',
+                  }
+                : {}),
+        };
+    }
+
+    /** The story facts of a face in prompt lines. */
+    function factLines(facts: NewcomerFacts | null): string[] {
+        if (!facts) return [];
+        const note = facts.relationNote ? ` — «${facts.relationNote}»` : '';
+        const reason = facts.reason ? ` (${facts.reason})` : '';
+        return [
+            facts.relation !== 'unknown'
+                ? `To the player's character: ${facts.relation}${note}${reason}`
+                : note
+                  ? `The story calls them${note}`
+                  : '',
+            facts.stanceHint !== undefined
+                ? `Stance the story shows toward the player: ${stanceLabel(facts.stanceHint, 'en')} (${facts.stanceHint})`
+                : '',
+            facts.role ? `Role in the story: ${facts.role}` : '',
+            facts.species ? `Kind: ${facts.species}` : '',
+            facts.groups?.length ? `Belongs to: ${facts.groups.join('; ')}` : '',
+        ].filter(Boolean);
+    }
+
+    /** What the story showed of a face: its story log lines and what it is doing now. */
+    function seenOf(view: EngineView, profile: CharacterProfile): string[] {
+        const live = view.state.characters[profile.id];
+        const lines = view.state.log
+            .filter((event) => event.character === profile.id && event.kind !== 'generator.new')
+            .slice(-SEEN_LINES)
+            .map((event) => event.text);
+        if (live?.scene.doing) lines.push(`Doing now: ${live.scene.doing}`);
+        if (live?.scene.goal) lines.push(`Wants in the scene: ${live.scene.goal}`);
+        return lines;
+    }
+
+    /** The card's world in prompt lines: a clipped description, its rules and the player's reputation. */
+    function worldLinesOf(view: EngineView): string[] {
+        let card: ReturnType<typeof app.readers.card.current> = null;
+        try {
+            card = app.readers.card.current();
+        } catch (error) {
+            log.debug('card unavailable for the world lines', error);
+        }
+        const lines: string[] = [];
+        if (card?.description?.trim()) lines.push(`Card description: ${clipText(card.description, 1500)}`);
+        if (card?.personality?.trim()) lines.push(`Card personality: ${clipText(card.personality, 500)}`);
+        for (const rule of view.state.rules.slice(0, 12)) {
+            const target =
+                rule.target.mode === 'class'
+                    ? ` → ${rule.target.class}`
+                    : rule.target.mode === 'player'
+                      ? " → the player's character"
+                      : '';
+            lines.push(`Rule of the world — ${rule.holders}${target}: ${rule.label || rule.kind}`);
+        }
+        for (const entry of view.state.reputation.slice(0, 8)) {
+            const among = entry.among.trim() === '*' ? 'everyone' : entry.among;
+            lines.push(
+                `Reputation of the player's character among ${among}: ${entry.label || '—'} (${stanceLabel(entry.stance, 'en')})`,
+            );
+        }
+        return lines;
     }
 
     /** Starting pressure of drawn appetites in the live state. */
@@ -436,17 +613,29 @@ function startGenerator({ app, settings, log, own, session }: ModuleContext<Gene
             sketched.add(`${key}|${normalizeName(name)}`);
             if (sketches.some((item) => matchName(name, [item.profile], { strict: true }))) continue;
             const member = des.find((item) => normalizeName(item.name) === normalizeName(name));
-            const role = detectRole(roleSources(name, member));
-            const reputation = strangerStance(view.state.reputation, role === UNKNOWN_ROLE ? [] : [role])?.stance;
+            // What the story showed: the turn pass's facts, else the words around the name (the chat, DES details).
+            const facts = factsAbout(view, { name }, Object.values(member?.details ?? {}));
+            const identity = identityOf(member);
+            const role = detectRole([
+                ...(facts?.role ? [{ text: facts.role, weight: 4 }] : []),
+                ...roleSources(name, member),
+            ]);
+            const groups = groupsFor(view, [], facts);
+            const species = identity.species ?? facts?.species;
+            const person = {
+                ...(species ? { species } : {}),
+                ...(role !== UNKNOWN_ROLE ? { role } : facts?.role ? { role: facts.role } : {}),
+                groups,
+            };
             const params = sampleParams(
                 role,
                 view.state.worldTone,
                 cast,
                 app.rng,
                 levers().diversity,
-                reputation === undefined ? {} : { reputation },
+                groundingOf(view, person, role, facts),
             );
-            const profile = sketchProfile(name, params, { lang: lang(), taken, ...identityOf(member) });
+            const profile = sketchProfile(name, params, { lang: lang(), taken, ...identity, facts, groups });
             taken.add(profile.id);
             cast.push(castMember(profile));
             sketches.push({ profile, role });
@@ -477,7 +666,7 @@ function startGenerator({ app, settings, log, own, session }: ModuleContext<Gene
                 const result = applyRules(
                     fresh,
                     state.rules,
-                    ruleContext(state, [...view.card.characters, ...state.extras, ...fresh]),
+                    ruleContext(state, [...view.card.characters, ...state.extras, ...fresh], true),
                     app.rng,
                 );
                 fresh = result.profiles;
@@ -553,7 +742,12 @@ function startGenerator({ app, settings, log, own, session }: ModuleContext<Gene
         return groundedSources(card, book, namesOf(profile), greeting);
     }
 
-    function contextOf(view: EngineView, profile: CharacterProfile, sources = ''): GenContext {
+    function contextOf(
+        view: EngineView,
+        profile: CharacterProfile,
+        sources = '',
+        facts: NewcomerFacts | null = null,
+    ): GenContext {
         const des = app.readers.des.available() ? app.readers.des.lastCast() : [];
         const member = des.find((item) => matchName(item.name, [profile], { strict: true }) === profile.id);
         const said = [
@@ -583,7 +777,7 @@ function startGenerator({ app, settings, log, own, session }: ModuleContext<Gene
                   .filter(Boolean)
                   .join('\n')
             : '';
-        return {
+        const out: GenContext = {
             worldTone: view.state.worldTone,
             playerName: view.playerName,
             lang: lang(),
@@ -593,6 +787,16 @@ function startGenerator({ app, settings, log, own, session }: ModuleContext<Gene
             ...(story ? { story } : {}),
             ...(sources ? { sources } : {}),
         };
+        if (!sources) {
+            // A face the story brought in: the world it lives in, what the story showed of it, who it is.
+            const world = worldLinesOf(view);
+            if (world.length) out.world = world;
+            const seen = seenOf(view, profile);
+            if (seen.length) out.seen = seen;
+            const known = factLines(facts);
+            if (known.length) out.facts = known;
+        }
+        return out;
     }
 
     function subjectOf(profile: CharacterProfile, missing: string[], tags: string[]): GenSubject {
@@ -635,33 +839,48 @@ function startGenerator({ app, settings, log, own, session }: ModuleContext<Gene
         return candidate ? { candidate } : { error: 'no-candidates' };
     }
 
-    /** Asks the model for three candidates and picks one; a fill the dice alone can answer needs no model. */
+    /**
+     * Asks the model for three candidates and picks one; a fill the dice alone can answer needs no model. A face the
+     * story brought in (params.fixed) is written on the story: newFaceMessages, its core back in the answer.
+     */
     async function candidateFor(
-        target: Target,
+        target: Exclude<Target, 'reground'>,
         view: EngineView,
         profile: CharacterProfile,
-        params: ReturnType<typeof paramsFromProfile>,
+        params: GenParams,
         tags: string[],
         background: boolean,
+        facts: NewcomerFacts | null = null,
     ): Promise<{ candidate?: GenCandidate; error?: string }> {
         const missing = target === 'fill' ? missingFields(profile) : [];
+        const newFace = !!params.fixed;
         if (target === 'fill' && !fillFields(missing).length) return { candidate: emptyCandidate() };
         const kind: GeneratorKind = target;
-        const schema = generatorSchema(kind);
+        const schema = generatorSchema(kind, newFace);
+        const subject = subjectOf(profile, missing, tags);
+        const context = contextOf(view, profile, '', facts);
         const result = await app.llm.request<unknown>({
             task: GENERATE_TASK,
-            messages: generatorMessages(kind, subjectOf(profile, missing, tags), params, contextOf(view, profile)),
-            maxTokens: kind === 'draft' ? 1800 : 4000,
+            messages: newFace
+                ? newFaceMessages(kind, subject, params, context)
+                : generatorMessages(kind, subject, params, context),
+            maxTokens: kind === 'draft' ? 2200 : 4000,
             temperature: 0.9,
             schema: { name: schema.name, schema: schema.schema },
             background,
         });
         if (!result.ok) return { error: result.error ?? 'failed' };
-        const candidate = pickCandidate(parseCandidates(result.data ?? parseJson(result.text)), app.rng);
+        const parsed = parseCandidates(result.data ?? parseJson(result.text));
+        // A new face: a take that does not fit the story and the world is not picked while another does.
+        const candidate = newFace ? pickFitting(parsed, app.rng) : pickCandidate(parsed, app.rng);
         return candidate ? { candidate } : { error: 'no-candidates' };
     }
 
-    async function generate(id: string, target: Target, background: boolean): Promise<GeneratorOutcome> {
+    async function generate(
+        id: string,
+        target: Exclude<Target, 'reground'>,
+        background: boolean,
+    ): Promise<GeneratorOutcome> {
         const fail = (error: string): GeneratorOutcome => ({ ok: false, written: [], error });
         const eng = engine();
         const api = maestro();
@@ -705,21 +924,34 @@ function startGenerator({ app, settings, log, own, session }: ModuleContext<Gene
                     ...(tagFields?.coping ? { coping: tagFields.coping } : {}),
                 };
             } else {
+                // A face the story brought in: grounded in the story, the dice's values are only guesses.
                 const cast = view.present
                     .filter((other) => other !== id)
                     .map((other) => view.byId.get(other))
                     .filter(isProfile)
                     .map(castMember);
-                const role = hinted.role ?? detectRole([hinted.name]);
-                const sampled = sampleParams(role, view.state.worldTone, cast, app.rng, levers().diversity);
-                const params = paramsFromProfile(hinted, sampled);
-                answer = await candidateFor(target, view, hinted, params, tags, background);
+                const facts = factsAbout(view, hinted);
+                const role = priorRole(hinted);
+                const person = { ...hinted, groups: groupsFor(view, hinted.groups ?? [], facts) };
+                const sampled = sampleParams(
+                    role,
+                    view.state.worldTone,
+                    cast,
+                    app.rng,
+                    levers().diversity,
+                    groundingOf(view, person, role, facts),
+                );
+                const everyGenerated = repairDue(view, hinted);
+                const params = paramsFromProfile(hinted, sampled, { everyGenerated });
+                answer = await candidateFor(target, view, hinted, params, tags, background, facts);
                 options = {
                     lod,
                     origin: 'generated',
                     kind: target,
                     params,
                     lang: lang(),
+                    ground: true,
+                    ...(everyGenerated ? { everyGenerated: true } : {}),
                     // A fill writes the gaps it asked for and what the dice drew, nothing else the answer holds.
                     ...(target === 'fill' ? { only: [...missingFields(hinted), ...DICE_DEFAULTED] } : {}),
                     ...(tagFields?.coping ? { coping: tagFields.coping } : {}),
@@ -742,6 +974,7 @@ function startGenerator({ app, settings, log, own, session }: ModuleContext<Gene
                 return applied.profile;
             };
             let saved: boolean;
+            const repaired = !grounded && repairDue(view, hinted);
             if (extra) {
                 saved = await eng.updateState((state) => {
                     if (chatOf(state) !== key) return;
@@ -751,6 +984,8 @@ function startGenerator({ app, settings, log, own, session }: ModuleContext<Gene
                     state.extras[at] = next;
                     const live = state.characters[id];
                     if (live) state.characters[id] = syncLiveState(live, out.before ?? null, next);
+                    // A promotion of a dice-made face rebuilt it on the story: the repair is done.
+                    if (repaired) markRegrounded(state, [id]);
                 });
             } else {
                 saved = await eng.updateProfiles((card) => {
@@ -827,6 +1062,300 @@ function startGenerator({ app, settings, log, own, session }: ModuleContext<Gene
         }
     }
 
+    /* ---------------------------------------------------------------- repair: rebuilding dice-made faces */
+
+    function regroundedIn(state: Pick<ChatState, 'generator'>): Set<string> {
+        const list = state.generator?.regrounded;
+        return new Set(Array.isArray(list) ? list : []);
+    }
+
+    /** A face an older build drew from dice, not rebuilt yet: its generated fields are all guesses. */
+    function repairDue(view: EngineView, profile: CharacterProfile): boolean {
+        return needsGrounding(profile) && !regroundedIn(view.state).has(profile.id);
+    }
+
+    function markRegrounded(state: ChatState, ids: readonly string[]): void {
+        const done = regroundedIn(state);
+        for (const id of ids) done.add(id);
+        state.generator = { ...(state.generator ?? { dismissed: [] }), regrounded: [...done] };
+    }
+
+    /** A character the generator made (an extra, or a card character nobody wrote): it may be rebuilt on the story. */
+    function generatedFace(view: EngineView, profile: CharacterProfile): boolean {
+        if (profile.kind === 'group') return false;
+        if (view.state.extras.some((item) => item.id === profile.id)) return true;
+        return !Object.values(profile.meta).some((meta) => meta.origin === 'author' || meta.origin === 'inferred');
+    }
+
+    /** The kind of fields a level keeps (a rebuild writes nothing beyond the face's level). */
+    function levelKind(lod: Lod): GeneratorKind | 'sketch' {
+        return lod === 'sketch' ? 'sketch' : lod;
+    }
+
+    /**
+     * Rebuilds up to REGROUND_BATCH faces on the story in one request (regroundMessages): the dice's values (with
+     * `everyGenerated`, every generated field) give way to what the story and the world support; the level, the
+     * author's, the story's and the user's fields and locks stay. Each face is marked rebuilt, so the repair never
+     * runs on it again by itself.
+     */
+    async function regroundBatch(ids: readonly string[], background: boolean): Promise<GeneratorOutcome> {
+        const fail = (error: string): GeneratorOutcome => ({ ok: false, written: [], error });
+        const eng = engine();
+        const api = maestro();
+        if (!eng) return fail('no-engine');
+        const view = eng.view();
+        if (!view) return fail('no-chat');
+        if (background && (!api || !api.leader.isLeader())) return fail('not-leader');
+        const faces = ids
+            .map((id) => view.byId.get(id))
+            .filter(isProfile)
+            .filter((profile) => generatedFace(view, profile) && !inflight.has(profile.id))
+            .slice(0, REGROUND_BATCH);
+        if (!faces.length) return fail(ids.length ? 'busy' : 'unknown');
+        const key = chatOf(view.state);
+        const items: { id: string; params: GenParams; everyGenerated: boolean }[] = [];
+        const subjects: RegroundSubject[] = [];
+        for (const profile of faces) {
+            const facts = factsAbout(view, profile);
+            const role = priorRole(profile);
+            const person = { ...profile, groups: groupsFor(view, profile.groups ?? [], facts) };
+            const cast = view.present
+                .filter((other) => other !== profile.id)
+                .map((other) => view.byId.get(other))
+                .filter(isProfile)
+                .map(castMember);
+            const sampled = sampleParams(
+                role,
+                view.state.worldTone,
+                cast,
+                app.rng,
+                levers().diversity,
+                groundingOf(view, person, role, facts),
+            );
+            // The user's own rebuild and the repair of a dice-made face take every generated field as a guess.
+            const everyGenerated = !background || repairDue(view, profile);
+            const params = paramsFromProfile(profile, sampled, { everyGenerated });
+            const context = contextOf(view, profile, '', facts);
+            items.push({ id: profile.id, params, everyGenerated });
+            subjects.push({
+                subject: subjectOf(profile, [], []),
+                params,
+                lod: profile.lod,
+                ...(context.said?.length ? { said: context.said } : {}),
+                ...(context.seen?.length ? { seen: context.seen } : {}),
+                ...(context.facts?.length ? { facts: context.facts } : {}),
+            });
+        }
+        for (const item of items) inflight.add(item.id);
+        try {
+            const names = faces.map((profile) => profile.name);
+            const schema = regroundSchema(names);
+            const shared = contextOf(view, faces[0]!);
+            const result = await app.llm.request<unknown>({
+                task: REGROUND_TASK,
+                messages: regroundMessages(subjects, { ...shared, said: [], relations: [] }),
+                maxTokens: Math.min(7000, 1600 * faces.length),
+                temperature: 0.6,
+                schema: { name: schema.name, schema: schema.schema },
+                background,
+            });
+            if (!result.ok) {
+                const error = result.error ?? 'failed';
+                if (background) for (const item of items) noteAttempt(view, item.id, 'reground', !TRANSIENT.has(error));
+                if (!TRANSIENT.has(error)) log.debug('rebuilding faces on the story failed', error);
+                return fail(error);
+            }
+            const answers = parseRegrounds(result.data ?? parseJson(result.text), names);
+            let changes: { ref: ProfileRef; before: CharacterProfile; after: CharacterProfile }[] = [];
+            let written: string[] = [];
+            const rebuild = (fresh: CharacterProfile): CharacterProfile => {
+                const item = items.find((entry) => entry.id === fresh.id);
+                const candidate = answers.get(faces.find((profile) => profile.id === fresh.id)?.name ?? '');
+                if (!item || !candidate) return fresh;
+                const applied = applyGenerated(fresh, candidate, {
+                    lod: fresh.lod,
+                    origin: 'generated',
+                    kind: levelKind(fresh.lod),
+                    params: item.params,
+                    lang: lang(),
+                    ground: true,
+                    ...(item.everyGenerated ? { everyGenerated: true } : {}),
+                });
+                written.push(...applied.written);
+                return applied.profile;
+            };
+            const chat = app.host.chatId();
+            const extras = new Set(view.state.extras.map((profile) => profile.id));
+            const cardIds = items.map((item) => item.id).filter((id) => !extras.has(id));
+            let cardAfter: CharacterProfile[] = [];
+            let cardBefore: CharacterProfile[] = [];
+            if (cardIds.length) {
+                await eng.updateProfiles((card) => {
+                    cardBefore = [];
+                    cardAfter = [];
+                    written = [];
+                    card.characters = card.characters.map((profile) => {
+                        if (!cardIds.includes(profile.id)) return profile;
+                        const next = rebuild(profile);
+                        cardBefore.push(profile);
+                        cardAfter.push(next);
+                        return next;
+                    });
+                });
+                for (const after of cardAfter) {
+                    const before = cardBefore.find((profile) => profile.id === after.id)!;
+                    if (after !== before) {
+                        changes.push({
+                            ref: { store: 'card', id: after.id, card: view.card.card, chat },
+                            before,
+                            after,
+                        });
+                    }
+                }
+            }
+            const fromCard = { changes: [...changes], written: [...written] };
+            const saved = await eng.updateState((state) => {
+                if (chatOf(state) !== key) return;
+                // A save retried after another tab won runs this again: start from what the card part did.
+                changes = [...fromCard.changes];
+                written = [...fromCard.written];
+                state.extras = state.extras.map((profile) => {
+                    if (!extras.has(profile.id) || !items.some((item) => item.id === profile.id)) return profile;
+                    const next = rebuild(profile);
+                    if (next === profile) return profile;
+                    const live = state.characters[profile.id];
+                    if (live) state.characters[profile.id] = syncLiveState(live, profile, next);
+                    changes.push({
+                        ref: { store: 'extras', id: profile.id, card: state.card, chat },
+                        before: profile,
+                        after: next,
+                    });
+                    return next;
+                });
+                for (const after of cardAfter) {
+                    const before = cardBefore.find((profile) => profile.id === after.id);
+                    const live = state.characters[after.id];
+                    if (live && before) state.characters[after.id] = syncLiveState(live, before, after);
+                }
+                // Answered or not, a face asked about is not repaired by itself again; the sheet's button still can.
+                markRegrounded(
+                    state,
+                    items
+                        .map((item) => item.id)
+                        .filter((id) => answers.has(view.byId.get(id)?.name ?? '') || background),
+                );
+            });
+            if (!saved) return fail('not-saved');
+            for (const change of changes) {
+                await record(t('generator.journal.regrounded', { name: change.after.name }), [
+                    { target: JOURNAL_TARGET, ref: { ...change.ref }, before: change.before, after: change.after },
+                ]);
+            }
+            if (changes.length) {
+                notice(t('generator.notice.regrounded', { names: changes.map((item) => item.after.name).join(', ') }));
+            }
+            if (!answers.size) return fail('no-candidates');
+            return { ok: true, written };
+        } catch (error) {
+            log.error('rebuilding faces on the story failed', error);
+            return fail('error');
+        } finally {
+            for (const item of items) inflight.delete(item.id);
+        }
+    }
+
+    /** The background repair: dice-made faces of this chat, present ones first, one batch after a reply. */
+    async function regroundPending(): Promise<void> {
+        const view = engine()?.view();
+        if (!view || generating || !leads()) return;
+        if (leversFor(app.settings.get(), view.state.overrides).mode === 'economy') return;
+        const present = new Set(view.present);
+        const ids = view.state.extras
+            .filter((profile) => repairDue(view, profile) && !inflight.has(profile.id))
+            .filter((profile) => mayTry(view, profile.id, 'reground'))
+            .sort((a, b) => Number(present.has(b.id)) - Number(present.has(a.id)))
+            .map((profile) => profile.id)
+            .slice(0, REGROUND_BATCH);
+        if (ids.length) await regroundBatch(ids, true);
+    }
+
+    /** The sheet's «Пересобрать»: these faces (else every generated face of the chat), batch by batch. */
+    async function regroundAll(ids?: readonly string[]): Promise<GeneratorOutcome> {
+        const view = engine()?.view();
+        if (!view) return { ok: false, written: [], error: 'no-chat' };
+        const list = (ids ?? view.state.extras.map((profile) => profile.id)).filter((id) => {
+            const profile = view.byId.get(id);
+            return !!profile && generatedFace(view, profile);
+        });
+        if (!list.length) return { ok: false, written: [], error: 'unknown' };
+        const written: string[] = [];
+        let last: GeneratorOutcome = { ok: true, written: [] };
+        for (let i = 0; i < list.length; i += REGROUND_BATCH) {
+            last = await regroundBatch(list.slice(i, i + REGROUND_BATCH), false);
+            written.push(...last.written);
+            if (!last.ok && last.error !== 'no-candidates') break;
+        }
+        return last.ok || written.length ? { ok: true, written } : last;
+    }
+
+    /**
+     * What the story showed about faces that already have a profile, written without a model after a turn: their
+     * groups, kind and role join them, a guessed stance gives way to the relation the story showed; rules are drawn
+     * again for the new groups.
+     */
+    async function groundKnown(view: EngineView): Promise<void> {
+        const eng = engine();
+        const fresh = factsOf(view.state).filter((facts) => facts.turn === view.state.turn);
+        if (!eng || !fresh.length) return;
+        const key = chatOf(view.state);
+        const chat = app.host.chatId();
+        const changes: ApiJournalChange[] = [];
+        const names: string[] = [];
+        await eng.updateState((state) => {
+            if (chatOf(state) !== key) return;
+            changes.length = 0;
+            names.length = 0;
+            const world = groupsOfWorld(state, [...view.card.characters, ...state.extras]);
+            const touched: string[] = [];
+            state.extras = state.extras.map((profile) => {
+                const facts = factsFor(fresh, profile);
+                if (!facts || profile.kind === 'group') return profile;
+                const groups = groupsFor(view, profile.groups ?? [], facts);
+                const repute = strangerStance(state.reputation, [
+                    ...groups,
+                    ...(profile.species ? [profile.species] : []),
+                ]);
+                const result = groundWithFacts(profile, facts, {
+                    lang: lang(),
+                    groups: world,
+                    ...(repute && repute.among.trim() !== '*'
+                        ? { reputation: { stance: repute.stance, label: repute.label } }
+                        : {}),
+                });
+                if (!result.written.length) return profile;
+                const live = state.characters[profile.id];
+                if (live) state.characters[profile.id] = syncLiveState(live, profile, result.profile);
+                touched.push(profile.id);
+                names.push(profile.name);
+                changes.push(
+                    change({ store: 'extras', id: profile.id, card: state.card, chat }, profile, result.profile),
+                );
+                return result.profile;
+            });
+            if (touched.length && settings.rules && state.rules.length) {
+                const result = applyRules(
+                    state.extras,
+                    state.rules,
+                    { ...ruleContext(state, [...view.card.characters, ...state.extras], true), only: touched },
+                    app.rng,
+                );
+                state.extras = result.profiles;
+                grantPressure(state, result.grants, result.profiles);
+            }
+        });
+        if (changes.length) await record(t('generator.journal.grounded', { names: names.join(', ') }), changes);
+    }
+
     /* ---------------------------------------------------------------- gaps and turns */
 
     async function fillAuthored(view: EngineView | null): Promise<void> {
@@ -875,6 +1404,8 @@ function startGenerator({ app, settings, log, own, session }: ModuleContext<Gene
         const view = (await eng.ready()) ?? eng.view();
         if (!view) return;
         if (settings.sketches) await sketchUnknown(view, messageIndex);
+        const known = eng.view();
+        if (known && settings.sketches) await groundKnown(known);
         const current = eng.view();
         if (!current) return;
         const present = current.present.map((id) => current.byId.get(id)).filter(isProfile);
@@ -958,6 +1489,12 @@ function startGenerator({ app, settings, log, own, session }: ModuleContext<Gene
                 en: GENERATOR_STRINGS.en['generator.task']!,
             }),
         );
+        own(
+            api.llm.registerTask(REGROUND_TASK, {
+                ru: GENERATOR_STRINGS.ru['generator.task.reground']!,
+                en: GENERATOR_STRINGS.en['generator.task.reground']!,
+            }),
+        );
         own(api.journal.registerUndo(JOURNAL_TARGET, undo));
     }
     own(() => {
@@ -997,6 +1534,7 @@ function startGenerator({ app, settings, log, own, session }: ModuleContext<Gene
         // Queued behind the counting of a turn still in progress: it decides whether anything is due.
         void enqueue(async () => {
             if (promotionsDue && settings.promotion && !generating) await promote();
+            if (settings.promotion && !generating) await regroundPending();
         });
         schedule();
     };
@@ -1020,6 +1558,12 @@ function startGenerator({ app, settings, log, own, session }: ModuleContext<Gene
             });
             if (!saved) return { ok: false, written: [], error: 'not-saved' };
             return pinned ? generate(id, 'portrait', false) : { ok: true, written: [] };
+        },
+        reground: (ids) => regroundAll(ids),
+        groundable() {
+            const view = engine()?.view();
+            if (!view) return [];
+            return view.state.extras.filter((profile) => repairDue(view, profile)).map((profile) => profile.id);
         },
         busy: () => [...inflight],
         idle: () => queue,

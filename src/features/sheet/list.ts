@@ -12,6 +12,7 @@ import { textInput } from '../../ui/form';
 import { addCharacter, nameOf, setWorldTone, toggleCardLock } from './edits';
 import { emptyState, keyed, stanceChip, summarize, unitBlock } from './parts';
 import { overrideCount } from './levers';
+import { guessedTag, regroundButton } from './reground';
 import { isHiddenAppetite, spoiler } from './secrets';
 import { FILTERS } from './types';
 import type { IntentApi, IntentReadResult, ListFilter, SheetCtx } from './types';
@@ -247,6 +248,7 @@ function listRow(ctx: SheetCtx, profile: CharacterProfile): HTMLElement {
             ? el('span', { class: 'dramatis-sheet-tag', data: { band }, text: bandLabel(band, ctx.lang) })
             : null,
         extra ? el('span', { class: 'dramatis-sheet-tag', text: t('sheet.extra') }) : null,
+        guessedTag(ctx, profile.id),
     ];
     const facts: (Node | null)[] = [];
     if (playerTie) {
@@ -365,6 +367,8 @@ function worldLinks(ctx: SheetCtx): HTMLElement {
         link('invariants', 'fa-anchor', t('sheet.nav.invariants', { n: view.card.invariants.length })),
         link('metrics', 'fa-chart-simple', t('sheet.nav.metrics')),
         link('levers', 'fa-sliders', t('sheet.nav.levers', { n: overrideCount(ctx) })),
+        // The faces the generator made in this chat: rebuilt on the story at once.
+        view.state.extras.some((profile) => profile.kind !== 'group') ? regroundButton(ctx) : null,
     ]);
 }
 

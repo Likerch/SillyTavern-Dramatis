@@ -146,6 +146,11 @@ function optionalText(value: unknown, max: number = LIMITS.text): string | undef
     return cleanText(value, max) || undefined;
 }
 
+function optionalList(value: unknown, maxItems: number, maxLength: number): string[] | undefined {
+    const list = cleanList(value, maxItems, maxLength);
+    return list.length ? list : undefined;
+}
+
 /* ------------------------------------------------------------------ ids */
 
 const TRANSLIT: Record<string, string> = {
@@ -686,6 +691,7 @@ export function normalizeProfile(raw: unknown, options: { taken?: Iterable<strin
         starts: normalizeStarts(dict.starts),
         meta: normalizeMeta(dict.meta),
         minor: dict.minor === true || undefined,
+        groups: optionalList(dict.groups, LIMITS.aliases, LIMITS.name),
     } as CharacterProfile);
 }
 

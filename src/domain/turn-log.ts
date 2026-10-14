@@ -126,6 +126,10 @@ const W = {
         en: '{name}: the reply played them against the engine ({what})',
         ru: '{name}: ответ разошёлся с движком ({what})',
     },
+    driftFollowed: {
+        en: '{name}: the story played them otherwise; the invented sheet gives way ({what})',
+        ru: '{name}: история показала иначе — придуманное уступает ({what})',
+    },
     break: {
         en: '{name}: breaks under the strain — {what}',
         ru: '{name}: не выдержал — {what}',

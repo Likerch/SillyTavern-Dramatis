@@ -401,6 +401,13 @@
     border-style: dashed;
 }
 
+/* A guess of the dice or a template: the story may replace it. */
+.dramatis-sheet-origin[data-origin='guess'],
+.dramatis-sheet-tag-guessed {
+    border-style: dotted;
+    font-style: italic;
+}
+
 .dramatis-sheet-lock,
 .dramatis-sheet-quotes-toggle {
     min-width: 28px;

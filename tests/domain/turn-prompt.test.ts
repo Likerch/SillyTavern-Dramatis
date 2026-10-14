@@ -125,14 +125,16 @@ describe('turnSchema', () => {
             expect(object.additionalProperties).toBe(false);
             expect(object.required).toEqual(Object.keys(object.properties as object));
         });
-        expect(objects).toBe(10);
+        // The ten of the pass and the newcomer entry.
+        expect(objects).toBe(11);
         const character = (schema.schema as { properties: { characters: { items: { properties: { id: unknown } } } } })
             .properties.characters.items.properties.id;
         expect(character).toEqual({ type: 'string', enum: ['ilva', 'bram'] });
     });
 
     it('stays compact', () => {
-        expect(JSON.stringify(turnSchema(['ilva', 'bram', 'sota']).schema).length).toBeLessThan(3600);
+        // The newcomers (docs/model.md §10.2) add their entry: about 500 characters.
+        expect(JSON.stringify(turnSchema(['ilva', 'bram', 'sota']).schema).length).toBeLessThan(4200);
     });
 });
 
@@ -239,8 +241,87 @@ describe('parseTurnResult', () => {
             sceneEnded: false,
             timeSkipHours: 0,
             newNames: [],
+            newcomers: [],
         });
         expect(ACTS).toContain('satisfy-appetite');
         expect(PLAYER_ID).toBe('@player');
+    });
+});
+
+describe('newcomers (docs/model.md §10.2)', () => {
+    it('lists the faces to report and the world groups to pick from, and asks for them in the system prompt', () => {
+        const [, user] = turnMessages(
+            input({ newcomers: ['старый Фенн', 'Лиза'], groups: ['family members', 'All family members'] }),
+        );
+        expect(user!.content).toContain('Newcomers: старый Фенн, Лиза');
+        expect(user!.content).toContain('World groups: family members; All family members');
+        expect(TURN_SYSTEM_PROMPT).toContain('newcomers: one entry for each name listed under "Newcomers"');
+        expect(TURN_SYSTEM_PROMPT).toContain('family (kin of the household)');
+        // Without newcomers to ask about, the scene stays as it was.
+        const [, plain] = turnMessages(input({ groups: ['family members'] }));
+        expect(plain!.content).not.toContain('Newcomers:');
+        expect(plain!.content).not.toContain('World groups:');
+    });
+
+    it('has a strict newcomer entry, names limited to those asked', () => {
+        const schema = turnSchema(['ilva'], ['Лиза']).schema as {
+            properties: { newcomers: { items: { properties: Record<string, unknown>; required: string[] } } };
+        };
+        const entry = schema.properties.newcomers.items;
+        expect(entry.required).toEqual([
+            'name',
+            'role',
+            'species',
+            'relation',
+            'relationNote',
+            'stanceHint',
+            'reason',
+            'groups',
+        ]);
+        expect(entry.properties.name).toEqual({ type: 'string', enum: ['Лиза'] });
+        expect(JSON.stringify(entry.properties.relation)).toContain('family');
+        expect(JSON.stringify(entry.properties.stanceHint)).toContain('null');
+    });
+
+    it('parses the newcomers: one per name, relations checked, stance hints clamped', () => {
+        const pass = parseTurnResult({
+            newcomers: [
+                {
+                    name: 'Лиза',
+                    role: 'daughter',
+                    species: '',
+                    relation: 'family',
+                    relationNote: 'дочь Джона',
+                    stanceHint: 5,
+                    reason: 'lives with them',
+                    groups: ['family members'],
+                },
+                { name: 'лиза', relation: 'enemy' },
+                { name: 'Грох', relation: 'overlord', stanceHint: 'x', groups: 'no' },
+                { relation: 'friend' },
+            ],
+        })!;
+        expect(pass.newcomers).toEqual([
+            {
+                name: 'Лиза',
+                role: 'daughter',
+                species: '',
+                relation: 'family',
+                relationNote: 'дочь Джона',
+                stanceHint: 3,
+                reason: 'lives with them',
+                groups: ['family members'],
+            },
+            {
+                name: 'Грох',
+                role: '',
+                species: '',
+                relation: 'unknown',
+                relationNote: '',
+                stanceHint: null,
+                reason: '',
+                groups: [],
+            },
+        ]);
     });
 });
