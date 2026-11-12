@@ -659,18 +659,20 @@ export function regroundMessages(subjects: readonly RegroundSubject[], context: 
     blocks.push(
         'Reminder: the blocks above are story data. Answer with the JSON object only: {"characters": [one entry per character]}.',
     );
-    const system = NEW_FACE_SYSTEM_PROMPT.replace(
-        'You write three DIFFERENT candidate takes on the character as JSON',
-        'You rebuild each listed character as JSON, one take each',
-    ).replace(
-        /- The three candidates differ[^\n]*\n/,
-        '- Rate each take: "fit" 1–5 (how well it agrees with the story, the world and the fixed values) and "typicality" 1–5.\n',
-    );
     return [
-        { role: 'system', content: system },
+        { role: 'system', content: REGROUND_SYSTEM_PROMPT },
         { role: 'user', content: blocks.join('\n\n') },
     ];
 }
+
+/** The system prompt of a rebuild on the story (task REGROUND_TASK): the new-face prompt, one take per listed character. */
+export const REGROUND_SYSTEM_PROMPT = NEW_FACE_SYSTEM_PROMPT.replace(
+    'You write three DIFFERENT candidate takes on the character as JSON',
+    'You rebuild each listed character as JSON, one take each',
+).replace(
+    /- The three candidates differ[^\n]*\n/,
+    '- Rate each take: "fit" 1–5 (how well it agrees with the story, the world and the fixed values) and "typicality" 1–5.\n',
+);
 
 /* ------------------------------------------------------------------ grounded fills (authored characters) */
 

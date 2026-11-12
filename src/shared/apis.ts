@@ -169,6 +169,78 @@ export interface MaestroApiV1 {
         /** The tag of the block: 'offscreen'. */
         tag: string;
     };
+    /** Maestro 1.34+ (`features` has 'agents'): built-in agents, proposal receivers (docs/integration-agents.md). */
+    agents?: ApiAgents;
+    /** Maestro 1.34+: sources of context for the user's agents. */
+    context?: ApiContext;
+}
+
+/* ------------------------------------------------------------------ agents (Maestro 1.34) */
+// The part of Maestro's ApiAgents / ApiContext (its src/shared/public-api-types.ts) Dramatis uses.
+
+export interface ApiLabel {
+    ru: string;
+    en: string;
+}
+
+export interface ApiBuiltInSpec {
+    /** The task id ('dramatis.turn'). */
+    id: string;
+    title: ApiLabel;
+    when: ApiLabel;
+    description?: ApiLabel;
+    sources?: ApiLabel;
+    icon?: string;
+    /** The default instruction as it stands in the system message of the job's requests. */
+    defaultInstructions: string[] | (() => string[]);
+    defaults?: { maxTokens: number; temperature: number };
+    channel?: 'maestro' | 'own';
+    interactive?: boolean;
+    enabled?(): boolean;
+    setEnabled?(on: boolean): void | Promise<void>;
+}
+
+export interface ApiReceiverProposal {
+    title: string;
+    description?: string;
+    payload: unknown;
+    changes?: ApiJournalChange[];
+    sourceMessage?: number;
+}
+
+export interface ApiProposalReceiver {
+    kind: string;
+    label: ApiLabel;
+    describe: string;
+    schema: Record<string, unknown>;
+    defaultAutonomy?: 'auto' | 'notify' | 'inbox' | 'ask' | 'off';
+    neverAuto?: boolean;
+    direct?: boolean;
+    available?(context: { messageIndex?: number }): boolean | Promise<boolean>;
+    toProposal(
+        data: Record<string, unknown>,
+        context: { agentName: string; messageIndex?: number },
+    ): ApiReceiverProposal | null | Promise<ApiReceiverProposal | null>;
+    apply(payload: unknown): Promise<void>;
+}
+
+export interface ApiContextSource {
+    id: string;
+    title: string;
+    label: ApiLabel;
+    budget?: number;
+    stable?: boolean;
+    available?(): boolean;
+    render(context: { agentId: string; focusIndex?: number; budget: number }): string | Promise<string>;
+}
+
+export interface ApiAgents {
+    registerBuiltIn(spec: ApiBuiltInSpec): ApiUnsubscribe;
+    registerReceiver(receiver: ApiProposalReceiver): ApiUnsubscribe;
+}
+
+export interface ApiContext {
+    register(source: ApiContextSource): ApiUnsubscribe;
 }
 
 /* ------------------------------------------------------------------ DRAMATIS_API v1 */

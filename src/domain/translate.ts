@@ -296,7 +296,7 @@ export const TRANSLATE_SCHEMA: Record<string, unknown> = {
     additionalProperties: false,
 };
 
-const SYSTEM_PROMPT = [
+export const TRANSLATE_SYSTEM_PROMPT = [
     'You translate short notes about the characters of a role-play story from English into Russian. The player reads them in the character sheet; the story itself is told in Russian.',
     'Rules:',
     '- Natural, idiomatic Russian, the way a Russian novel would put it. Keep the meaning and the tone; do not soften anything.',
@@ -355,7 +355,7 @@ export function translateMessages(batch: readonly BatchItem[], names: readonly s
         item.who ? { id: item.id, text: item.text, who: item.who } : { id: item.id, text: item.text },
     );
     return [
-        { role: 'system', content: SYSTEM_PROMPT },
+        { role: 'system', content: TRANSLATE_SYSTEM_PROMPT },
         { role: 'user', content: JSON.stringify(payload) },
     ];
 }
